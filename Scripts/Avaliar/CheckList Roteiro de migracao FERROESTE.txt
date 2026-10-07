@@ -1,0 +1,169 @@
+ROTEIRO DE MIGRACAO FERROESTE:
+
+- Validacao dos acessos nos servidores 10.10.0.7 e 10.10.0.18
+https://sistema.ferroeste.com.br/RDWeb/Pages/en-US/login.aspx
+user:  ferroeste\p.wesleysantos
+senha: 3dy8e9@u
+
+VALIDACOES INICIAIS NO AMBIENTE DE ORIGEM:
+-- Garantir que o banco de origem nao esteja em begin backup:
+SELECT * FROM v$backup WHERE status != 'NOT ACTIVE'; 
+
+-- Limpar a RECYCLEBIN:
+PURGE DBA_RECYCLEBIN;
+
+-- Coletar estatisticas de dicionario ( permite ganho de performance ):
+EXEC DBMS_STATS.GATHER_DICTIONARY_STATS;
+
+-- Conferencia do Oracle Multimidia (se tiver), verificar a definicao do sinonimo publico AREA. Tem que estar apontando para o objeto OGC_AREA, caso contrario poderá falhar processo de upgrade.
+select owner, synonym_name, table_owner, table_name from dba_synonyms where synonym_name = 'AREA';
+
+FASE - PREUPGRADE
+-- Executar o script preupgrade.jar do ambiente de destino no ambiente de origem (Neste caso How to Download and Run Oracle's Database Pre-Upgrade Utility (Doc ID 884522.1))
+C:\app\oracle\product\12.1.0\dbhome_1\jdk\bin\java -jar C:\Users\p.wesleysantos\Downloads\preupgrade_19_cbuild_9_crlf\preupgrade.jar FILE TEXT DIR C:\Users\p.wesleysantos\Downloads\PREUPGRADE_ORACLE_PRODUCAO 
+
+-- Validar os arquivos que o preupgrade gera para tratar todos os possiveis problemas.
+-- Executar tambem os fixups
+
+-- Realize o backup do banco de dados com o RMAN.
+
+
+( ESSA FASE NAO EXISTE NA DOCUMENTACAO SERÁ CRIADA POR MIM - FRED )
+FASE - RESTORE
+-- Remova bases existestes
+set ORACLE_SID=MSAFPROD
+sqlplus / as sysdba
+shu abort;
+startup mount restrict;
+select name from v$database;
+select instance_name from v$instance;
+show parameter db_name;
+drop database;
+
+-- Realize a limpeza dos diretorio para nao ficar lixo
+delete E:\app\oracle\diag\rdbms\msafprod
+delete E:\app\oracle\admin\msafprod
+delete E:\app\oracle\product\19.3.0.0\dbhome_1\log\diag\rdbms\msafprod
+
+-- Executar o restore no banco de destino utilizando o backup mais recente do ambiente de origem.
+set ORACLE_SID=MSAFPROD
+rman target /
+startup nomount;
+restore controlfile from 'F:\BKP_RMAN\MSAFPROD\CONTROL_AUTOBACKUP_MSAFPROD_C-2327256311-20210212-00';
+alter database mount;
+crosscheck backup;
+crosscheck archivelog all;
+delete expired backup;
+delete expired archivelog all;
+catalog start with 'F:\BKP_RMAN\MSAFPROD';
+
+run {
+configure device type disk parallelism 4;
+set newname for database to 'E:\app\oracle\oradata\MSAFPROD\%U';
+restore database;
+recover database delete archivelog;
+}
+
+-- Executar o recover no banco de destino utilizando os archives do ambiente de origem até a data de migracao.
+
+DIA DA MIGRACAO
+-- Renomeie os TEMPFILES e REDOLOGS para o novo cenario.
+alter database rename file 'E:\APP\ADMINISTRATOR\ORADATA\MSAFPROD\TEMP01.DBF' to 'E:\APP\ORACLE\ORADATA\MSAFDEV\TEMP-TEMP01.DBF';
+alter database rename file 'E:\APP\ADMINISTRATOR\ORAREDO\MSAFPROD\REDO07.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO07.LOG';
+alter database rename file 'E:\APP\ADMINISTRATOR\ORADATA\MSAFPROD\REDO07B.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO07B.LOG';
+alter database rename file 'E:\APP\ADMINISTRATOR\ORADATA\MSAFPROD\REDO04.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO04.LOG';
+alter database rename file 'E:\APP\ADMINISTRATOR\ORAREDO\MSAFPROD\REDO04B.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO04B.LOG';
+alter database rename file 'E:\APP\ADMINISTRATOR\ORAREDO\MSAFPROD\REDO05.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO05.LOG';
+alter database rename file 'E:\APP\ADMINISTRATOR\ORADATA\MSAFPROD\REDO05B.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO05B.LOG';
+alter database rename file 'E:\APP\ADMINISTRATOR\ORADATA\MSAFPROD\REDO06.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO06.LOG';
+alter database rename file 'E:\APP\ADMINISTRATOR\ORAREDO\MSAFPROD\REDO06B.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO06B.LOG';
+
+-- Abra a base no modo upgrade com resetlogs:
+ALTER DATABASE OPEN RESETLOGS UPGRADE;
+
+-- Confira se a base está acessivel e no modo UPGRADE.
+select instance_name,status from v$instance;
+
+FASE - UPGRADE
+-- Inicie o processo de upgrade:
+cd %ORACLE_HOME%\bin
+dbupgrade
+
+-- Execute o script de pos upgrade:
+$ sqlplus "/as sysdba"
+SQL> STARTUP
+SQL> @?ORACLE_HOME/rdbms/admin/utlusts.sql
+
+-- Execute o DBUPGDIAG
+cd <location of the script>
+$ sqlplus / as sysdba
+sql> alter session set nls_language='American';
+sql> @dbupgdiag.sql@
+sql> exit
+
+-- Recompile os objetos invalidos
+$ sqlplus "/ AS SYSDBA"
+SQL> @Oracle_home/rdbms/admin/utlrp.sql
+
+FASE - POSUPGRADE
+-- Execute o postupgrade fixup script gerado pelo preupgrade.
+@postupgrade_fixups.sql
+
+-- Crie um ORAPW
+-- Atualize o timezone
+E:\app\oracle\product\19.3.0.0\dbhome_1\rdbms\admin\utltz_countstats.sql
+#Script to gives how much TIMESTAMP WITH TIME ZONE data there is in a database using stats info. No restart required.
+
+E:\app\oracle\product\19.3.0.0\dbhome_1/rdbms/admin/utltz_countstar.sql
+#Script to approximate how much TIMESTAMP WITH TIME ZONE data there is in a database using a COUNT(*) for each table that has a TSTZ column. This script is useful when using DBMS_DST package or the scripts of utlz_upg_check.sql and utlz_upg_apply.sql scripts.
+
+E:\app\oracle\product\19.3.0.0\dbhome_1/rdbms/admin/utltz_upg_check.sql
+#Time zone upgrade check script
+
+?/rdbms/admin/utltz_upg_apply.sql
+#Time zone apply script. Warning: This script will restart the database and adjust time zone data.
+
+-- Faca o upgrade das estatisticas 
+EXECUTE DBMS_STATS.UPGRADE_STAT_TABLE('SYS', 'dictstattab');
+
+FIM DO PROCESSO.
+
+APLICAR DATAPATCH
+
+APLICAR ALTERACOES FINAIS
+
+alter system reset scope=spfile;
+
+show parameter optimizer_features_enabled
+show parameter compatible
+show parameter sga_max_size
+show parameter Job_queue_processes
+
+update MSAF.PRT_PAR_MSAF set NUM_THREAD=5, IND_IMP_DOCFIS_MULTI_LOAD='N';
+commit;
+
+BEGIN
+dbms_stats.Gather_system_stats('START');
+sys.dbms_stats.Delete_schema_stats('SYS');
+sys.dbms_stats.Gather_schema_stats('SYS');
+dbms_stats.gather_fixed_objects_stats;
+dbms_stats.gather_dictionary_stats;
+dbms_stats.gather_schema_stats(ownname => 'MSAF' ,
+estimate_percent => 30 ,
+method_opt => 'FOR ALL INDEXED COLUMNS SIZE SKEWONLY' ,
+degree => 6,
+granularity => 'ALL' ,
+CASCADE => TRUE);
+dbms_stats.Gather_system_stats('STOP');
+END;
+
+
+alter database rename file 'E:\APP\ORACLE\ORADATA\MSAFDEV\TEMP-TEMP01.DBF' to 'E:\APP\ORACLE\ORADATA\MSAFPROD\TEMP-TEMP01.DBF';  
+alter database rename file 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO07.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFPROD\REDO07.LOG';
+alter database rename file 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO07B.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFPROD\REDO07B.LOG';
+alter database rename file 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO04.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFPROD\REDO04.LOG';
+alter database rename file 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO04B.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFPROD\REDO04B.LOG';
+alter database rename file 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO05.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFPROD\REDO05.LOG';
+alter database rename file 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO05B.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFPROD\REDO05B.LOG';
+alter database rename file 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO06.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFPROD\REDO06.LOG';
+alter database rename file 'E:\APP\ORACLE\ORADATA\MSAFDEV\REDO06B.LOG' to 'E:\APP\ORACLE\ORADATA\MSAFPROD\REDO06B.LOG';

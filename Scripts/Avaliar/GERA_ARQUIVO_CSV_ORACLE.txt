@@ -1,0 +1,41 @@
+-- Crio um DIRECTORY para gravar o arquivo em CSV
+create or replace directory csv_dir as '/diretorio_base/diretorio_csv';
+
+-- Cria a PROCEDURE para gerar o CSV
+create or replace procedure gera_csv is
+  file_handle UTL_FILE.file_type;
+begin
+  file_handle := utl_file.fopen('CSV_DIR', 'arquivo01.csv', 'w', 32767);
+  for rws in (
+    select * from dual -- (ADICIONE A QUERY AQUI)
+  ) loop
+    utl_file.put_line(file_handle, 
+      rws.c1 || ',' || rws.c2 || ',' || rws.c3 -- (ADICIONE AS COLUNAS AQUI)
+    );
+  end loop;
+  utl_file.fclose(file_handle);
+end gera_csv;
+/
+
+-- Cria um JOB para executar programado
+BEGIN
+  DBMS_SCHEDULER.CREATE_JOB (
+    job_name => 'EXPORT_CSV_JOB01',
+    job_type => 'PLSQL_BLOCK',
+    job_action => 'begin gera_csv; end;',
+    number_of_arguments => 0,
+    start_date => NULL,
+    repeat_interval => 'FREQ=DAILY',
+    end_date => NULL,
+    enabled => FALSE,
+    auto_drop => FALSE);
+
+  DBMS_SCHEDULER.SET_ATTRIBUTE( 
+    name => 'EXPORT_CSV_JOB01', 
+    attribute => 'logging_level', 
+    value => DBMS_SCHEDULER.LOGGING_RUNS);
+  
+  DBMS_SCHEDULER.enable(
+    name => 'EXPORT_CSV_JOB01');
+END;
+/

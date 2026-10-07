@@ -1,0 +1,157 @@
+--------------------------------------------------------
+--  DDL for Table STR_DDL_LOG
+--------------------------------------------------------
+
+  CREATE TABLE "DBAMV"."STR_DDL_LOG" 
+   (	"USER_NAME" VARCHAR2(100 BYTE), 
+	"DDL_DATE" DATE, 
+	"DDL_TYPE" VARCHAR2(100 BYTE), 
+	"OBJECT_TYPE" VARCHAR2(100 BYTE), 
+	"OWNER" VARCHAR2(100 BYTE), 
+	"OBJECT_NAME" VARCHAR2(100 BYTE), 
+	"SQL_COMMAND" CLOB, 
+	"ANT_SQL_TEXT" CLOB, 
+	"V_SID" NUMBER, 
+	"V_TERMINAL" VARCHAR2(2000 BYTE), 
+	"V_SESSIONID" NUMBER, 
+	"V_INSTANCE" VARCHAR2(100 BYTE), 
+	"V_ISDBA" VARCHAR2(10 BYTE), 
+	"V_CURRENT_USERID" VARCHAR2(1000 BYTE), 
+	"V_CURRENT_USER" VARCHAR2(100 BYTE), 
+	"V_SESSION_USER" VARCHAR2(100 BYTE), 
+	"V_SESSION_USERID" VARCHAR2(100 BYTE), 
+	"V_HOST" VARCHAR2(100 BYTE), 
+	"V_OS_USER" VARCHAR2(100 BYTE), 
+	"V_EXTERNAL_NAME" VARCHAR2(200 BYTE), 
+	"V_IP_ADDRESS" VARCHAR2(100 BYTE), 
+	"V_NETWORK_PROTOCOL" VARCHAR2(100 BYTE)
+   ) SEGMENT CREATION IMMEDIATE 
+  PCTFREE 10 PCTUSED 40 INITRANS 1 MAXTRANS 255 
+ NOCOMPRESS LOGGING
+  STORAGE(INITIAL 65536 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)
+  TABLESPACE "MV2000_D" 
+ LOB ("SQL_COMMAND") STORE AS BASICFILE (
+  TABLESPACE "MV2000_D" ENABLE STORAGE IN ROW CHUNK 8192 RETENTION 
+  NOCACHE LOGGING 
+  STORAGE(INITIAL 65536 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)) 
+ LOB ("ANT_SQL_TEXT") STORE AS BASICFILE (
+  TABLESPACE "MV2000_D" ENABLE STORAGE IN ROW CHUNK 8192 RETENTION 
+  NOCACHE LOGGING 
+  STORAGE(INITIAL 65536 NEXT 1048576 MINEXTENTS 1 MAXEXTENTS 2147483645
+  PCTINCREASE 0 FREELISTS 1 FREELIST GROUPS 1
+  BUFFER_POOL DEFAULT FLASH_CACHE DEFAULT CELL_FLASH_CACHE DEFAULT)) ;
+  
+  
+--------------------------------------------------------
+--  DDL for TRIGGER STR_DDL_TRIG
+-------------------------------------------------------- 
+create or replace TRIGGER "STARTUPADMIN"."STR_DDL_TRIG"
+    BEFORE DDL
+ON DATABASE
+DECLARE
+sql_text ora_name_list_t;
+stmt clob;
+i Integer;
+n Integer;
+ant_sql clob;
+sub_text varchar2(32000);
+v_sid number;
+v_terminal varchar2(2000);
+v_sessionid number;
+v_instance varchar2(100);
+v_isdba varchar2(10);
+v_current_userid varchar2(1000);
+v_current_user varchar2(100);
+v_session_user varchar2(100);
+v_session_userid varchar2(100);
+v_host varchar2(100);
+v_os_user varchar2(100);
+v_external_name varchar2(200);
+v_ip_address varchar2(100);
+v_network_protocol varchar2(100);
+BEGIN
+---- pega as outras variaveis do sistema.
+select SYS_CONTEXT('USERENV','sid') into v_sid from dual;
+select SYS_CONTEXT('USERENV','TERMINAL')  into v_terminal from dual;
+select SYS_CONTEXT('USERENV','SESSIONID')  into v_sessionid from dual;
+select SYS_CONTEXT('USERENV','INSTANCE')  into v_instance from dual;
+select SYS_CONTEXT('USERENV','ISDBA')  into v_isdba from dual;
+select SYS_CONTEXT('USERENV','CURRENT_USER')  into v_current_user from dual;
+select SYS_CONTEXT('USERENV','CURRENT_USERID')  into v_current_userid from dual;
+select SYS_CONTEXT('USERENV','SESSION_USER')  into v_session_user from dual;
+select SYS_CONTEXT('USERENV','SESSION_USERID')  into v_session_userid from dual;
+select SYS_CONTEXT('USERENV','HOST')  into v_host from dual;
+select SYS_CONTEXT('USERENV','OS_USER')  into v_os_user from dual;
+select SYS_CONTEXT('USERENV','EXTERNAL_NAME')  into v_external_name from dual;
+select SYS_CONTEXT('USERENV','IP_ADDRESS')  into v_ip_address from dual;
+select SYS_CONTEXT('USERENV','NETWORK_PROTOCOL')  into v_network_protocol from dual;
+----------------------
+        IF ora_login_user not in ('MDSYS','TSMSYS','DMSYS','PUBLIC','OUTLN','CTXSYS','OLAPSYS','SYSTEM','ORACLE_OCM','EXFSYS','DBSNMP','ORDSYS','ORDPLUGINS','SYSMAN','XDB','SYS','WMSYS','SI_INFORMTN_SCHEMA','BACKUP','PERFSTAT') then
+        n := ora_sql_txt(sql_text);
+        FOR i IN 1..n LOOP
+        stmt := stmt || sql_text(i);
+        END LOOP;
+        BEGIN
+           select count(1) into n from dba_source where owner=ora_dict_obj_owner and type=ora_dict_obj_type and name=ora_dict_obj_name;
+           FOR i in 1..n LOOP
+           select text into sub_text from dba_source
+           where owner=ora_dict_obj_owner and type=ora_dict_obj_type and name=ora_dict_obj_name and line=i;
+           ant_sql :=  ant_sql || sub_text;
+           END LOOP;
+           Exception
+             when no_data_found then
+             null;
+        END;
+        INSERT INTO STARTUPADMIN.STR_DDL_LOG (
+        user_name,
+        ddl_date,
+        ddl_type,
+        object_type,
+        owner,
+        object_name,
+        sql_command,
+        ant_sql_text,
+        v_sid,
+        v_terminal,
+        v_sessionid,
+        v_instance,
+        v_isdba,
+        v_current_userid,
+        v_current_user,
+        v_session_user,
+        v_session_userid,
+        v_host,
+        v_os_user,
+        v_external_name,
+        v_ip_address,
+        v_network_protocol
+        ) VALUES (
+        ora_login_user,
+        SYSDATE,
+        ora_sysevent,
+        ora_dict_obj_type,
+        ora_dict_obj_owner,
+        ora_dict_obj_name,
+        stmt,
+        ant_sql,
+        v_sid,
+        v_terminal,
+        v_sessionid,
+        v_instance,
+        v_isdba,
+        v_current_userid,
+        v_current_user,
+        v_session_user,
+        v_session_userid,
+        v_host,
+        v_os_user,
+        v_external_name,
+        v_ip_address,
+        v_network_protocol
+  );
+END IF;
+END;

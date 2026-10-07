@@ -1,0 +1,122 @@
+MIGRACAO SEMPER PROD
+
+rman target / log='/tmp/restore_PROD_migracao.log'
+
+run {
+allocate channel ch1 type disk;
+set newname for database to '/u03/oradata/PROD/%U';
+restore database;
+switch datafile all;
+recover database;
+}
+
+alter database rename file '/u03/oradata/PROD/PROD/onlinelog/redo03a.log' to '/u03/oradata/PROD/redo03a.log';
+alter database rename file '/u03/oradata/PROD/PROD/onlinelog/redo02a.log' to '/u03/oradata/PROD/redo02a.log';
+alter database rename file '/u03/oradata/PROD/PROD/onlinelog/redo01a.log' to '/u03/oradata/PROD/redo01a.log';
+alter database rename file '/u03/oradata/PROD/PROD/onlinelog/redo01b.log' to '/u03/oradata/PROD/redo01b.log';
+alter database rename file '/u03/oradata/PROD/PROD/onlinelog/redo02b.log' to '/u03/oradata/PROD/redo02b.log';
+alter database rename file '/u03/oradata/PROD/PROD/onlinelog/redo03b.log' to '/u03/oradata/PROD/redo03b.log';
+
+alter database rename file '/u03/oradata/PROD/PROD/datafile/o1_mf_perfst_t_j64d4j8m_.tmp' to '/u03/oradata/PROD/temp_perfstat01.dbf';
+alter database rename file '/u03/oradata/PROD/PROD/datafile/o1_mf_temp_j64d4j7z_.tmp' to '/u03/oradata/PROD/temp01.dbf';
+
+mv /u03/oradata/PROD/PROD/datafile/o1_mf_temp_j64d4j7z_.tmp /u03/oradata/PROD/temp01.dbf
+mv /u03/oradata/PROD/PROD/datafile/o1_mf_perfst_t_j64d4j8m_.tmp /u03/oradata/PROD/temp_perfstat01.dbf
+
+ALTER TABLESPACE TEMP ADD TEMPFILE '+DATA' REUSE;
+ALTER TABLESPACE TEMP ADD TEMPFILE '+DATA' REUSE;
+ALTER TABLESPACE TEMP ADD TEMPFILE '+DATA' REUSE;
+
+
+
+ALTER TABLESPACE TEMP ADD TEMPFILE '+DATAC1' REUSE;
+
+
+Bom dia Robert,
+foi realizado a criacao do usuario apoiointegradorclient com sucesso no ambeinte PRDMVSL.
+Segue abaixo os detalhes da criacao:
+
+Tablespace: APOIO_D
+Usuario: apoiointegradorclient
+Senha: "hRtN@@2021_Ap010" 
+Privilegios: 
+SELECT nas tabelas conforme solicitado
+Produtos:
+ - dbamv.produto
+ - dbamv.especie
+ - dbamv.classe
+ - dbamv.sub_clas
+ - dbamv.uni_pro
+ - dbamv.itunidade
+ - dbamv.lab_pro
+ 
+Solicitação de Compra:
+ - dbamv.sol_com
+ - dbamv.setor
+ - dbamv.mot_ped
+ - dbamv.cotador
+ - dbamv.estoque
+ - dbamv.itsol_com 
+ - dbamv.parcela_itsol_com
+
+ 
+Ordem de Compra:
+ - dbamv.parcela_itord_pro
+ - dbamv.itord_pro
+ - dbamv.ord_dupl
+ - dbamv.ord_com
+
+Nota fiscal:
+ - dbamv.ent_pro
+ - Dbamv.Ent_Pro_Conclusao
+ - dbamv.fornecedor
+ - dbamv.condicoes_pagamento
+ - dbamv.cfop
+ - dbamv.duplicata
+ - dbamv.itent_pro 
+ - dbamv.itlot_ent
+ 
+Grant de EXECUCAO na funcao abaixo:
+Função:
+ - dbamv.verif_vl_fator_prod
+ 
+Qualquer duvida estarei à disposição.
+ 
+Exibindo 01dfda57b1de99e7ef40d5b9a0015e42.txt…
+
+create tablespace APOIO_D datafile size 1G autoextend on next 1G maxsize 30G;
+create user apoiointegradorclient identified by "hRtN@@2021_Ap010" default tablespace APOIO_D;
+grant connect,resource to apoiointegradorclient;
+grant unlimited tablespace to apoiointegradorclient;
+
+grant select on dbamv.produto to apoiointegradorclient;
+grant select on dbamv.especie to apoiointegradorclient;
+grant select on dbamv.classe to apoiointegradorclient;
+grant select on dbamv.sub_clas to apoiointegradorclient;
+grant select on dbamv.uni_pro to apoiointegradorclient;
+grant select on dbamv.itunidade to apoiointegradorclient;
+grant select on dbamv.lab_pro to apoiointegradorclient;
+ 
+grant select on dbamv.sol_com to apoiointegradorclient;
+grant select on dbamv.setor to apoiointegradorclient;
+grant select on dbamv.mot_ped to apoiointegradorclient;
+grant select on dbamv.cotador to apoiointegradorclient;
+grant select on dbamv.estoque to apoiointegradorclient;
+grant select on dbamv.itsol_com  to apoiointegradorclient;
+grant select on dbamv.parcela_itsol_com to apoiointegradorclient;
+
+grant select on dbamv.parcela_itord_pro to apoiointegradorclient;
+grant select on dbamv.itord_pro to apoiointegradorclient;
+grant select on dbamv.ord_dupl to apoiointegradorclient;
+grant select on dbamv.ord_com to apoiointegradorclient;
+
+grant select on dbamv.ent_pro to apoiointegradorclient;
+grant select on Dbamv.Ent_Pro_Conclusao to apoiointegradorclient;
+grant select on dbamv.fornecedor to apoiointegradorclient;
+grant select on dbamv.condicoes_pagamento to apoiointegradorclient;
+grant select on dbamv.cfop to apoiointegradorclient;
+grant select on dbamv.duplicata to apoiointegradorclient;
+grant select on dbamv.itent_pro to apoiointegradorclient; 
+grant select on dbamv.itlot_ent to apoiointegradorclient;
+ 
+grant execute on dbamv.verif_vl_fator_prod to apoiointegradorclient;

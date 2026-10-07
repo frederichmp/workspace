@@ -1,0 +1,11 @@
+
+#BACKUP PARA FITA - STARTUP - FRED
+00 12 * * 1,5 /backup/script_copia.sh FITA_INC0
+00 01 * * 0,2-4,6 /backup/script_copia.sh FITA_INC1
+*/30 * * * * /backup/script_copia.sh FITA_ARCH
+*/30 * * * * /backup/script_copia.sh FITA_CTL
+
+00 12 * * 1,5 /backup/script_copia.sh ODA_INC0
+00 01 * * 0,2-4,6 /backup/script_copia.sh ODA_INC1
+*/30 * * * * /backup/script_copia.sh ODA_ARCH
+*/30 * * * * /backup/script_copia.sh ODA_CTL

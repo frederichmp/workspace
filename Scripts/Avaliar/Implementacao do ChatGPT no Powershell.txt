@@ -1,0 +1,72 @@
+POWERSHELLAI usando o chatgpt API
+
+chave
+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
+
+Armazendando a chave no POWERSHELL SECRETSTORE
+# Set the variable
+$SecretKey = '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'
+# Register the Secret Vault
+Register-SecretVault -ModuleName Microsoft.PowerShell.SecretStore
+# Set the secret using a friendly name and a password that will be needed to get the secret
+Set-Secret -Name MyOpenAIKey -Secret $SecretKey -Vault Microsoft.PowerShell.SecretStore
+# Retrieve the secret - it will prompt for a password
+Get-Secret -Name MyOpenAIKey -Vault Microsoft.PowerShell.SecretStore
+
+Instalando o modulo POWERSHELLAI do Doug Finke
+# Install PowerShellAI module
+Install-Module -Name PowerShellAI
+# Review the available commands
+(Get-Command -Module PowerShellAI).Name
+<#
+ai
+ConvertFrom-GPTMarkdownTable
+copilot
+Disable-AIShortCutKey
+Enable-AIShortCutKey
+Get-ChatCompletion
+Get-ChatHistory
+Get-ChatInProgress
+Get-ChatSession
+Get-ChatSessionContent
+Get-ChatSessionPath
+Get-ChatTheme
+Get-DalleImage
+Get-GPT3Completion
+Get-OpenAIBaseRestURI
+Get-OpenAIChatCompletionUri
+Get-OpenAICompletionsURI
+Get-OpenAIEdit
+Get-OpenAIEditsURI
+Get-OpenAIImagesGenerationsURI
+Get-OpenAIKey
+Get-OpenAIModel
+Get-OpenAIModelsURI
+Get-OpenAIModeration
+Get-OpenAIModerationsURI
+Get-OpenAIUsage
+Get-OpenAIUser
+Import-ChatAssistantMessages
+Import-ChatMessages
+Import-ChatSession
+Import-ChatUserMessages
+Invoke-AIErrorHelper
+Invoke-AIExplain
+Invoke-ChatCompletion
+Invoke-OpenAIAPI
+New-Chat
+New-SpreadSheet
+Set-DalleImageAsWallpaper
+Set-OpenAIKey
+Stop-Chat
+Test-ChatInProgress
+#>
+
+Configurando o OPENAI API
+# set the API Key
+Set-OpenAIKey -Key (Get-Secret -Name MyOpenAIKey -Vault Microsoft.PowerShell.SecretStore)
+
+Agora so brincar
+Ex:
+$Prompt = 'Para SQL Server crie uma tabela Usuarios com os detalhes basicos'
+Get-GPT3Completion $Prompt

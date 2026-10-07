@@ -1,0 +1,156 @@
+RESTART DOP AMBIENTE DE PRODUCAO ODA MARIO PENNA
+
+ODA PRIMARIO
+Last login: Thu Jan 28 08:52:40 2021 from 192.168.115.231
+[root@srvodaprm0 ~]# oakcli show vm
+
+          NAME                                  NODENUM         MEMORY          VCPU            STATE           REPOSITORY
+
+        SRV-ACR-01                              0               4096M              2            ONLINE          rpodaprmvm
+        SRV-APLIC-01                            0               32768M             8            ONLINE          rpodaprmvm
+        SRV-APLIC-02                            0               32768M             8            ONLINE          rpodaprmvm
+        SRV-APLIC-03                            0               32768M             8            OFFLINE         rpodaprmvm
+        SRV-CAS-01                              0               8192M              4            ONLINE          rpodaprmvm
+        SRV-CHEF-01                             0               7168M              2            OFFLINE         rpodaprmvm
+        SRV-CHEF-02                             0               6144M              2            ONLINE          rpodaprmvm
+        SRV-LAUDO-01                            0               4096M              2            ONLINE          rpodaprmvm
+        SRV-LAUDO-02                            0               4096M              2            ONLINE          rpodaprmvm
+        SRV-MV-02                               0               8192M              2            ONLINE          rpodaprmvm
+        SRV-MVP-01                              0               4096M              2            ONLINE          rpodaprmvm
+
+
+[root@srvodaprm0 ~]# date
+Thu Jan 28 22:48:05 -03 2021
+[root@srvodaprm0 ~]#
+[root@srvodaprm0 ~]# su - oracle
+[oracle@srvodaprm0 ~]$ ps -ef |grep pmon
+grid     14130     1  0  2020 ?        00:14:14 asm_pmon_+ASM1
+grid     15307     1  0  2020 ?        00:10:28 apx_pmon_+APX1
+oracle   16174     1  0  2020 ?        00:16:38 ora_pmon_dw1
+oracle   16182     1  0  2020 ?        00:53:31 ora_pmon_prdnew1
+grid     45820     1  0 Jan08 ?        00:01:26 mdb_pmon_-MGMTDB
+oracle   89103 88918  0 22:48 pts/0    00:00:00 grep pmon
+[oracle@srvodaprm0 ~]$
+
+ODA SECUNDARIO
+Last login: Thu Jan 28 23:00:34 2021 from 192.168.115.230
+[root@srvodasec0 ~]# oakcli show vm
+
+          NAME                                  NODENUM         MEMORY          VCPU            STATE           REPOSITORY
+
+        OEM13c                                  0               8192M              4            ONLINE          rpodasecvm
+        SRV-ACR-01                              0               4096M              2            OFFLINE         rpodasecvm
+        SRV-APP-01                              0               32768M             8            ONLINE          rpodasecvm
+        SRV-APP-02                              0               32768M             8            ONLINE          rpodasecvm
+        SRV-APP-03                              0               32768M             8            ONLINE          rpodasecvm
+        SRV-APP-04                              0               32768M             8            OFFLINE         rpodasecvm
+        SRV-CAS-01                              0               8192M              4            ONLINE          rpodasecvm
+        SRV-CHEF-01                             0               6144M              2            OFFLINE         rpodasecvm
+        SRV-MVH-02                              0               4096M              1            ONLINE          rpodasecvm
+        SRV-SACR-02                             0               2048M              2            ONLINE          rpodasecvm
+        oem13cserver                            0               8192M              4            OFFLINE         rpodasecvm
+
+
+[root@srvodasec0 ~]#
+[root@srvodasec0 ~]# date
+Thu Jan 28 23:01:15 -03 2021
+[root@srvodasec0 ~]# su - oracle
+[oracle@srvodasec0 ~]$ ps -ef |grep pmon
+oracle    2481     1  0  2020 ?        00:06:41 ora_pmon_hml1
+grid     19822     1  0  2020 ?        00:08:37 asm_pmon_+ASM1
+grid     21050     1  0  2020 ?        00:06:15 apx_pmon_+APX1
+oracle   22739     1  0  2020 ?        00:09:11 ora_pmon_dgprdnew1
+oracle   22740     1  0  2020 ?        00:09:05 ora_pmon_oem13c1
+oracle   22758     1  0  2020 ?        00:09:16 ora_pmon_sml1
+oracle   50462 50080  0 23:01 pts/3    00:00:00 grep pmon
+oracle   55086     1  0 Jan20 ?        00:01:09 ora_pmon_trn1
+[oracle@srvodasec0 ~]$
+
+
+CHEKLIST PARA STOP DO AMBIENTE DE PRODUCAO
+STOP DE TODAS AS VMS
+
+oakcli stop vm SRV-ACR-01   
+oakcli stop vm SRV-APLIC-01 
+oakcli stop vm SRV-APLIC-02 
+oakcli stop vm SRV-CAS-01   
+oakcli stop vm SRV-CHEF-02  
+oakcli stop vm SRV-LAUDO-01 
+oakcli stop vm SRV-LAUDO-02 
+oakcli stop vm SRV-MV-02    
+oakcli stop vm SRV-MVP-01
+
+STOP DOS DATABASES
+srvctl stop database -d dw
+srvctl stop database -d prdnew
+
+STOP DO SERVIDOR ODABASE
+shutdown -h now
+
+SSTOP DO SERVICDOR DOM
+shutdown -h now
+
+
+
+CHEKLIST PARA STOP DO AMBIENTE DE SSTANDBY
+STOP DE TODAS AS VMS
+
+oakcli stop vm OEM13c      
+oakcli stop vm SRV-APP-01  
+oakcli stop vm SRV-APP-02  
+oakcli stop vm SRV-APP-03  
+oakcli stop vm SRV-CAS-01  
+oakcli stop vm SRV-MVH-02  
+oakcli stop vm SRV-SACR-02 
+
+STOP DOS DATABASES
+srvctl stop database -d hml
+srvctl stop database -d trn
+srvctl stop database -d sml
+srvctl stop database -d dgprdnew
+srvctl stop database -d oem13c
+
+STOP DO SERVIDOR ODABASE
+shutdown -h now
+
+SSTOP DO SERVICDOR DOM
+shutdown -h now
+
+
+
+
+CHEKLIST PARA START DO AMBIENTE DE PRODUCAO
+START DOS DATABASES
+srvctl start database -d dw
+srvctl start database -d prdnew
+
+START DE TODAS AS VMS
+oakcli start vm SRV-ACR-01   
+oakcli start vm SRV-APLIC-01 
+oakcli start vm SRV-APLIC-02 
+oakcli start vm SRV-CAS-01   
+oakcli start vm SRV-CHEF-02  
+oakcli start vm SRV-LAUDO-01 
+oakcli start vm SRV-LAUDO-02 
+oakcli start vm SRV-MV-02    
+oakcli start vm SRV-MVP-01
+
+CHEKLIST PARA STOP DO AMBIENTE DE SSTANDBY
+START DOS DATABASES
+srvctl start database -d hml
+srvctl start database -d trn
+srvctl start database -d sml
+srvctl start database -d dgprdnew
+srvctl start database -d oem13c
+
+START DE TODAS AS VMS
+oakcli start vm OEM13c      
+oakcli start vm SRV-APP-01  
+oakcli start vm SRV-APP-02  
+oakcli start vm SRV-APP-03  
+oakcli start vm SRV-CAS-01  
+oakcli start vm SRV-MVH-02  
+oakcli start vm SRV-SACR-02 
+
+
+

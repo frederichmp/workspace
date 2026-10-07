@@ -1,0 +1,82 @@
+ATUALIZAR BASE TSTHSJ Hospital Univesitario Ciencias Medicas
+
+Confere se a base é a correta.
+export ORACLE_SID=tsthsj
+sqlplus / as sysdba
+show parameter db_name;
+select instance_name from v$instance;
+-- SE O NOME DA BASE FOR TSTHSJ METE BALA
+shu abort
+startup mount restrict;
+drop database;
+
+REALIZAR BEGIN BACKUP EM PRODUCAO
+export ORACLE_SID=hsjprd
+sqlplus / as sysdba
+select distinct status from v$backup;
+alter database begin backup;
+select distinct status from v$backup;
+exit
+
+REALIZE A COPIA DOS DATAFILES PARA O DIRETORIO DO BANCO TSTHSJ
+cp MV2000_A* ../tsthsj &
+cp MV2000_AI* ../tsthsj &
+cp MV2000_D* ../tsthsj &
+cp MV2000_I* ../tsthsj &
+cp MV2000_L* ../tsthsj &
+cp MVPORTAL_D01.dbf ../tsthsj &
+cp MVPORTAL_I01.dbf ../tsthsj &
+cp SGPS_D01.dbf ../tsthsj &
+cp SGPS_I01.dbf ../tsthsj &
+cp sysaux01.dbf ../tsthsj &
+cp system01.dbf ../tsthsj &
+cp temp01.dbf ../tsthsj &
+cp temp02.dbf ../tsthsj &
+cp undotbs101.dbf ../tsthsj &
+
+APOS COPIA REALIZADA TIRE A BASE DE BEGIN BACKUP E GERE NOVOS ARCHIVES
+export ORACLE_SID=hsjprd
+sqlplus / as sysdba
+select distinct status from v$backup;
+alter database end backup;
+select distinct status from v$backup;
+alter system archive log current;
+alter system archive log current;
+alter system archive log current;
+alter system archive log current;
+alter system archive log current;
+alter system archive log current;
+exit
+
+ENTRE NO SQLPLUS CRIE O CONTROLFILE E EXECUTE O COMANDO DE RECUPERACAO DA BASE PARA VERIFICAR A DATA E SEQUENCIA DO ARCHIVES
+export ORACLE_SID=tsthsj
+sqlplus / as sysdba
+recover database using backup controlfile until cancel;
+-- CAPTURE A SEQUENCE PARA RESTAURA-LA
+exit;
+
+
+ENTRE NO RMAN HSJPRD E RECUPERE OS ARCHIVES PARA RECUPERACAO DA BASE TSTHSJ
+export ORACLE_SID=hsjprd
+rman target /
+run {
+allocate channel ch1 type 'sbt_tape'
+PARMS="SBT_LIBRARY=/opt/commvault/Base/libobk.so, BLKSIZE=1048576 ENV=(CV_mmsApiVsn=2,CV_channelPar=ch1,ThreadCommandLine= -cn hsjsrvdb -vm Instance001)";
+restore archivelog from sequence 177339 until sequence 177353;
+}
+
+
+CATALOGUE OS ARCHIVES RESTAURADOS DE PRODUCAO E EXECUTE O RECOVER
+export ORACLE_SID=tsthsj
+catalog start with '/u01/app/oracle/admin/hsjprd/archives';
+recover database;
+
+
+
+ODA X7-2HA RESTAURACAO BASE PRDMV VIA FITA
+
+run {
+allocate channel ch1 type 'sbt_tape'
+PARMS="SBT_LIBRARY=/opt/commvault/Base/libobk.so, BLKSIZE=1048576 ENV=(CV_mmsApiVsn=2,CV_channelPar=ch1,ThreadCommandLine= -cn hsjsrvdb -vm Instance001)";
+restore controlfile;
+}

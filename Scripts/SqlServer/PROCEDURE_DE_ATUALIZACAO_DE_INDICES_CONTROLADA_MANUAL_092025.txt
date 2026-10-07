@@ -1,0 +1,126 @@
+**Item 7 — Manual enxuto (final)**
+Pode colar num .md interno. Quando validar, mando qualquer ajuste fino.
+
+---
+
+# Guia rápido — IndexMaint
+
+## O que é
+
+Procedure única (`startupmonitor.dbo.IndexMaint_Run`) que:
+
+* **LIST/REPORT**: inventaria/consulta.
+* **ALTER/STATS/HYBRID**: executa REORGANIZE/REBUILD/UPDATE STATISTICS conforme regras.
+* **AlwaysOn**: “rebaixa” REBUILD se filas de envio/redo passarem limites.
+* **Log completo** em `startupmonitor.dbo.index_maint_log`.
+* **Fila/ETA** por execução em `startupmonitor.dbo.IndexMaint_Queue`.
+* **Whitelist multi-DB** em `startupmonitor.dbo.IndexMaint_Alvo`.
+* **Perfis** em `startupmonitor.dbo.IndexMaint_Config`.
+
+## Objetos
+
+* `dbo.index_maint_log` (log das ações, estados/stages, erros, tempos, frag before/after).
+* `dbo.IndexMaint_Alvo` (db_name, schema, table).
+* `dbo.IndexMaint_Config` (perfil com parâmetros).
+* `dbo.IndexMaint_Queue` (pendências, RUNNING/DONE/ERRO/CANCELADO, tini/tfim, ETA).
+* `dbo.IndexMaint_Run` (procedure principal).
+
+## Parâmetros (defaults)
+
+* `@TargetDB` (UAU_DIRECIONAL) — banco alvo.
+* `@Profile` (NULL) — carrega parâmetros da tabela Config.
+* `@Mode` (HYBRID) — `ALTER|STATS|HYBRID|REPORT`.
+* `@Report` (ALL) — `FRAG|RESUMABLE|LASTRUN|ALL`.
+* `@ReportScope` (ALVO) — `ALVO|TODAS` (em FRAG).
+* `@StatsMode` (SAMPLE), `@SamplePercent` (20) ou `FULLSCAN`.
+* Janela: `@WindowMinutes` (120).
+* Regras: `@FragMin` (10), `@FragRebuild` (30), `@LargePages` (500000 páginas), `@HotModPct` (10).
+* Execução: `@MaxDOP` (2), `@FillFactor` (NULL), `@OnlineDesejado` (1),
+  `@UseWaitLowPriority` (1 – 2014+), `@UseResumable` (1 – 2017+), `@OpMaxMinutes` (20).
+* AlwaysOn: `@AGMaxSendQueueMB` (512), `@AGMaxRedoQueueMB` (512).
+* Resumables: `@ResumableHandling` (ABORT|RESUME|IGNORE) = `ABORT`.
+
+## Modos
+
+* **REPORT**
+
+  * `FRAG ALVO|TODAS`: lista fragmentação (em TODAS inclui `insert_stmt` para popular Alvo).
+  * `RESUMABLE`: operações pausáveis ativas.
+  * `LASTRUN`: início, fim, duração da última execução.
+* **ALTER**: Reorg se frag < `@FragRebuild`; senão Rebuild.
+* **STATS**: apenas `UPDATE STATISTICS` (SAMPLE x FULLSCAN; incremental por partição quando aplicável).
+* **HYBRID**:
+
+  * `mod_pct >= @HotModPct` e `frag < @FragRebuild` → **STATS**.
+  * `@FragMin <= frag < @FragRebuild` → **REORGANIZE**.
+  * `frag >= @FragRebuild` e (`page_count >= @LargePages` ou `mod_pct >= @HotModPct`) → **REORGANIZE**.
+  * Caso contrário → **REBUILD**.
+    **Guard-rails AlwaysOn**: antes do REBUILD, se filas > limites → “rebaixa” para REORGANIZE + STATS.
+
+## Stages no log
+
+`STAGE_BEGIN` → `RUN_ID` → (`STAGE_REPORT_END` se REPORT) →
+`STAGE_ABORT_START/END` (resumables) → `STAGE_COLLECT_START/END` →
+`STAGE_EXEC_START/END` → `STAGE_END` (mensura duração total).
+
+## Compatibilidade/observações
+
+* `RESUMABLE` (2017+) e `SORT_IN_TEMPDB` são **incompatíveis** — a proc monta o comando correto.
+* Fallback para `dm_db_stats_properties` ausente (compat antigo): usa `sys.sysindexes`.
+* `ONLINE=ON` só se Enterprise/Developer; a proc liga/desliga automaticamente.
+
+## Operação (exemplos)
+
+* **Popular alvos** (exemplo já enviado no Item 2).
+* **Relatórios**:
+
+  ```sql
+  EXEC startupmonitor.dbo.IndexMaint_Run @TargetDB=N'UAU_DIRECIONAL', @Mode=N'REPORT', @Report=N'FRAG', @ReportScope=N'ALVO';
+  EXEC startupmonitor.dbo.IndexMaint_Run @TargetDB=N'UAU_DIRECIONAL', @Mode=N'REPORT', @Report=N'FRAG', @ReportScope=N'TODAS';
+  EXEC startupmonitor.dbo.IndexMaint_Run @TargetDB=N'UAU_DIRECIONAL', @Mode=N'REPORT', @Report=N'ALL';
+  ```
+* **Execução**:
+
+  ```sql
+  -- Perfil diário
+  EXEC startupmonitor.dbo.IndexMaint_Run @TargetDB=N'UAU_DIRECIONAL', @Profile=N'DIARIO';
+
+  -- Apenas STATS FULLSCAN
+  EXEC startupmonitor.dbo.IndexMaint_Run @TargetDB=N'UAU_DIRECIONAL', @Mode=N'STATS', @StatsMode=N'FULLSCAN';
+
+  -- ALTER sem resumable
+  EXEC startupmonitor.dbo.IndexMaint_Run @TargetDB=N'UAU_DIRECIONAL', @Mode=N'ALTER', @UseResumable=0, @OnlineDesejado=1, @MaxDOP=2;
+  ```
+* **Multi-DB**: inclua várias linhas em `IndexMaint_Alvo` (db_name diferente) e chame a proc por DB (várias steps ou um bloco T-SQL iterando uma lista).
+
+## Monitoramento/ETA
+
+* Logs e diagnósticos: **Item 6** (consultas já enviadas).
+* Fila/ETA: `IndexMaint_Queue` — estados `PENDING/RUNNING/DONE/ERRO/CANCELADO`, com `tini/tfim`, `page_count`, `frag_before/after`.
+  Use as queries 6.6–6.8 para progresso e estimativas.
+
+## Job (SQL Agent)
+
+* **Item 4** já cria `IDX_Maint_UAU_DIRECIONAL` às 02:00 na `startupmonitor`.
+* Para múltiplos DBs, duplique o step ou crie um step que execute várias chamadas.
+
+## Manutenção
+
+* Limpeza sugerida:
+
+  * `index_maint_log`: `dt < DATEADD(day,-60, SYSDATETIME())`.
+  * `IndexMaint_Queue`: `created_at < DATEADD(day,-7, SYSDATETIME())`.
+    (Scripts no Item 6.)
+
+## Desinstalação
+
+```sql
+EXEC msdb.dbo.sp_delete_job @job_name = N'IDX_Maint_UAU_DIRECIONAL';
+DROP PROC  startupmonitor.dbo.IndexMaint_Run;
+DROP TABLE startupmonitor.dbo.IndexMaint_Queue;
+DROP TABLE startupmonitor.dbo.IndexMaint_Config;
+DROP TABLE startupmonitor.dbo.IndexMaint_Alvo;
+DROP TABLE startupmonitor.dbo.index_maint_log;
+```
+
+Pronto. Quer que eu gere um **.sql único** com tudo e headers, ou deixamos nesses blocos por item?

@@ -1,0 +1,245 @@
+USE [Startupmonitor]
+GO
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+/*
+COMO USAR
+OBS.: Obrigatorio que tenha criado uma base chamada "auditoria"
+USE [startupmonitor]
+GO
+EXEC startupmonitor.dbo.stp_gerar_auditoria_sql_startup 'NOME DA BASE A SER AUDITADA','OWNER DA TABELA AUDITADA','NOME TABELA A SER AUDITADA','TIPO DML (INSERT,UPDATE,DELETE) pode usar as tres caso seja necessario'
+*/
+IF
+ (OBJECT_ID('stp_gerar_auditoria_sql_startup') IS NOT NULL)
+
+DROP PROCEDURE stp_gerar_auditoria_sql_startup
+GO
+
+CREATE PROCEDURE [stp_gerar_auditoria_sql_startup]
+        @dbtrigg  varchar(128),
+        @owntrigg varchar(128),
+        @tabela   varchar(128),
+        @dml      varchar(128)
+AS
+        BEGIN
+            SET nocount on
+			-- Verificar se a base de auditoria existe
+			IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'auditoria')
+			BEGIN
+				PRINT 'A base de auditoria não existe.';
+				RETURN;
+			END
+
+				--inicio variaveis da base de auditoria
+				DECLARE @owner    varchar(128) = 'dbo'
+				DECLARE @database varchar(128) = 'auditoria'
+				--FIM Variaveis da base auditoria
+				
+				--início variáveis do cursor
+				DECLARE @coluna  varchar(128)
+				DECLARE @tipo    varchar(128)
+				DECLARE @tamanho smallint
+				DECLARE @null    int
+				DECLARE @collate sysname
+				DECLARE @precisao tinyint
+				DECLARE @scala    tinyint
+				--FIM Variáveis do cursor
+				
+				--início variáveis para montar o sql
+				declare @sql     varchar(max)
+				declare @sqlhead varchar (max)
+				declare @campos  varchar(max)
+				DECLARE @cmd     VARCHAR(MAX)
+				--fim variáveis para montar o sql
+				
+				set @campos = ''
+				--pega cada campo da tabela a ser auditada nas tabelas de sistema
+				--ordena pela ordem de criação dos campos da tabela
+				SET @cmd = 'SELECT b.name, c.name AS tipo, b.length, b.isnullable, b.collation, b.xprec, b.xscale
+							INTO ##temp
+							FROM ' + @dbtrigg + '.sys.sysobjects a
+							INNER JOIN ' + @dbtrigg + '.sys.syscolumns b ON a.id = b.id
+							INNER JOIN ' + @dbtrigg + '.sys.systypes c ON b.xtype = c.xtype AND c.name <> ''sysname''
+							WHERE a.id = OBJECT_ID(N''' + @dbtrigg + '.' + @owner + '.' + @tabela + ''')
+							AND (SELECT 1 FROM ' + @dbtrigg + '.sys.objects WHERE object_id = a.id AND type = ''U'') = 1
+							AND c.usertype < 200
+							ORDER BY b.colorder'
+				EXEC (@cmd)
+				
+				DECLARE @col_name    varchar(128),
+						@col_type    varchar(128),
+						@col_length  int         ,
+						@is_nullable bit         ,
+						@collation   varchar(128),
+						@precision   int         ,
+						@scale       int
+						
+				DECLARE c_sql CURSOR READ_ONLY FOR
+				SELECT
+						name      ,
+						tipo      ,
+						length    ,
+						isnullable,
+						collation ,
+						xprec     ,
+						xscale
+				FROM
+						##temp
+				OPEN c_sql
+				
+				--início cria a tabela de log
+				set @sql = 'IF (OBJECT_ID(''' + @database + '.' + @owner + '.' + @tabela + '_aud' + ''') IS NOT NULL) DROP TABLE ' + @database + '.' + @owner + '.' + @tabela + '_aud '
+				set @sql = @sql + 'create table ' + @database + '.' + @owner + '.' + @tabela + '_aud' + ' ('
+				set @sql = @sql + 'Id_Aud int identity (1, 1) not null,'
+				
+				--colunas de controle
+				set @sql = @sql + 'Dt_Atualizacao DATETIME DEFAULT GETDATE(),'
+				set @sql = @sql + '[Login] VARCHAR(100),'
+				set @sql = @sql + 'Hostname VARCHAR(100),'
+				set @sql = @sql + 'Programa varchar(128),'
+				set @sql = @sql + 'Operacao VARCHAR(20),'
+				
+				--colunas da tabela
+				fetch next
+				from
+						c_sql
+				into
+						@coluna  ,
+						@tipo    ,
+						@tamanho ,
+						@null    ,
+						@collate ,
+						@precisao,
+						@scala
+						
+				set @campos = '' + char(9)
+				
+				while @@fetch_status = 0
+						begin
+								--select @coluna, @tipo, @tamanho, @null, @collate, @precisao, @scala
+								if
+									(@tipo <> 'text' and @tipo <> 'ntext' and @tipo <> 'image' and @tipo <> 'timestamp')
+									begin
+											set @campos = @campos + @coluna + ',' + char(13) + char(9) + char(9)
+                                    set @sql = @sql + '' + @coluna + ' ' + @tipo + ' '
+											
+											if
+											@tipo in ('binary', 'char', 'nchar', 'nvarchar', 'varbinary', 'varchar')
+													begin
+															if
+																(@tamanho = -1)
+															set @sql = @sql + '(max) '
+															else
+															set @sql = @sql + '(' + cast(@tamanho as varchar(10)) + ') '
+													end
+													
+											if
+											@tipo in ('decimal', 'numeric')
+												set @sql = @sql + '(' + cast(@precisao as varchar(10)) + ',' + cast(@scala as varchar(10)) + ') '
+											
+											if
+											@tipo in ('char', 'nchar', 'nvarchar', 'varchar', 'text', 'ntext')
+												set @sql = @sql + 'collate ' + @collate + ' '
+											
+											if
+											@null = 0
+												set @sql = @sql + 'not '
+												set @sql = @sql + 'null, '
+									end
+								
+								fetch next
+								from
+										c_sql
+								into
+										@coluna  ,
+										@tipo    ,
+										@tamanho ,
+										@null    ,
+										@collate ,
+										@precisao,
+										@scala
+							
+				end
+				
+				CLOSE c_sql
+				DEALLOCATE c_sql
+				DROP TABLE ##temp;
+				--select @campos
+				
+				--colunas de controle
+				SET @sql     = @sql   + 'Ds_Query VARCHAR(MAX)'
+				SET @sql     = @sql   + ')'
+				SET @sqlhead = 'USE ' + @dbtrigg + ' GO'
+				
+				IF NOT EXISTS (SELECT * FROM [auditoria].sys.tables WHERE name = @tabela + '_aud')
+					BEGIN
+						--resultado da construcao da tabela
+						SELECT
+								@sqlhead,
+								@sql AS 'COMANDO PARA CRIAR A TABELA'
+						
+						--exec (@sql)
+						--select @tabela
+					END
+
+                SET @sql = ''
+                --IF ((SELECT COUNT(*) FROM sys.triggers WHERE name = 'str_audit_' + @tabela + '' AND parent_id = OBJECT_ID('' + @tabela + '')) > 0) set @sql = 'ALTER' ELSE set @sql = 'CREATE'
+                IF
+                 (OBJECT_ID('' + @dbtrigg + '.' + @owntrigg + '.' + 'str_audit_' + @tabela + '') IS NOT NULL)
+					set @sql = 'ALTER'
+                ELSE
+					set @sql = 'CREATE'
+					
+                --select @sql
+                --exec(@sql)
+                set @sql     = @sql   + ' TRIGGER str_audit_' + @tabela + 
+										' ON ' + @dbtrigg + '.' + @owner + '.' + @tabela + char(13) + 
+										'FOR ' + @dml + char(13) + char(13) + 
+										'AS ' + char(13) + char(13) + 
+										'BEGIN ' + char(13) + char(13) + 
+										'SET NOCOUNT ON ' + char(13) + char(13) + 
+										'DECLARE @Login VARCHAR(100) = SYSTEM_USER,' + char(13) + char(13) + 
+												'@HostName VARCHAR(100) = HOST_NAME(),' + char(13) + char(13) + 
+												'@Data DATETIME = GETDATE(),' + char(13) + char(13) + 
+												'@Programa VARCHAR(100) = APP_NAME()' + char(13) + char(13) + 
+										'DECLARE @SqlQuery VARCHAR(MAX)' + char(13) + char(13) + 
+										'DECLARE @TableSqlQuery TABLE (' + char(13) + char(13) + 
+																		'EventType NVARCHAR(30),' + char(13) + char(13) + 
+																		'[Parameters] INT,' + char(13) + char(13) + 
+																		'EventInfo NVARCHAR(MAX)' + char(13) + char(13) + 
+																		')' + char(13) + char(13) + 
+										'INSERT INTO @TableSqlQuery' + char(13) + char(13) + 
+										'EXEC(''DBCC INPUTBUFFER(@@SPID)'')' + char(13) + char(13) + 
+										'SET @SqlQuery = (SELECT TOP(1) EventInfo FROM @TableSqlQuery)' + char(13) + char(13) + 
+										'IF (EXISTS(SELECT * FROM Inserted) AND EXISTS (SELECT * FROM Deleted))' + char(13) + char(13) + 
+										'BEGIN' + char(13) + char(13) + 
+											'INSERT INTO '+ @database + '.' + @owner + '.' + @tabela + '_aud' + '(' + char(13) + char(9) + 'Dt_Atualizacao,[Login],Hostname,Programa,Operacao,' + @campos + 'Ds_Query' + char(13) + char(9) + ')' + char(13) + char(9) + 
+											'SELECT @Data, @Login, @HostName,@Programa, ''UPDATE_INSERTED_NEW'',' + @campos + ' @SqlQuery' + char(13) + char(13) + 'FROM Inserted' + char(13) + char(13) + 
+											'INSERT INTO '+ @database + '.' + @owner + '.' + @tabela + '_aud' + '(' + char(13) + char(9) + 'Dt_Atualizacao,[Login],Hostname,Programa,Operacao,' + @campos + 'Ds_Query' + char(13) + char(9) + ')' + char(13) + char(9) + 
+											'SELECT @Data, @Login, @HostName,@Programa, ''UPDATE_DELETED_OLD'',' + @campos + ' @SqlQuery' + char(13) + char(13) + 'FROM Deleted' + char(13) + char(13) + 
+										'END' + char(13) + char(13) + 
+										'ELSE 
+											BEGIN' + char(13) + char(13) + 
+												'IF (EXISTS(SELECT * FROM Inserted))' + char(13) + char(13) + 
+												'BEGIN' + char(13) + char(13) + 
+													'INSERT INTO '+ @database + '.' + @owner + '.' + @tabela + '_aud' + '(' + char(13) + char(9) + 'Dt_Atualizacao,[Login],Hostname,Programa,Operacao,' + @campos + 'Ds_Query' + char(13) + char(9) + ')' + char(13) + char(9) + 
+													'SELECT @Data, @Login, @HostName,@Programa, ''INSERT_NEW'',' + @campos + ' @SqlQuery' + char(13) + char(13) + 'FROM Inserted' + char(13) + char(13) + 
+												'END' + char(13) + char(13) + 
+												'ELSE 
+													BEGIN' + char(13) + char(13) + 
+														'INSERT INTO '+ @database + '.' + @owner + '.' + @tabela + '_aud' + '(' + char(13) + char(9) + 'Dt_Atualizacao,[Login],Hostname,Programa,Operacao,' + @campos + 'Ds_Query' + char(13) + char(9) + ')' + char(13) + char(9) + 
+														'SELECT @Data, @Login, @HostName,@Programa, ''DELETE_OLD'',' + @campos + ' @SqlQuery' + char(13) + char(13) + 'FROM Deleted' + char(13) + char(13) + 
+													'END' + char(13) + char(13) + 
+												'END' + char(13) + char(13) + 
+											'END' + char(13) + char(13)
+				
+				--resultado da construcao da trigger
+                set @sqlhead = 'USE ' + @dbtrigg + ';'
+                select
+                        @sqlhead,
+                        @sql as 'COMANDO PARA CRIAR A TRIGGER'
+                --exec(@sql)
+
+END

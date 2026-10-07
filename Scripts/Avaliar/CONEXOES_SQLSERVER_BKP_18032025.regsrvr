@@ -1,0 +1,1458 @@
+<?xml version="1.0"?>
+<model xmlns="http://schemas.serviceml.org/smlif/2007/02">
+  <identity>
+    <name>urn:uuid:96fe1236-abf6-4a57-b54d-e9baab394fd1</name>
+    <baseURI>http://documentcollection/</baseURI>
+  </identity>
+  <xs:bufferSchema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+    <definitions xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08">
+      <document>
+        <docinfo>
+          <aliases>
+            <alias>/system/schema/RegisteredServers</alias>
+          </aliases>
+          <sfc:version DomainVersion="1" />
+        </docinfo>
+        <data>
+          <xs:schema targetNamespace="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+            <xs:element name="ServerGroup">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:any namespace="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" processContents="skip" minOccurs="0" maxOccurs="unbounded" />
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+            <xs:element name="RegisteredServer">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:any namespace="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" processContents="skip" minOccurs="0" maxOccurs="unbounded" />
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+            <RegisteredServers:bufferData xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08">
+              <instances xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08">
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:ServerGroup xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:RegisteredServers>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/RegisteredServer/10_.10_.200_.101__servidor__testes__fred</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:RegisteredServers>
+                      <RegisteredServers:ServerGroups>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/CCPR</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GENYX</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/HBA - Hospital da Baleia</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LDT - GEOSOL</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/MUZZI ADVOGADOS</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:ServerGroups>
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">DatabaseEngineServerGroup</RegisteredServers:Name>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                    </RegisteredServers:ServerGroup>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/RegisteredServer/10_.10_.200_.101__servidor__testes__fred</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">10.10.200.101_servidor_testes_fred</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">10.10.200.101</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">true</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-32640</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=10.10.200.101;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;application name="Microsoft SQL Server Management Studio";command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/CCPR</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:ServerGroup xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:RegisteredServers>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/CCPR/RegisteredServer/CCPR__CONNECT__PRD</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/CCPR/RegisteredServer/CCPR__CONNECTA__DEV</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/CCPR/RegisteredServer/CCPR__CONNECTA__QAS</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:RegisteredServers>
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">CCPR</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                    </RegisteredServers:ServerGroup>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/CCPR/RegisteredServer/CCPR__CONNECT__PRD</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/CCPR</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">CCPR_CONNECT_PRD</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">10.2.1.67</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=10.2.1.67;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/CCPR/RegisteredServer/CCPR__CONNECTA__DEV</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/CCPR</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">CCPR_CONNECTA_DEV</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">10.30.90.10</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=10.30.90.10;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/CCPR/RegisteredServer/CCPR__CONNECTA__QAS</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/CCPR</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">CCPR_CONNECTA_QAS</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">10.2.1.69</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=10.2.1.69;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:ServerGroup xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:RegisteredServers>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__HOMOLOGACAO__SQL2017</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__PRODUCAO__ISQL01</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__PRODUCAO__ISQL02</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__PRODUCAO__ISQL03</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__PRODUCAO__LEGADO__01</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__PRODUCAO__REPLICA</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__REPORTSERVER</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__REPORTSERVER__02</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__REPORTSERVER__215</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:RegisteredServers>
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">DIRECIONAL</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                    </RegisteredServers:ServerGroup>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__HOMOLOGACAO__SQL2017</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">DIR_HOMOLOGACAO_SQL2017</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.100.198\SQL2017</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.100.198\SQL2017;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__PRODUCAO__ISQL01</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">DIR_PRODUCAO_ISQL01</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.100.42\ISQL01,51114</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.100.42\ISQL01,51114;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__PRODUCAO__ISQL02</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">DIR_PRODUCAO_ISQL02</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.100.43\ISQL02,53286</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.100.43\ISQL02,53286;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__PRODUCAO__ISQL03</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">DIR_PRODUCAO_ISQL03</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.100.44\ISQL03,50583</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">true</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-65536</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.100.44\ISQL03,50583;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__PRODUCAO__LEGADO__01</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">DIR_PRODUCAO_LEGADO_01</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.100.232\MSSQLSERVERDB01</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.100.232\MSSQLSERVERDB01;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__PRODUCAO__REPLICA</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">DIR_PRODUCAO_REPLICA</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.100.199</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.100.199;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__REPORTSERVER</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">DIR_REPORTSERVER</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.100.203</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.100.203;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__REPORTSERVER__02</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">DIR_REPORTSERVER_02</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.100.107</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.100.107;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL/RegisteredServer/DIR__REPORTSERVER__215</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/DIRECIONAL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">DIR_REPORTSERVER_215</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.100.215</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.100.215;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GENYX</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:ServerGroup xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:RegisteredServers>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GENYX/RegisteredServer/GNX__PLATAFORMA</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GENYX/RegisteredServer/GNX__SANKHYA</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:RegisteredServers>
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">GENYX</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                    </RegisteredServers:ServerGroup>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GENYX/RegisteredServer/GNX__PLATAFORMA</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GENYX</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">GNX_PLATAFORMA</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.139.13</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.139.13;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GENYX/RegisteredServer/GNX__SANKHYA</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GENYX</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">GNX_SANKHYA</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.183.6</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.183.6;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:ServerGroup xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:RegisteredServers>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS/RegisteredServer/GBS__ADAPTOR</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS/RegisteredServer/GBS__ADAPTOR__OLD</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS/RegisteredServer/GBS__CPJ</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS/RegisteredServer/GBS__CPJ__OLD</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS/RegisteredServer/GBX__CPJ__HOMOLOGACAO</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:RegisteredServers>
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">GRUPO BARCLOS</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                    </RegisteredServers:ServerGroup>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS/RegisteredServer/GBS__ADAPTOR</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">GBS_ADAPTOR</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.0.242</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.0.242;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS/RegisteredServer/GBS__ADAPTOR__OLD</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">GBS_ADAPTOR_OLD</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.0.232</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.0.232;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS/RegisteredServer/GBS__CPJ</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">GBS_CPJ</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.0.142</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.0.142;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS/RegisteredServer/GBS__CPJ__OLD</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">GBS_CPJ_OLD</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.0.231</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.0.231;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS/RegisteredServer/GBX__CPJ__HOMOLOGACAO</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/GRUPO BARCLOS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">GBX_CPJ_HOMOLOGACAO</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.0.98</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.0.98;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/HBA - Hospital da Baleia</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:ServerGroup xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:RegisteredServers>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/HBA - Hospital da Baleia/RegisteredServer/HBA__CORPORE</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:RegisteredServers>
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">HBA - Hospital da Baleia</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                    </RegisteredServers:ServerGroup>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/HBA - Hospital da Baleia/RegisteredServer/HBA__CORPORE</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/HBA - Hospital da Baleia</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">HBA_CORPORE</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">172.16.10.52</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=172.16.10.52;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LDT - GEOSOL</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:ServerGroup xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:RegisteredServers>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LDT - GEOSOL/RegisteredServer/LAYNE</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LDT - GEOSOL/RegisteredServer/OSMIO</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LDT - GEOSOL/RegisteredServer/PROTHEUS__TESTE</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:RegisteredServers>
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LDT - GEOSOL</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                    </RegisteredServers:ServerGroup>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LDT - GEOSOL/RegisteredServer/LAYNE</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LDT - GEOSOL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LAYNE</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.0.31</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.0.31;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LDT - GEOSOL/RegisteredServer/OSMIO</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LDT - GEOSOL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">OSMIO</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.0.14</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.0.14;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LDT - GEOSOL/RegisteredServer/PROTHEUS__TESTE</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LDT - GEOSOL</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">PROTHEUS_TESTE</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.0.28</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.0.28;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:ServerGroup xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:RegisteredServers>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE/RegisteredServer/LJR__CENTAURI</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE/RegisteredServer/LJR__MERCURIO</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE/RegisteredServer/LJR__ORION</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE/RegisteredServer/LJR__THOR</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:RegisteredServers>
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LOJAS REDE</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                    </RegisteredServers:ServerGroup>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE/RegisteredServer/LJR__CENTAURI</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LJR_CENTAURI</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.1.199</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.1.199;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE/RegisteredServer/LJR__MERCURIO</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LJR_MERCURIO</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.1.133</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.1.133;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE/RegisteredServer/LJR__ORION</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LJR_ORION</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.0.80</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.0.80;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE/RegisteredServer/LJR__THOR</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LOJAS REDE</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LJR_THOR</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.1.40,49468</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.1.40,49468;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:ServerGroup xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:RegisteredServers>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/RegisteredServer/LZB__AWS__PRODUCAO</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/RegisteredServer/LZB__AWS__PRODUCAO__VPN</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:RegisteredServers>
+                      <RegisteredServers:ServerGroups>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:ServerGroups>
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LUIZA BARCELOS</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                    </RegisteredServers:ServerGroup>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/RegisteredServer/LZB__AWS__PRODUCAO</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LZB_AWS_PRODUCAO</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">sft.luizabarcelos.net.br</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=sft.luizabarcelos.net.br;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/RegisteredServer/LZB__AWS__PRODUCAO__VPN</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LZB_AWS_PRODUCAO_VPN</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">10.40.2.226</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=10.40.2.226;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:ServerGroup xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:RegisteredServers>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS/RegisteredServer/LBC__BHSHOPPING</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS/RegisteredServer/LBC__DIAMOND</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS/RegisteredServer/LBC__HIGIENOPOLIS</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS/RegisteredServer/LBC__MORUMBI</sml:Uri>
+                          </sfc:Reference>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS/RegisteredServer/LBC__PATIO__SAVASSI</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:RegisteredServers>
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LOJAS</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                    </RegisteredServers:ServerGroup>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS/RegisteredServer/LBC__BHSHOPPING</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LBC_BHSHOPPING</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">201.17.132.24</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=201.17.132.24;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS/RegisteredServer/LBC__DIAMOND</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LBC_DIAMOND</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">201.17.131.164</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=201.17.131.164;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS/RegisteredServer/LBC__HIGIENOPOLIS</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LBC_HIGIENOPOLIS</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">200.236.208.157</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=200.236.208.157;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS/RegisteredServer/LBC__MORUMBI</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LBC_MORUMBI</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">201.93.255.32</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=201.93.255.32;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS/RegisteredServer/LBC__PATIO__SAVASSI</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/LUIZA BARCELOS/ServerGroup/LOJAS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">LBC_PATIO_SAVASSI</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">201.17.131.164</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=201.17.131.164;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/MUZZI ADVOGADOS</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:ServerGroup xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:RegisteredServers>
+                        <sfc:Collection>
+                          <sfc:Reference sml:ref="true">
+                            <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/MUZZI ADVOGADOS/RegisteredServer/MZA__PRODUCAO</sml:Uri>
+                          </sfc:Reference>
+                        </sfc:Collection>
+                      </RegisteredServers:RegisteredServers>
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">MUZZI ADVOGADOS</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                    </RegisteredServers:ServerGroup>
+                  </data>
+                </document>
+                <document>
+                  <docinfo>
+                    <aliases>
+                      <alias>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/MUZZI ADVOGADOS/RegisteredServer/MZA__PRODUCAO</alias>
+                    </aliases>
+                    <sfc:version DomainVersion="1" />
+                  </docinfo>
+                  <data>
+                    <RegisteredServers:RegisteredServer xmlns:RegisteredServers="http://schemas.microsoft.com/sqlserver/RegisteredServers/2007/08" xmlns:sfc="http://schemas.microsoft.com/sqlserver/sfc/serialization/2007/08" xmlns:sml="http://schemas.serviceml.org/sml/2007/02" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                      <RegisteredServers:Parent>
+                        <sfc:Reference sml:ref="true">
+                          <sml:Uri>/RegisteredServersStore/ServerGroup/DatabaseEngineServerGroup/ServerGroup/MUZZI ADVOGADOS</sml:Uri>
+                        </sfc:Reference>
+                      </RegisteredServers:Parent>
+                      <RegisteredServers:Name type="string">MZA_PRODUCAO</RegisteredServers:Name>
+                      <RegisteredServers:Description type="string" />
+                      <RegisteredServers:ServerName type="string">192.168.16.87</RegisteredServers:ServerName>
+                      <RegisteredServers:UseCustomConnectionColor type="boolean">false</RegisteredServers:UseCustomConnectionColor>
+                      <RegisteredServers:CustomConnectionColorArgb type="int">-986896</RegisteredServers:CustomConnectionColorArgb>
+                      <RegisteredServers:ServerType type="ServerType">DatabaseEngine</RegisteredServers:ServerType>
+                      <RegisteredServers:ConnectionStringWithEncryptedPassword type="string">data source=192.168.16.87;pooling=False;multiple active result sets=False;connect timeout=30;encrypt=False;trust server certificate=False;packet size=4096;command timeout=0</RegisteredServers:ConnectionStringWithEncryptedPassword>
+                      <RegisteredServers:CredentialPersistenceType type="CredentialPersistenceType">None</RegisteredServers:CredentialPersistenceType>
+                      <RegisteredServers:OtherParams type="string" />
+                      <RegisteredServers:AuthenticationType type="int">1</RegisteredServers:AuthenticationType>
+                      <RegisteredServers:ActiveDirectoryTenant type="string" />
+                    </RegisteredServers:RegisteredServer>
+                  </data>
+                </document>
+              </instances>
+            </RegisteredServers:bufferData>
+          </xs:schema>
+        </data>
+      </document>
+    </definitions>
+  </xs:bufferSchema>
+</model>

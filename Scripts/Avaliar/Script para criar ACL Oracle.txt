@@ -1,0 +1,97 @@
+-- DROPA UMA ACL
+DECLARE
+ NM_ACL VARCHAR2(30) := '/sys/acls/sefaz_reinf.xml';
+BEGIN
+   DBMS_NETWORK_ACL_ADMIN.DROP_ACL(
+      acl => NM_ACL);
+END;
+/
+
+-- CRIA UMA ACL
+DECLARE
+ NM_ACL VARCHAR2(30) := 'email_ccpr.xml';
+ NM_ACL_DESCRIPTION VARCHAR2(30) := 'envia_email';
+BEGIN
+ DBMS_NETWORK_ACL_ADMIN.CREATE_ACL(
+ ACL => NM_ACL,
+ DESCRIPTION => NM_ACL_DESCRIPTION,
+ PRINCIPAL => 'SCPL',
+ IS_GRANT => true,
+ privilege => 'connect' );
+END;
+/
+
+-- ADD PRIVILEGES
+DECLARE
+ NM_ACL VARCHAR2(30) := 'email_ccpr.xml';
+BEGIN
+ DBMS_NETWORK_ACL_ADMIN.ADD_PRIVILEGE(
+ ACL => NM_ACL,
+ PRINCIPAL => 'SCPL',
+ IS_GRANT => true,
+ privilege => 'resolve' );
+ 
+ 
+END;
+/
+
+-- ASSOCIA A ACL A UM HOST/PORTA
+DECLARE
+IP_SERVIDOR VARCHAR2(30) := '172.16.192.3';
+ PORTA_INI NUMBER := NULL;
+ PORTA_FIM NUMBER := NULL;
+ NM_ACL VARCHAR2(30) := '/sys/acls/email_ccpr.xml';
+BEGIN
+ DBMS_NETWORK_ACL_ADMIN.ASSIGN_ACL(
+ ACL => NM_ACL,
+ host => IP_SERVIDOR,
+ lower_port => PORTA_INI,
+ upper_port => PORTA_FIM);
+END;
+/
+
+BEGIN
+ DBMS_NETWORK_ACL_ADMIN.unassign_acl (
+ acl         => '/sys/acls/sefaz_reinf.xml',
+ host        => '172.16.5.81', 
+ lower_port  => 587,
+ upper_port  => 587); 
+
+ COMMIT;
+END;
+/
+
+-- CONSULTA A ACL
+column owner format a12;
+column index_name format a18;
+column status format a10;
+column domidx_status format a10;
+column domidx_opstatus format a10;
+column funcidx_status format a10;
+
+select acl,principal,privilege,is_grant from DBA_NETWORK_ACL_PRIVILEGES;
+select acl,host,lower_port,upper_port from DBA_NETWORK_ACLS;
+
+DECLARE
+	vDE varchar2(50) := 'fred.martins@startupnet.com.br'; -- email de teste
+	vPARA varchar2(50) := 'fred.martins@startupnet.com.br'; --email de teste
+	EmailServer varchar2(30) := 'smtp.office365.com'; --IP servidor de EMAIL;
+	PORTA number := 587; --porta
+	base64username varchar(100) := UTL_RAW.cast_to_varchar2(UTL_ENCODE.base64_encode(UTL_RAW.cast_to_raw('sac@hospitalsantaclara.com.br'))); -- NOVO COM AUTENTICACAO  
+	base64password varchar(30) := UTL_RAW.cast_to_varchar2(UTL_ENCODE.base64_encode(UTL_RAW.cast_to_raw('#1q2w3e4r'))); -- NOVO COM AUTENTICACAO
+	conn UTL_SMTP.CONNECTION;
+	crlf VARCHAR2(2):= CHR(13) || CHR(10);
+	mesg VARCHAR2(4000);
+BEGIN
+	conn:= utl_smtp.open_connection(EmailServer,PORTA);
+	utl_smtp.helo(conn,EmailServer);
+	UTL_SMTP.command(conn, 'AUTH', 'LOGIN'); -- NOVO COM AUTENTICACAO
+	UTL_SMTP.command(conn, base64username ); -- NOVO COM AUTENTICACAO
+	UTL_SMTP.command(conn, base64password ); -- NOVO COM AUTENTICACAO
+	utl_smtp.mail(conn, vDe);
+	utl_smtp.rcpt(conn,vPARA);
+	mesg:= 'From:'||vDE|| crlf ||'Subject: Teste de e-mail enviado pelo Servidor Oracle' ||crlf ||'To: '||vPARA || crlf ||'' || crlf ||'Este e-mail foi enviado pelo servidor de banco de dados Oracle';
+	utl_smtp.data(conn,mesg);
+	utl_smtp.quit(conn);
+END;
+/

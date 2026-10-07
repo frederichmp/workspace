@@ -1,0 +1,46 @@
+/**** EXECUTAR NA BASE A SER AUDITADA *****/
+
+
+
+/****** Object:  DdlTrigger [str_tr_alteracoes]    Script Date: 09/05/2023 11:07:12 ******/
+DROP TRIGGER [str_tr_alteracoes] ON DATABASE
+GO
+
+/****** Object:  DdlTrigger [str_tr_alteracoes]    Script Date: 09/05/2023 11:07:12 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+create trigger [str_tr_alteracoes] on database for
+    -- obs: é possível selecionar eventos individuais ou todos os eventos, como fiz nesse exemplo
+    ddl_database_level_events
+/*  create_procedure, alter_procedure, drop_procedure, 
+    create_table, alter_table, drop_table, 
+    create_function, alter_function, drop_function,
+    create_view, alter_view, drop_view
+*/
+as
+    set nocount on
+    set arithabort on
+    -- salvar evento (convertendo o XML para lowercase, pois o método value é case-sensitive, e não queremos nos preocupar com isso)
+    declare @ds_dados_evento xml = lower(cast(eventdata() as nvarchar(max)))
+    insert into auditoria.dbo.adm_audit_ddl (dt_alteracao, nr_spid, nm_computador,  ds_ip, nm_login, nm_banco, ds_tipo_evento, nm_objeto, ds_tipo_objeto, ds_sql, ds_event_data)
+        select
+            sysdatetime(),
+            @@spid, -- identificador da conexão
+            host_name(), -- nome da máquina do cliente
+            cast (connectionproperty('client_net_address') as varchar(300)), -- ip
+            suser_name(), -- login
+            @ds_dados_evento.value('(/event_instance/databasename)[1]', 'sysname'),
+            @ds_dados_evento.value('(/event_instance/eventtype)[1]', 'nvarchar(50)'), 
+            @ds_dados_evento.value('(/event_instance/objectname)[1]', 'sysname'), 
+            @ds_dados_evento.value('(/event_instance/objecttype)[1]', 'nvarchar(50)'), 
+            @ds_dados_evento.value('(/event_instance/tsqlcommand/commandtext)[1]', 'nvarchar(max)'),
+            @ds_dados_evento -- xml integral do evento
+GO
+
+ENABLE TRIGGER [str_tr_alteracoes] ON DATABASE
+GO
+

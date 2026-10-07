@@ -1,0 +1,76 @@
+Checklist Restore da base TOTVS SCBH 20/01/2021 19:00
+
+Salvar o banco anterior 
+mv /oradata/totvs /oratada/totvs_old
+mkdir -p /oradata/totvs
+
+Subir a base em nomount e restaurar o controlfile
+startup nomount
+rman target /
+restore controlfile from '/backup_storage/rman/totvs/Wednesday/ctl/rman_totvs_ARCHDELETE_20_01_2021__18h_50m_Wed_3_ctl_1062355826_1_106198';
+alter database mount;
+
+Realizar a preparacao do STANDERPRISE
+Abrir 9 canais de restauracao. Control +a +c / Control +a +n (passa a tela)
+Sao 28 datafiles para serem restaurados
+Nao será preciso fazer set newname pois será no mesmo diretorio
+Comando abaixo deverá ser aberto em uma screen com varias sessoes.
+???? Verificar se será preciso fazer switch datafile all ????
+rman target / log=/tmp/restore01.log
+run {
+restore datafile 19,26;
+}
+
+rman target / log=/tmp/restore02.log
+run {
+restore datafile 25,28;
+}
+
+rman target / log=/tmp/restore03.log
+run {
+restore datafile 07,20;
+}
+
+rman target / log=/tmp/restore04.log
+run {
+restore datafile 08,01;
+}
+
+rman target / log=/tmp/restore05.log
+run {
+restore datafile 09,27,06;
+}
+
+rman target / log=/tmp/restore06.log
+run {
+restore datafile 10,04,14;
+}
+
+rman target / log=/tmp/restore07.log
+run {
+restore datafile 23,22,15,02,16;
+}
+
+rman target / log=/tmp/restore08.log
+run {
+restore datafile 21,12,03,05,17;
+}
+
+rman target / log=/tmp/restore09.log
+run {
+restore datafile 11,24,13,18;
+}
+
+
+Apos o restore realizar o recover até as 17:30 do dia 20/01/2021
+rman target / log=/tmp/recover01.log
+run {
+allocate channel ch1 type disk;
+set until time = "to_date('2021-01-20:17:30:00','yyyy-mm-dd:hh24:mi:ss')"; 
+recover database delete archivelog;
+}
+
+Abrir a base e criar o TEMP se ele nao criou. Ambiente finalizado as 20:30
+Testar e validar com o pessoal; Falta validar com o pessoal.
+
+

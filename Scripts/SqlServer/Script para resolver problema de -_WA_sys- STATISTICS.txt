@@ -1,0 +1,34 @@
+--Use the database in question
+USE [UAU_DIRECIONAL];
+GO
+
+--Put the statistic name in the WHERE clause
+SELECT s.Name as statName,
+c.name ColumnName,
+OBJECT_NAME(s.object_id) as [tableName]
+FROM sys.stats s
+INNER JOIN sys.stats_columns sc ON s.Object_id = sc.object_id
+  AND s.stats_id = sc.stats_id
+INNER JOIN sys.columns c ON sc.column_id = c.Column_id
+  AND sc.object_id = c.object_id
+WHERE s.name = '_WA_Sys_0000006C_5D9AA944';
+
+/*
+Results should bring back the following columns:
+
+statName 
+ColumnName 
+tableName
+
+_WA_Sys_00000004_4A202281 
+LineStatusCode 
+RateComponentLine
+
+Then run the following to drop the existing stat and recreate a new stat:
+*/
+
+CREATE STATISTICS StatsLineStatusCode ON RateComponentLine (LineStatusCode) WITH NORECOMPUTE;
+GO
+
+DROP STATISTICS RateComponentLine._WA_Sys_00000004_4A202281;
+GO
