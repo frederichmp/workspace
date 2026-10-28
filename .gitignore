@@ -22,3 +22,5 @@ temp/
 
 # OneDrive
 ~$*
+# Repositorios externos / Projetos aninhados
+SCRIPT STARTUP GIT/
