@@ -68,38 +68,41 @@ def test_corpus_adversarial_tokenizacao(
 
 # =============================================================================
 # L3: Testes de regras do executor via executar_script() sem conexão
+# Lê nomes e expectativas exclusivamente de manifest.json (fonte única)
 # =============================================================================
+L3_TARGET_IDS = {"A14", "A16", "A17", "A18", "A20"}
+l3_cases = [
+    (
+        data["id"],
+        fname,
+        data["tipo_declarado"],
+        data["expected_status"],
+    )
+    for fname, data in corpus_manifest.items()
+    if data["id"] in L3_TARGET_IDS
+]
+
+
 @pytest.mark.parametrize(
-    "script_id,filename,tipo_declarado,expected_motivo",
-    [
-        ("a14_spool_inicio", "a14_spool_inicio.sql", "SELECT", "DIRETIVA_SQLPLUS"),
-        ("a16_tipo_select_com_update", "a16_tipo_select_com_update.sql", "SELECT", "TIPO_DIVERGENTE"),
-        ("a17_tipo_dml_com_create", "a17_tipo_dml_com_create.sql", "DML", "TIPO_DIVERGENTE"),
-        ("a18_tipo_plsql_com_select", "a18_tipo_plsql_com_select.sql", "PLSQL", "TIPO_DIVERGENTE"),
-        ("a20_syntax_error", "a20_syntax_error.sql", "SELECT", "TIPO_NAO_RECONHECIDO"),
-    ],
-    ids=[
-        "A14_DIRETIVA_SQLPLUS",
-        "A16_TIPO_DIVERGENTE",
-        "A17_TIPO_DIVERGENTE",
-        "A18_TIPO_DIVERGENTE",
-        "A20_TIPO_NAO_RECONHECIDO",
-    ],
+    "case_id,filename,tipo_declarado,expected_motivo",
+    l3_cases,
+    ids=[f"{c[0]}_{c[1]}" for c in l3_cases],
 )
 def test_l3_executar_script_adversarial_sem_conexao(
-    script_id, filename, tipo_declarado, expected_motivo, monkeypatch
+    case_id, filename, tipo_declarado, expected_motivo, monkeypatch
 ):
     """
     L3: Valida a execução completa via executar_script (não apenas tokenizador)
     com registro de teste e arquivo real para regras do executor, garantindo
     que nenhuma conexão com o Oracle seja aberta (mock_connect.assert_not_called()).
+    Lê nomes e expectativas exclusivamente de manifest.json (fonte única).
     """
     file_path = CORPUS_DIR / filename
     raw_bytes = file_path.read_bytes()
     sha256_hash = hashlib.sha256(raw_bytes).hexdigest()
 
     entry = ScriptRegistryEntry(
-        script_id=script_id,
+        script_id=filename.replace(".sql", ""),
         arquivo=filename,
         sha256=sha256_hash,
         tipo=tipo_declarado,
@@ -111,11 +114,11 @@ def test_l3_executar_script_adversarial_sem_conexao(
     monkeypatch.setenv("SCRIPTS_DIR_PATH", str(CORPUS_DIR))
     with patch("src.tools.executor.obter_script", return_value=entry), \
          patch("oracledb.connect") as mock_conn:
-        saida_str = executar_script(script_id, {})
+        saida_str = executar_script(entry.script_id, {})
         resultado = json.loads(saida_str)
 
         assert resultado["status"] == "recusado", f"Esperado status=recusado, obtido: {resultado}"
         assert resultado["motivo"] == expected_motivo, (
-            f"Caso {script_id}: esperado motivo={expected_motivo}, obtido={resultado.get('motivo')} (msg: {resultado.get('mensagem')})"
+            f"Caso {case_id} ({filename}): esperado motivo={expected_motivo}, obtido={resultado.get('motivo')} (msg: {resultado.get('mensagem')})"
         )
         mock_conn.assert_not_called()

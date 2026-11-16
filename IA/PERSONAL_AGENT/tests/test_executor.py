@@ -24,6 +24,7 @@ load_dotenv(dotenv_path=BASE_DIR / ".env", override=True)
 
 from src.tools.executor import (
     _analisar_blocos_plsql,
+    determinar_tipo_real_sql,
     executar_script,
     tokenizar_e_validar_sql,
     tokenizar_sql_stream,
@@ -504,3 +505,86 @@ def test_t20_corpus_plsql_tokenizacao(filename, is_valid, expected_code):
 
     assert valid == is_valid, f"Falha no caso {filename}: esperado valido={is_valid}, obtido {valid} (msg: {msg})"
     assert code_res == expected_code, f"Falha no caso {filename}: esperado codigo={expected_code}, obtido {code_res} (msg: {msg})"
+
+
+# =============================================================================
+# B3: CREATE incompleto -> (None, "CREATE incompleto.") e TIPO_NAO_RECONHECIDO
+# =============================================================================
+def test_b3_create_incompleto_recusado_tipo_nao_reconhecido():
+    """B3: CREATE incompleto retorna (None, 'CREATE incompleto.') e TIPO_NAO_RECONHECIDO sem conectar."""
+    tokens_create = tokenizar_sql_stream("CREATE;")
+    tipo_real, erro = determinar_tipo_real_sql(tokens_create)
+    assert tipo_real is None
+    assert erro == "CREATE incompleto."
+
+    valido, cod, msg, _, _ = tokenizar_e_validar_sql("CREATE;")
+    assert valido is False
+    assert cod == "TIPO_NAO_RECONHECIDO"
+
+    tokens_replace = tokenizar_sql_stream("CREATE OR REPLACE;")
+    tipo_real_rep, erro_rep = determinar_tipo_real_sql(tokens_replace)
+    assert tipo_real_rep is None
+    assert erro_rep == "CREATE incompleto."
+
+    valido_rep, cod_rep, msg_rep, _, _ = tokenizar_e_validar_sql("CREATE OR REPLACE;")
+    assert valido_rep is False
+    assert cod_rep == "TIPO_NAO_RECONHECIDO"
+
+
+# =============================================================================
+# B4: Motivos de recusa (ARQUIVO_VAZIO, TIPO_NAO_RECONHECIDO - nunca MULTIPLOS_STATEMENTS)
+# =============================================================================
+def test_b4_motivos_recusa_arquivo_vazio_e_primeiro_token_nao_palavra():
+    """B4: Valida ARQUIVO_VAZIO e primeiro token não-palavra como TIPO_NAO_RECONHECIDO (nunca MULTIPLOS_STATEMENTS)."""
+    # 1. Arquivo vazio
+    valido_vazio, cod_vazio, _, _, _ = tokenizar_e_validar_sql("")
+    assert valido_vazio is False
+    assert cod_vazio == "ARQUIVO_VAZIO"
+    assert cod_vazio != "MULTIPLOS_STATEMENTS"
+
+    # 2. Arquivo contendo apenas comentários e espaços
+    valido_com, cod_com, _, _, _ = tokenizar_e_validar_sql("  -- apenas comentario de linha\n/* bloco */\n  ")
+    assert valido_com is False
+    assert cod_com == "ARQUIVO_VAZIO"
+    assert cod_com != "MULTIPLOS_STATEMENTS"
+
+    # 3. Primeiro token não-palavra (ex.: "(")
+    valido_paren, cod_paren, _, _, _ = tokenizar_e_validar_sql("(")
+    assert valido_paren is False
+    assert cod_paren == "TIPO_NAO_RECONHECIDO"
+    assert cod_paren != "MULTIPLOS_STATEMENTS"
+
+    valido_subquery, cod_subquery, _, _, _ = tokenizar_e_validar_sql("(SELECT 1 FROM dual)")
+    assert valido_subquery is False
+    assert cod_subquery == "TIPO_NAO_RECONHECIDO"
+    assert cod_subquery != "MULTIPLOS_STATEMENTS"
+
+
+# =============================================================================
+# FIXTURES: Hashes das entradas comuns entre scripts.yaml e test_scripts.yaml são iguais
+# =============================================================================
+def test_fixtures_hashes_entradas_comuns_sao_iguais():
+    """FIXTURES: Garante sem conexão que entradas comuns aos dois YAMLs possuem hashes idênticos."""
+    import yaml
+    raiz = BASE_DIR
+    scripts_yaml_path = raiz / "registry" / "scripts.yaml"
+    test_yaml_path = raiz / "registry" / "test_scripts.yaml"
+
+    assert scripts_yaml_path.is_file(), "registry/scripts.yaml deve existir"
+    assert test_yaml_path.is_file(), "registry/test_scripts.yaml deve existir"
+
+    with open(scripts_yaml_path, "r", encoding="utf-8") as f:
+        dados_prod = yaml.safe_load(f).get("scripts", [])
+    with open(test_yaml_path, "r", encoding="utf-8") as f:
+        dados_test = yaml.safe_load(f).get("scripts", [])
+
+    prod_map = {item["script_id"]: item["sha256"] for item in dados_prod}
+    test_map = {item["script_id"]: item["sha256"] for item in dados_test}
+
+    chaves_comuns = set(prod_map.keys()).intersection(set(test_map.keys()))
+    assert len(chaves_comuns) > 0, "Deve haver ao menos uma entrada comum entre os registros"
+
+    for sid in chaves_comuns:
+        assert prod_map[sid] == test_map[sid], (
+            f"Divergência de hash na entrada comum '{sid}': prod={prod_map[sid]} vs test={test_map[sid]}"
+        )
