@@ -157,6 +157,7 @@ def test_t4_multiplos_statements_rejeitados():
 # =============================================================================
 # T5: ';' dentro de string literal e comentário, um único SELECT -> executa
 # =============================================================================
+@pytest.mark.sandbox_only
 def test_t5_ponto_e_virgula_em_literal_e_comentario():
     """T5: Ponto-e-vírgula em string e comentário em SELECT único executa normalmente."""
     saida_str = executar_script("select_t5_complexo", {})
@@ -172,6 +173,7 @@ def test_t5_ponto_e_virgula_em_literal_e_comentario():
 # =============================================================================
 # T6: Bloco BEGIN...END com ';' internos -> executa como um statement
 # =============================================================================
+@pytest.mark.sandbox_only
 def test_t6_bloco_plsql_com_pontos_e_virgulas_internos():
     """T6: Bloco PL/SQL com ponto-e-vírgulas internos executa como statement único."""
     saida_str = executar_script("plsql_bloco_t6", {})
@@ -184,13 +186,14 @@ def test_t6_bloco_plsql_com_pontos_e_virgulas_internos():
 # =============================================================================
 # T7: CREATE PROCEDURE com ';' internos e sem '/' -> executa como um statement
 # =============================================================================
+@pytest.mark.sandbox_only
 def test_t7_create_procedure_sem_barra():
     """T7: CREATE PROCEDURE com ';' internos e sem '/' executa como um statement."""
     saida_str = executar_script("procedure_t7", {})
     resultado = json.loads(saida_str)
 
     assert resultado["status"] == "sucesso"
-    assert resultado["tipo"] in ("DDL", "PLSQL")
+    assert resultado["tipo"] == "PLSQL"
 
 
 # =============================================================================
@@ -212,38 +215,65 @@ def test_t8_diretivas_sqlplus_recusadas():
 
 
 # =============================================================================
-# T9: Bind com "' OR 1=1 --" em SELECT parametrizado -> sem alteração de statement
-# Validar em V$SQL: texto do SQL contém :nome, não o valor injetado.
+# T9: Bind com "' OR 1=1 --" em SELECT parametrizado -> teste de efeito e V$SQL (sandbox)
 # =============================================================================
+@pytest.mark.sandbox_only
 def test_t9_bind_injetado_sem_alteracao_statement_v_sql():
-    """T9: SQL Injection via bind nomeado preserva :nome inalterado na V$SQL."""
-    saida_str = executar_script("select_param_t9", {"nome": "' OR 1=1 --"})
-    resultado = json.loads(saida_str)
-
-    assert resultado["status"] == "sucesso"
-    assert resultado["linhas_afetadas"] == 0
-
+    """T9: SQL Injection via bind nomeado preserva :nome inalterado na V$SQL e valida efeito."""
     user_mut = os.getenv("ORACLE_USER_MUT") or os.getenv("ORACLE_USER")
     pass_mut = os.getenv("ORACLE_PASSWORD_MUT") or os.getenv("ORACLE_PASSWORD")
     dsn = os.getenv("ORACLE_DSN")
 
     conn = oracledb.connect(user=user_mut, password=pass_mut, dsn=dsn)
     cur = conn.cursor()
+
+    # 1. Inserir linha de teste com nome = 'T9_MARCADOR'
+    cur.execute("DELETE FROM startupadmin.tb_teste_executor WHERE nome IN ('T9_MARCADOR', 'teste_param')")
+    cur.execute("INSERT INTO startupadmin.tb_teste_executor (id, nome) VALUES (9001, 'T9_MARCADOR')")
+    conn.commit()
+
+    # Coleta EXECUTIONS antes
     cur.execute("""
-        SELECT sql_text
+        SELECT sql_id, executions
         FROM v$sql
         WHERE sql_text LIKE '%T9_VALIDACAO_INJECTION_PARAM%'
           AND sql_text NOT LIKE '%v$sql%'
+        ORDER BY last_active_time DESC
+        FETCH FIRST 1 ROWS ONLY
     """)
-    linhas_vsql = cur.fetchall()
-    cur.close()
-    conn.close()
+    row_antes = cur.fetchone()
+    execs_antes = row_antes[1] if row_antes else 0
 
-    assert len(linhas_vsql) > 0, "Instrução não foi localizada na V$SQL do Oracle."
-    sql_text_oracle = linhas_vsql[0][0]
+    # 2. executar_script("select_param_t9", {"nome": "T9_MARCADOR"}) -> linhas_afetadas == 1
+    saida_marcador = json.loads(executar_script("select_param_t9", {"nome": "T9_MARCADOR"}))
+    assert saida_marcador["status"] == "sucesso"
+    assert saida_marcador["linhas_afetadas"] == 1
+
+    # 3. executar_script("select_param_t9", {"nome": "' OR 1=1 --"}) -> linhas_afetadas == 0
+    saida_injection = json.loads(executar_script("select_param_t9", {"nome": "' OR 1=1 --"}))
+    assert saida_injection["status"] == "sucesso"
+    assert saida_injection["linhas_afetadas"] == 0
+
+    # 4. Verificação de :nome em V$SQL como complemento
+    cur.execute("""
+        SELECT sql_id, executions, sql_text
+        FROM v$sql
+        WHERE sql_text LIKE '%T9_VALIDACAO_INJECTION_PARAM%'
+          AND sql_text NOT LIKE '%v$sql%'
+        ORDER BY last_active_time DESC
+        FETCH FIRST 1 ROWS ONLY
+    """)
+    row_depois = cur.fetchone()
+    assert row_depois is not None
+    execs_depois = row_depois[1]
+    sql_text_oracle = row_depois[2]
 
     assert ":nome" in sql_text_oracle
     assert "' OR 1=1 --" not in sql_text_oracle
+    assert execs_depois >= execs_antes + 2
+
+    cur.close()
+    conn.close()
 
 
 # =============================================================================
@@ -266,34 +296,21 @@ def test_t10_bind_com_nome_nao_declarado():
 
 
 # =============================================================================
-# T11: Usuário de leitura executando script DML -> ORA-01031 (privilégio) e nada persistido
+# T11: Script DML registrado como SELECT -> TIPO_DIVERGENTE sem conectar (E3)
 # =============================================================================
 def test_t11_usuario_leitura_executando_dml_ora_01031():
-    """T11: Usuário de leitura executando DML resulta em ORA-01031 e nada persistido."""
+    """T11: Script DML registrado como SELECT é recusado com TIPO_DIVERGENTE antes de conectar."""
     saida_str = executar_script("dml_tentativa_read_t11", {})
     resultado = json.loads(saida_str)
 
-    assert resultado["status"] == "erro"
-    assert resultado["motivo"] == "ERRO_ORACLE"
-    assert "ORA-01031" in resultado["mensagem"]
-
-    user_mut = os.getenv("ORACLE_USER_MUT") or os.getenv("ORACLE_USER")
-    pass_mut = os.getenv("ORACLE_PASSWORD_MUT") or os.getenv("ORACLE_PASSWORD")
-    dsn = os.getenv("ORACLE_DSN")
-
-    conn = oracledb.connect(user=user_mut, password=pass_mut, dsn=dsn)
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM startupadmin.tb_teste_executor WHERE id = 998")
-    count = cur.fetchone()[0]
-    cur.close()
-    conn.close()
-
-    assert count == 0, "Falha de isolamento: registro foi persistido indevidamente pelo usuário de leitura!"
+    assert resultado["status"] == "recusado"
+    assert resultado["motivo"] == "TIPO_DIVERGENTE"
 
 
 # =============================================================================
 # T12: SELECT com LOB -> truncado conforme limite
 # =============================================================================
+@pytest.mark.sandbox_only
 def test_t12_select_com_lob_truncado():
     """T12: Valida que colunas CLOB são truncadas no limite configurado com marcador."""
     saida_str = executar_script("select_lob_t12", {})
@@ -310,6 +327,7 @@ def test_t12_select_com_lob_truncado():
 # =============================================================================
 # T13: Falha no meio de DML -> rollback, sem linhas persistidas
 # =============================================================================
+@pytest.mark.sandbox_only
 def test_t13_falha_no_meio_de_dml_rollback():
     """T13: Falha no meio de DML dispara rollback imediato e nenhuma linha é persistida."""
     user_mut = os.getenv("ORACLE_USER_MUT") or os.getenv("ORACLE_USER")
@@ -356,6 +374,7 @@ def test_t14_plsql_multiplos_statements_apos_bloco():
 # =============================================================================
 # T15: BEGIN IF a THEN b := 1; END IF; c := 2; END; -> executa como um statement
 # =============================================================================
+@pytest.mark.sandbox_only
 def test_t15_plsql_com_if_interno_executa_statement_unico():
     """T15: Bloco PL/SQL com controle IF/THEN/END IF interno executa como um único statement."""
     saida_str = executar_script("plsql_if_stmt_t15", {})
@@ -368,13 +387,14 @@ def test_t15_plsql_com_if_interno_executa_statement_unico():
 # =============================================================================
 # T16: CREATE OR REPLACE PROCEDURE com IF/LOOP/CASE internos, sem '/' -> um statement
 # =============================================================================
+@pytest.mark.sandbox_only
 def test_t16_create_procedure_com_if_loop_case_internos():
     """T16: DDL com procedure contendo IF, LOOP e CASE internos executa como um statement."""
     saida_str = executar_script("procedure_complex_t16", {})
     resultado = json.loads(saida_str)
 
     assert resultado["status"] == "sucesso"
-    assert resultado["tipo"] in ("DDL", "PLSQL")
+    assert resultado["tipo"] == "PLSQL"
 
 
 # =============================================================================

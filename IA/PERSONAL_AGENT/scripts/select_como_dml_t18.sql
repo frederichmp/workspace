@@ -1,1 +1,1 @@
-SELECT 1 FROM dual
+WITH c AS (SELECT 1 FROM dual) DELETE FROM startupadmin.tb_teste_executor WHERE id = -18

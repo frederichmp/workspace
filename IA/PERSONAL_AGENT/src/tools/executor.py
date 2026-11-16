@@ -1,12 +1,13 @@
 """
-Módulo Executor Seguro de Scripts Oracle por script_id (TAREFA 1 & 1.1).
+Módulo Executor Seguro de Scripts Oracle por script_id (TAREFA 1 & 1.1 & 1.2).
 Aplica regras estritas de validação em ordem obrigatória (fail-fast sem conexão).
 O LLM nunca envia SQL bruto; executa exclusivamente scripts homologados no registro.
 
-NOTA DE GOVERNANÇA (C5):
-No Oracle Database, instruções DDL (CREATE, ALTER, DROP, TRUNCATE, etc.) realizam AUTO-COMMIT
-implícito antes e depois de sua execução pelo próprio kernel do banco de dados.
-Portanto, operações DDL são atômicas no nível de objeto e NÃO sofrem ROLLBACK.
+NOTA DE GOVERNANÇA (D5):
+No Oracle Database, DDL executa COMMIT implícito antes e depois da instrução. Portanto,
+nenhuma alteração feita antes do DDL pode ser revertida por este executor. Se um DDL falhar
+no meio de sua execução, o próprio Oracle reverte a instrução; não há rollback de múltiplas
+instruções. O executor não promete atomicidade para DDL.
 """
 
 import hashlib
@@ -186,6 +187,12 @@ def _analisar_blocos_plsql(tokens: List[Tuple[str, str]]) -> Tuple[bool, Optiona
     gera MULTIPLOS_STATEMENTS.
     Se não puder provar bloco único, recusa com PLSQL_AMBIGUO (default-deny).
     """
+    sig_words = [t[1].upper() for t in tokens if t[0] == "WORD"]
+    if sig_words and sig_words[0] == "CREATE":
+        sub = [w for w in sig_words[1:6] if w not in ("OR", "REPLACE", "EDITIONABLE", "NONEDITIONABLE")]
+        if sub and sub[0] in ("PACKAGE", "TYPE"):
+            return False, "PLSQL_AMBIGUO", f"Estrutura CREATE {sub[0]} não possui bloco único comprovável (default-deny)."
+
     stack: List[str] = []
     top_level_started = False
     top_level_closed = False
@@ -307,16 +314,92 @@ def _analisar_blocos_plsql(tokens: List[Tuple[str, str]]) -> Tuple[bool, Optiona
     return True, None, "Bloco PL/SQL único e válido comprovado."
 
 
+def verificar_diretivas_sqlplus(raw_sql: str, tokens: List[Tuple[str, str]]) -> Tuple[bool, Optional[str], str]:
+    """
+    D1: Detecta diretivas SQL*Plus apenas no início de statement e linha isolada '/':
+    - Linha contendo somente '/' (política conservadora; ver caso A28).
+    - Diretivas como primeiro token significativo de um statement:
+      * SET, PROMPT, SPOOL, COL, COLUMN, CLEAR, WHENEVER, PAUSE, DESC, DESCRIBE -> DIRETIVA_SQLPLUS
+      * START seguido de qualquer token que não seja WITH -> DIRETIVA_SQLPLUS
+      * CONNECT seguido de qualquer token que não seja BY -> DIRETIVA_SQLPLUS
+      * EXEC / EXECUTE seguido de algo que não seja BEGIN ou DECLARE -> DIRETIVA_SQLPLUS
+      * '@' ou '@@' como primeiro caractere do statement -> DIRETIVA_SQLPLUS
+    """
+    # 1. Linha contendo somente '/'
+    for num_linha, linha in enumerate(raw_sql.splitlines(), start=1):
+        if linha.strip() == "/":
+            return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Barra isolada '/' detectada."
+
+    # 2. Varredura por statements para encontrar primeiro token significativo de cada statement
+    sig_tokens = [(t_type, t_val) for t_type, t_val in tokens if t_type not in ("WHITESPACE", "COMMENT_LINE", "COMMENT_BLOCK")]
+    if not sig_tokens:
+        return True, None, ""
+
+    primeira_palavra = sig_tokens[0][1].upper() if sig_tokens[0][0] in ("WORD", "IDENT_QUOTED") else ""
+
+    # Determina se o primeiro statement é bloco PL/SQL
+    eh_plsql_raiz = primeira_palavra in ("DECLARE", "BEGIN")
+    if primeira_palavra == "CREATE":
+        sub = [t[1].upper() for t in sig_tokens[1:6] if t[0] == "WORD" and t[1].upper() not in ("OR", "REPLACE", "EDITIONABLE", "NONEDITIONABLE")]
+        if sub and sub[0] in ("PROCEDURE", "FUNCTION", "PACKAGE", "TRIGGER", "TYPE"):
+            eh_plsql_raiz = True
+
+    statement_starts = [0]
+    if not eh_plsql_raiz:
+        for idx, (t_type, t_val) in enumerate(sig_tokens):
+            if t_type == "SEMICOLON" and idx + 1 < len(sig_tokens):
+                statement_starts.append(idx + 1)
+
+    for st_idx in statement_starts:
+        if st_idx >= len(sig_tokens):
+            continue
+        t_type, t_val = sig_tokens[st_idx]
+
+        # '@' ou '@@' como primeiro caractere do statement
+        if t_type == "SYMBOL" and t_val.startswith("@"):
+            return False, "DIRETIVA_SQLPLUS", f"Diretiva de inclusão de script '{t_val}' detectada no início do statement."
+        if t_val in ("@", "@@"):
+            return False, "DIRETIVA_SQLPLUS", f"Diretiva de inclusão de script '{t_val}' detectada no início do statement."
+
+        if t_type == "WORD":
+            w = t_val.upper()
+            if w in ("SET", "PROMPT", "SPOOL", "COL", "COLUMN", "CLEAR", "WHENEVER", "PAUSE", "DESC", "DESCRIBE"):
+                return False, "DIRETIVA_SQLPLUS", f"Diretiva SQL*Plus '{w}' detectada no início do statement."
+
+            if w == "START":
+                prox = sig_tokens[st_idx + 1][1].upper() if st_idx + 1 < len(sig_tokens) and sig_tokens[st_idx + 1][0] == "WORD" else ""
+                if prox != "WITH":
+                    return False, "DIRETIVA_SQLPLUS", "Diretiva SQL*Plus 'START' detectada no início do statement."
+
+            if w == "CONNECT":
+                prox = sig_tokens[st_idx + 1][1].upper() if st_idx + 1 < len(sig_tokens) and sig_tokens[st_idx + 1][0] == "WORD" else ""
+                if prox != "BY":
+                    return False, "DIRETIVA_SQLPLUS", "Diretiva SQL*Plus 'CONNECT' detectada no início do statement."
+
+            if w in ("EXEC", "EXECUTE"):
+                prox = sig_tokens[st_idx + 1][1].upper() if st_idx + 1 < len(sig_tokens) and sig_tokens[st_idx + 1][0] == "WORD" else ""
+                if prox not in ("BEGIN", "DECLARE"):
+                    return False, "DIRETIVA_SQLPLUS", f"Diretiva SQL*Plus '{w}' sem bloco autônomo detectada no início do statement."
+
+    return True, None, ""
+
+
 def determinar_tipo_real_sql(tokens: List[Tuple[str, str]]) -> Tuple[Optional[str], Optional[str]]:
     """
-    C2: Determina o tipo real do comando SQL: SELECT, DML, DDL, PLSQL.
-    Verifica se um SELECT/WITH contém DML ou DDL de nível superior.
+    D2: Determina o tipo real do comando SQL com mapeamento fixo e igualdade exata:
+    - CREATE [OR REPLACE] PROCEDURE | FUNCTION | PACKAGE | PACKAGE BODY | TRIGGER | TYPE | TYPE BODY -> PLSQL
+    - Demais CREATE, ALTER, DROP, TRUNCATE, RENAME, COMMENT, GRANT, REVOKE, ANALYZE, AUDIT, NOAUDIT -> DDL
+    - SELECT ou WITH sem DML/DDL de nível superior -> SELECT
+    - SELECT ou WITH com DML/DDL de nível superior -> TIPO_DIVERGENTE (tipo detectado: DML/DDL)
+    - INSERT, UPDATE, DELETE, MERGE -> DML
+    - DECLARE ou BEGIN -> PLSQL
+    - Demais -> DESCONHECIDO (D3)
     """
-    palavras = [t[1].upper() for t in tokens if t[0] in ("WORD", "IDENT_QUOTED")]
-    if not palavras:
+    sig_words = [t[1].upper() for t in tokens if t[0] == "WORD"]
+    if not sig_words:
         return None, "Script vazio ou contendo apenas comentários."
 
-    primeira = palavras[0]
+    primeira = sig_words[0]
 
     if primeira in ("SELECT", "WITH"):
         paren_depth = 0
@@ -328,8 +411,10 @@ def determinar_tipo_real_sql(tokens: List[Tuple[str, str]]) -> Tuple[Optional[st
                     paren_depth = max(paren_depth - 1, 0)
             elif t_type == "WORD" and paren_depth == 0:
                 palavra_upper = t_val.upper()
-                if palavra_upper in ("INSERT", "UPDATE", "DELETE", "MERGE", "DROP", "ALTER", "CREATE", "TRUNCATE"):
-                    return "TIPO_DIVERGENTE", f"Comando SELECT contém instrução {palavra_upper} de nível superior."
+                if palavra_upper in ("INSERT", "UPDATE", "DELETE", "MERGE"):
+                    return "TIPO_DIVERGENTE", f"Comando {primeira} contém instrução DML ({palavra_upper}) de nível superior."
+                if palavra_upper in ("DROP", "ALTER", "CREATE", "TRUNCATE", "RENAME"):
+                    return "TIPO_DIVERGENTE", f"Comando {primeira} contém instrução DDL ({palavra_upper}) de nível superior."
         return "SELECT", None
 
     elif primeira in ("INSERT", "UPDATE", "DELETE", "MERGE"):
@@ -339,7 +424,7 @@ def determinar_tipo_real_sql(tokens: List[Tuple[str, str]]) -> Tuple[Optional[st
         return "PLSQL", None
 
     elif primeira == "CREATE":
-        sub = [w for w in palavras[1:6] if w not in ("OR", "REPLACE", "EDITIONABLE", "NONEDITIONABLE")]
+        sub = [w for w in sig_words[1:6] if w not in ("OR", "REPLACE", "EDITIONABLE", "NONEDITIONABLE")]
         if sub and sub[0] in ("PROCEDURE", "FUNCTION", "PACKAGE", "TRIGGER", "TYPE"):
             return "PLSQL", None
         return "DDL", None
@@ -352,43 +437,25 @@ def determinar_tipo_real_sql(tokens: List[Tuple[str, str]]) -> Tuple[Optional[st
 
 def tokenizar_e_validar_sql(raw_sql: str) -> Tuple[bool, Optional[str], str, str, str]:
     """
-    Tokeniza e valida o código SQL aplicando C1 (controle de blocos) e C2 (tipo real).
+    Tokeniza e valida o código SQL aplicando D1 (diretivas no início do statement),
+    D2 (mapeamento fixo de tipo), D3 (recusa explícita de DESCONHECIDO) e controle de statements.
     Retorna:
         (valido, codigo_motivo, mensagem_erro, sql_execucao, tipo_real_detectado)
     """
-    # 1. Verificação de Diretivas SQL*Plus por linha (SET, PROMPT, SPOOL, COL, @, /, EXEC sem bloco)
-    for num_linha, linha in enumerate(raw_sql.splitlines(), start=1):
-        strip_l = linha.strip()
-        if not strip_l:
-            continue
-
-        if strip_l == "/":
-            return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Barra isolada '/' detectada.", "", ""
-
-        if strip_l.startswith("@"):
-            return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Diretiva de script '{strip_l.split()[0]}' detectada.", "", ""
-
-        if strip_l.startswith("--"):
-            continue
-        if strip_l.startswith("/*") and strip_l.endswith("*/"):
-            continue
-
-        primeira_palavra = re.split(r"\s+", strip_l)[0].upper()
-        if primeira_palavra in SQLPLUS_DIRECTIVES:
-            return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Diretiva SQL*Plus '{primeira_palavra}' detectada.", "", ""
-
-        if primeira_palavra in ("EXEC", "EXECUTE"):
-            resto = strip_l[len(primeira_palavra):].strip().upper()
-            if not (resto.startswith("BEGIN") or resto.startswith("DECLARE")):
-                return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Diretiva 'EXEC' sem bloco detectada.", "", ""
-
-    # 2. Tokenização completa do stream
+    # 1. Tokenização completa do stream
     tokens = tokenizar_sql_stream(raw_sql)
 
-    # 3. Determinação do Tipo Real (C2)
+    # 2. Verificação de Diretivas SQL*Plus (D1)
+    valido_dir, mot_dir, msg_dir = verificar_diretivas_sqlplus(raw_sql, tokens)
+    if not valido_dir:
+        return False, mot_dir, msg_dir, "", "DIRETIVA_SQLPLUS"
+
+    # 3. Determinação do Tipo Real (D2 & D3)
     tipo_real, erro_tipo = determinar_tipo_real_sql(tokens)
-    if erro_tipo and tipo_real == "TIPO_DIVERGENTE":
-        return False, "TIPO_DIVERGENTE", erro_tipo, "", tipo_real
+    if tipo_real == "TIPO_DIVERGENTE":
+        return False, "TIPO_DIVERGENTE", erro_tipo, "", "DML"
+    if tipo_real == "DESCONHECIDO":
+        return False, "TIPO_NAO_RECONHECIDO", erro_tipo or "Tipo de comando SQL não reconhecido.", "", "DESCONHECIDO"
     if not tipo_real:
         return False, "MULTIPLOS_STATEMENTS", "Arquivo vazio ou contendo apenas comentários.", "", ""
 
@@ -486,7 +553,7 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
     8. Credenciais segregadas sem fallback (C3: ERRO_CONFIG) -> sem conectar
     9. Conexão Oracle com call_timeout configurado
     10. Execução: SELECT fetchmany(50) com LOB truncado / DML com commit e rollback em erro
-        (C5: DDL é auto-commit nativo no Oracle e não sofre rollback)
+        (D5: DDL no Oracle executa commit implícito antes e depois; não suporta rollback)
     11. Retorno JSON estruturado padronizado
     """
     # -------------------------------------------------------------------------
@@ -609,13 +676,8 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
             ensure_ascii=False,
         )
 
-    # C2: Verificação de divergência de tipo
-    # CREATE PROCEDURE/PACKAGE/FUNCTION/TRIGGER pode ser registrado como DDL ou PLSQL
-    tipo_compativel = (
-        (registro.tipo == tipo_detectado)
-        or (registro.tipo in ("DDL", "PLSQL") and tipo_detectado in ("DDL", "PLSQL"))
-    )
-    if not tipo_compativel:
+    # D2: Verificação de divergência de tipo com igualdade estrita (sem relaxamento)
+    if registro.tipo != tipo_detectado:
         return json.dumps(
             {
                 "status": "recusado",
@@ -719,7 +781,7 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
         limite_lob = int(os.getenv("ORACLE_LOB_LIMIT", str(LIMITE_PADRAO_LOB)))
 
         # ---------------------------------------------------------------------
-        # REGRA 9 (C5): Execução e Transacionalidade
+        # REGRA 9 (D5): Execução e Transacionalidade
         # ---------------------------------------------------------------------
         if registro.tipo == "SELECT":
             cursor.execute(sql_execucao, binds_validados)
@@ -805,7 +867,7 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
             )
 
         else:
-            # DDL: Auto-commit nativo do Oracle (C5)
+            # DDL: Auto-commit nativo do Oracle (D5)
             cursor.execute(sql_execucao, binds_validados)
             linhas_afetadas = max(cursor.rowcount, 0)
 
@@ -818,7 +880,7 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                     "inst_id": inst_id,
                     "tipo": registro.tipo,
                     "linhas_afetadas": linhas_afetadas,
-                    "saida": "Comando DDL executado com sucesso (auto-commit no Oracle).",
+                    "saida": "Comando DDL executado com sucesso (commit implícito no Oracle).",
                 },
                 ensure_ascii=False,
             )
