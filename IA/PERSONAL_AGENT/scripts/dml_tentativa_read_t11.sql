@@ -1,1 +1,1 @@
-INSERT INTO startupadmin.tb_teste_executor (id, nome) VALUES (998, 'readonly_attempt')
+SELECT startupadmin.fn_tentativa_dml_read() FROM dual

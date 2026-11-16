@@ -1,0 +1,77 @@
+{
+  "case01_valid_simple.sql": {
+    "is_valid": true,
+    "expected_code": null,
+    "description": "case01 valid simple"
+  },
+  "case02_valid_if_else.sql": {
+    "is_valid": true,
+    "expected_code": null,
+    "description": "case02 valid if else"
+  },
+  "case03_valid_nested_blocks.sql": {
+    "is_valid": true,
+    "expected_code": null,
+    "description": "case03 valid nested blocks"
+  },
+  "case04_valid_loop_exit.sql": {
+    "is_valid": true,
+    "expected_code": null,
+    "description": "case04 valid loop exit"
+  },
+  "case05_valid_while_loop.sql": {
+    "is_valid": true,
+    "expected_code": null,
+    "description": "case05 valid while loop"
+  },
+  "case06_valid_for_loop.sql": {
+    "is_valid": true,
+    "expected_code": null,
+    "description": "case06 valid for loop"
+  },
+  "case07_valid_case_when.sql": {
+    "is_valid": true,
+    "expected_code": null,
+    "description": "case07 valid case when"
+  },
+  "case08_valid_declare_block.sql": {
+    "is_valid": true,
+    "expected_code": null,
+    "description": "case08 valid declare block"
+  },
+  "case09_valid_end_label.sql": {
+    "is_valid": true,
+    "expected_code": null,
+    "description": "case09 valid end label"
+  },
+  "case10_valid_compound_constructs.sql": {
+    "is_valid": true,
+    "expected_code": null,
+    "description": "case10 valid compound constructs"
+  },
+  "case11_invalid_missing_endif.sql": {
+    "is_valid": false,
+    "expected_code": "PLSQL_AMBIGUO",
+    "description": "case11 invalid missing endif"
+  },
+  "case12_invalid_missing_endloop.sql": {
+    "is_valid": false,
+    "expected_code": "PLSQL_AMBIGUO",
+    "description": "case12 invalid missing endloop"
+  },
+  "case13_invalid_missing_final_end.sql": {
+    "is_valid": false,
+    "expected_code": "PLSQL_AMBIGUO",
+    "description": "case13 invalid missing final end"
+  },
+  "case14_invalid_multiple_blocks.sql": {
+    "is_valid": false,
+    "expected_code": "MULTIPLOS_STATEMENTS",
+    "description": "case14 invalid multiple blocks"
+  },
+  "case15_invalid_code_after_block.sql": {
+    "is_valid": false,
+    "expected_code": "MULTIPLOS_STATEMENTS",
+    "description": "case15 invalid code after block"
+  }
+}

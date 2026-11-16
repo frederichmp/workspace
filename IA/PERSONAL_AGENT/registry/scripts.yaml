@@ -118,7 +118,63 @@ scripts:
 
   - script_id: dml_tentativa_read_t11
     arquivo: dml_tentativa_read_t11.sql
-    sha256: "1d5f0a70f17b95ab2bad38361d6e85efa2742a2aa3439b16c86c1e95b9d650d1"
+    sha256: "8e090aedac851979974da332a12f7c0e4836df335797f6dfa2e4b2efa17048f3"
+    tipo: SELECT
+    risco: baixo
+    status: homologado
+    binds: []
+
+  - script_id: plsql_multi_t14
+    arquivo: plsql_multi_t14.sql
+    sha256: "c0c910e9584038f5b682faff8b9252a2e91ca906d38e52989c6a750dc7f8e835"
+    tipo: PLSQL
+    risco: medio
+    status: homologado
+    binds: []
+
+  - script_id: plsql_if_stmt_t15
+    arquivo: plsql_if_stmt_t15.sql
+    sha256: "f99a3806a62eb06e0629f99148da660c29a6bdab3685275c3f7996c498cde465"
+    tipo: PLSQL
+    risco: medio
+    status: homologado
+    binds: []
+
+  - script_id: procedure_complex_t16
+    arquivo: procedure_complex_t16.sql
+    sha256: "fd68149e98ad9a4ac496469eadbcb186b96790c80287409292ae3a81fa6431ef"
+    tipo: DDL
+    risco: alto
+    status: homologado
+    binds: []
+
+  - script_id: path_traversal_parent_t17
+    arquivo: "../secret.sql"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    tipo: SELECT
+    risco: alto
+    status: homologado
+    binds: []
+
+  - script_id: path_traversal_abs_t17
+    arquivo: "C:/secret.sql"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    tipo: SELECT
+    risco: alto
+    status: homologado
+    binds: []
+
+  - script_id: select_como_dml_t18
+    arquivo: select_como_dml_t18.sql
+    sha256: "3d49728aba5d2f3ffd91c23ea3fb884f0de3d3ef847f02e3c5e3848f79aa5c0f"
+    tipo: DML
+    risco: medio
+    status: homologado
+    binds: []
+
+  - script_id: dml_como_select_t18
+    arquivo: dml_como_select_t18.sql
+    sha256: "272353ccf1c95086d031005e72a6ecc4036c3367d7e92c68ef161909e1315823"
     tipo: SELECT
     risco: baixo
     status: homologado

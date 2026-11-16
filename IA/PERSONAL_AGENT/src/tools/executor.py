@@ -1,7 +1,12 @@
 """
-Módulo Executor Seguro de Scripts Oracle por script_id (TAREFA 1).
-Aplica 9 regras de validação estritas em ordem obrigatória.
+Módulo Executor Seguro de Scripts Oracle por script_id (TAREFA 1 & 1.1).
+Aplica regras estritas de validação em ordem obrigatória (fail-fast sem conexão).
 O LLM nunca envia SQL bruto; executa exclusivamente scripts homologados no registro.
+
+NOTA DE GOVERNANÇA (C5):
+No Oracle Database, instruções DDL (CREATE, ALTER, DROP, TRUNCATE, etc.) realizam AUTO-COMMIT
+implícito antes e depois de sua execução pelo próprio kernel do banco de dados.
+Portanto, operações DDL são atômicas no nível de objeto e NÃO sofrem ROLLBACK.
 """
 
 import hashlib
@@ -28,7 +33,7 @@ env_personal_agent = Path(__file__).resolve().parent.parent.parent / ".env"
 if env_personal_agent.is_file():
     load_dotenv(dotenv_path=env_personal_agent, override=False)
 
-# Constantes e Diretivas SQL*Plus a recusar
+# Constantes e Diretivas SQL*Plus a recusar terminantemente
 SQLPLUS_DIRECTIVES = {
     "SET", "PROMPT", "SPOOL", "COL", "COLUMN", "CLEAR",
     "@", "@@", "START", "WHENEVER", "PAUSE", "CONNECT",
@@ -48,7 +53,6 @@ def _serializar_valor(valor: Any, limite_lob: int = LIMITE_PADRAO_LOB) -> Any:
     if isinstance(valor, Decimal):
         return float(valor) if "." in str(valor) else int(valor)
     if hasattr(valor, "read"):
-        # Leitura de LOB (CLOB/BLOB/NCLOB)
         try:
             conteudo = valor.read()
             if isinstance(conteudo, bytes):
@@ -63,46 +67,8 @@ def _serializar_valor(valor: Any, limite_lob: int = LIMITE_PADRAO_LOB) -> Any:
     return valor
 
 
-def tokenizar_e_validar_sql(raw_sql: str) -> Tuple[bool, Optional[str], str, str]:
-    """
-    Tokeniza o código SQL bruto, inspeciona comentários, literais de string (incluindo q'[...]'),
-    aspas duplas, diretivas SQL*Plus e contagem de statements.
-
-    Retorna:
-        (valido, codigo_motivo, mensagem_erro, sql_pronto_para_execucao)
-        codigo_motivo pode ser 'DIRETIVA_SQLPLUS', 'MULTIPLOS_STATEMENTS' ou None.
-    """
-    # 1. Verificação de Diretivas SQL*Plus por linha (SET, PROMPT, SPOOL, COL, @, /, EXEC sem bloco)
-    for num_linha, linha in enumerate(raw_sql.splitlines(), start=1):
-        strip_l = linha.strip()
-        if not strip_l:
-            continue
-
-        # Barra isolada '/'
-        if strip_l == "/":
-            return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Barra isolada '/' detectada.", ""
-
-        # Diretiva de script externo (@ ou @@)
-        if strip_l.startswith("@"):
-            return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Diretiva de inclusão de script '{strip_l.split()[0]}' detectada.", ""
-
-        # Comentários de linha isolados
-        if strip_l.startswith("--"):
-            continue
-        if strip_l.startswith("/*") and strip_l.endswith("*/"):
-            continue
-
-        primeira_palavra = re.split(r"\s+", strip_l)[0].upper()
-        if primeira_palavra in SQLPLUS_DIRECTIVES:
-            return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Diretiva SQL*Plus '{primeira_palavra}' detectada.", ""
-
-        # EXEC sem bloco BEGIN/DECLARE
-        if primeira_palavra in ("EXEC", "EXECUTE"):
-            resto = strip_l[len(primeira_palavra):].strip().upper()
-            if not (resto.startswith("BEGIN") or resto.startswith("DECLARE")):
-                return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Diretiva SQL*Plus 'EXEC' sem bloco autônomo detectada.", ""
-
-    # 2. Tokenização completa respeitando comentários, literais normais e literais Q
+def tokenizar_sql_stream(raw_sql: str) -> List[Tuple[str, str]]:
+    """Tokeniza SQL preservando strings, strings Q, identificadores e comentários."""
     i = 0
     n = len(raw_sql)
     tokens: List[Tuple[str, str]] = []
@@ -132,7 +98,7 @@ def tokenizar_e_validar_sql(raw_sql: str) -> Tuple[bool, Optional[str], str, str
         # Literal Q: q'[...]', Q'(...)' etc.
         if c in ("q", "Q") and i + 1 < n and raw_sql[i + 1] == "'":
             start = i
-            i += 2  # pula q'
+            i += 2
             if i < n:
                 open_delim = raw_sql[i]
                 close_delim = {"[": "]", "{": "}", "(": ")", "<": ">"}.get(open_delim, open_delim)
@@ -152,7 +118,7 @@ def tokenizar_e_validar_sql(raw_sql: str) -> Tuple[bool, Optional[str], str, str
             while i < n:
                 if raw_sql[i] == "'":
                     if i + 1 < n and raw_sql[i + 1] == "'":
-                        i += 2  # aspas duplicadas '' escapadas
+                        i += 2
                         continue
                     i += 1
                     break
@@ -183,7 +149,7 @@ def tokenizar_e_validar_sql(raw_sql: str) -> Tuple[bool, Optional[str], str, str
             tokens.append(("WHITESPACE", raw_sql[start:i]))
             continue
 
-        # Ponto e vírgula fora de strings e comentários
+        # Ponto e vírgula
         if c == ";":
             tokens.append(("SEMICOLON", ";"))
             i += 1
@@ -203,81 +169,249 @@ def tokenizar_e_validar_sql(raw_sql: str) -> Tuple[bool, Optional[str], str, str
             tokens.append(("WORD", raw_sql[start:i]))
             continue
 
-        # Símbolos avulsos (: , ( ) + - = etc.)
+        # Símbolos avulsos
         tokens.append(("SYMBOL", c))
         i += 1
 
-    # Extrai palavras de código fora de comentários para avaliar estrutura
-    palavras_codigo: List[str] = []
-    for t_type, t_val in tokens:
-        if t_type in ("WORD", "IDENT_QUOTED"):
-            palavras_codigo.append(t_val.upper())
+    return tokens
 
-    if not palavras_codigo:
-        return False, "MULTIPLOS_STATEMENTS", "Arquivo vazio ou contendo apenas comentários.", ""
 
-    primeira_palavra = palavras_codigo[0]
+def _analisar_blocos_plsql(tokens: List[Tuple[str, str]]) -> Tuple[bool, Optional[str], str]:
+    """
+    C1: Controle estrito de blocos PL/SQL com pilha de contexto.
+    Aberturas: BEGIN, DECLARE, CASE, IF, LOOP
+    Fechamentos: END, END IF, END LOOP, END CASE
+    
+    Após fechamento do bloco superior, qualquer token que não seja espaço, comentário ou ';'
+    gera MULTIPLOS_STATEMENTS.
+    Se não puder provar bloco único, recusa com PLSQL_AMBIGUO (default-deny).
+    """
+    stack: List[str] = []
+    top_level_started = False
+    top_level_closed = False
 
-    # Verifica se é bloco PL/SQL ou DDL de Procedure/Function/Package/Trigger/Type
-    eh_plsql = False
-    if primeira_palavra in ("DECLARE", "BEGIN"):
-        eh_plsql = True
-    elif primeira_palavra == "CREATE":
-        sub_palavras = [w for w in palavras_codigo[1:6] if w not in ("OR", "REPLACE", "EDITIONABLE", "NONEDITIONABLE")]
-        if sub_palavras and sub_palavras[0] in ("PROCEDURE", "FUNCTION", "PACKAGE", "TRIGGER", "TYPE"):
-            eh_plsql = True
+    i = 0
+    num_tokens = len(tokens)
 
-    if eh_plsql:
-        # Validação de Bloco PL/SQL único:
-        # Rastreia profundidade do bloco com BEGIN/CASE vs END
-        depth = 0
-        iniciou_bloco = False
-        bloco_fechado = False
-        tokens_apos_bloco: List[Tuple[str, str]] = []
+    while i < num_tokens:
+        t_type, t_val = tokens[i]
 
+        if top_level_closed:
+            # Qualquer token pós-fechamento que não seja espaço, comentário ou ';' é MULTIPLOS_STATEMENTS
+            if t_type not in ("WHITESPACE", "COMMENT_LINE", "COMMENT_BLOCK", "SEMICOLON"):
+                return False, "MULTIPLOS_STATEMENTS", f"Instrução ou token extra detectado após o término do bloco: '{t_val}'"
+            i += 1
+            continue
+
+        if t_type != "WORD":
+            i += 1
+            continue
+
+        word = t_val.upper()
+
+        if word == "DECLARE":
+            top_level_started = True
+            if stack and stack[-1] == "DECLARE":
+                return False, "PLSQL_AMBIGUO", "Múltiplas cláusulas DECLARE consecutivas sem bloco."
+            stack.append("DECLARE")
+            i += 1
+            continue
+
+        elif word == "BEGIN":
+            top_level_started = True
+            if stack and stack[-1] == "DECLARE":
+                stack[-1] = "BEGIN"
+            else:
+                stack.append("BEGIN")
+            i += 1
+            continue
+
+        elif word == "IF":
+            if not top_level_started:
+                return False, "PLSQL_AMBIGUO", "IF encontrado fora de bloco PL/SQL principal."
+            stack.append("IF")
+            i += 1
+            continue
+
+        elif word == "LOOP":
+            if not top_level_started:
+                return False, "PLSQL_AMBIGUO", "LOOP encontrado fora de bloco PL/SQL principal."
+            stack.append("LOOP")
+            i += 1
+            continue
+
+        elif word == "CASE":
+            if not top_level_started:
+                return False, "PLSQL_AMBIGUO", "CASE encontrado fora de bloco PL/SQL principal."
+            stack.append("CASE")
+            i += 1
+            continue
+
+        elif word == "END":
+            if not stack:
+                return False, "PLSQL_AMBIGUO", "Palavra-chave END encontrada sem abertura correspondente."
+
+            # Verifica próximo token de palavra para identificar END IF, END LOOP, END CASE
+            j = i + 1
+            prox_palavra = None
+            prox_palavra_idx = -1
+            while j < num_tokens:
+                if tokens[j][0] == "WORD":
+                    prox_palavra = tokens[j][1].upper()
+                    prox_palavra_idx = j
+                    break
+                elif tokens[j][0] in ("SEMICOLON", "SYMBOL"):
+                    break
+                j += 1
+
+            if prox_palavra == "IF":
+                if stack[-1] != "IF":
+                    return False, "PLSQL_AMBIGUO", f"END IF encontrado mas bloco atual no topo é {stack[-1]}."
+                stack.pop()
+                i = prox_palavra_idx + 1
+            elif prox_palavra == "LOOP":
+                if stack[-1] != "LOOP":
+                    return False, "PLSQL_AMBIGUO", f"END LOOP encontrado mas bloco atual no topo é {stack[-1]}."
+                stack.pop()
+                i = prox_palavra_idx + 1
+            elif prox_palavra == "CASE":
+                if stack[-1] != "CASE":
+                    return False, "PLSQL_AMBIGUO", f"END CASE encontrado mas bloco atual no topo é {stack[-1]}."
+                stack.pop()
+                i = prox_palavra_idx + 1
+            else:
+                # END comum (fecha BEGIN ou CASE sem palavra CASE)
+                if stack[-1] in ("BEGIN", "CASE"):
+                    stack.pop()
+                    if prox_palavra is not None and prox_palavra not in ("IF", "LOOP", "CASE"):
+                        # Rótulo ou nome de rotina opcional (ex: END pr_nome; ou END bloco;)
+                        i = prox_palavra_idx + 1
+                    else:
+                        i += 1
+                else:
+                    return False, "PLSQL_AMBIGUO", f"END encontrado para fechar bloco {stack[-1]} sem a devida terminação."
+
+            if top_level_started and len(stack) == 0:
+                top_level_closed = True
+            continue
+
+        i += 1
+
+    if not top_level_started:
+        return False, "PLSQL_AMBIGUO", "Nenhum bloco PL/SQL foi iniciado."
+    if stack:
+        return False, "PLSQL_AMBIGUO", f"Bloco PL/SQL não finalizado. Pilha remanescente: {stack}"
+    if not top_level_closed:
+        return False, "PLSQL_AMBIGUO", "Bloco PL/SQL não pôde ser comprovado como unitário."
+
+    return True, None, "Bloco PL/SQL único e válido comprovado."
+
+
+def determinar_tipo_real_sql(tokens: List[Tuple[str, str]]) -> Tuple[Optional[str], Optional[str]]:
+    """
+    C2: Determina o tipo real do comando SQL: SELECT, DML, DDL, PLSQL.
+    Verifica se um SELECT/WITH contém DML ou DDL de nível superior.
+    """
+    palavras = [t[1].upper() for t in tokens if t[0] in ("WORD", "IDENT_QUOTED")]
+    if not palavras:
+        return None, "Script vazio ou contendo apenas comentários."
+
+    primeira = palavras[0]
+
+    if primeira in ("SELECT", "WITH"):
+        paren_depth = 0
         for t_type, t_val in tokens:
-            word = t_val.upper() if t_type == "WORD" else ""
-            if word in ("BEGIN", "CASE"):
-                if bloco_fechado:
-                    return False, "MULTIPLOS_STATEMENTS", "Segundo bloco PL/SQL iniciado no mesmo arquivo.", ""
-                depth += 1
-                iniciou_bloco = True
-            elif word == "END":
-                depth -= 1
-                if depth == 0:
-                    bloco_fechado = True
-            elif bloco_fechado:
-                if t_type == "SEMICOLON":
-                    continue  # Ponto e vírgula que fecha o END;
-                if t_type == "WORD" and depth == 0:
-                    # Rótulo de fechamento após END (ex: END nome_proc;)
-                    continue
-                if t_type not in ("WHITESPACE", "COMMENT_LINE", "COMMENT_BLOCK"):
-                    tokens_apos_bloco.append((t_type, t_val))
+            if t_type == "SYMBOL":
+                if t_val == "(":
+                    paren_depth += 1
+                elif t_val == ")":
+                    paren_depth = max(paren_depth - 1, 0)
+            elif t_type == "WORD" and paren_depth == 0:
+                palavra_upper = t_val.upper()
+                if palavra_upper in ("INSERT", "UPDATE", "DELETE", "MERGE", "DROP", "ALTER", "CREATE", "TRUNCATE"):
+                    return "TIPO_DIVERGENTE", f"Comando SELECT contém instrução {palavra_upper} de nível superior."
+        return "SELECT", None
 
-        if tokens_apos_bloco:
-            return (
-                False,
-                "MULTIPLOS_STATEMENTS",
-                f"Múltiplos statements detectados após o fechamento do bloco PL/SQL: {[t[1] for t in tokens_apos_bloco]}",
-                "",
-            )
+    elif primeira in ("INSERT", "UPDATE", "DELETE", "MERGE"):
+        return "DML", None
+
+    elif primeira in ("DECLARE", "BEGIN"):
+        return "PLSQL", None
+
+    elif primeira == "CREATE":
+        sub = [w for w in palavras[1:6] if w not in ("OR", "REPLACE", "EDITIONABLE", "NONEDITIONABLE")]
+        if sub and sub[0] in ("PROCEDURE", "FUNCTION", "PACKAGE", "TRIGGER", "TYPE"):
+            return "PLSQL", None
+        return "DDL", None
+
+    elif primeira in ("ALTER", "DROP", "TRUNCATE", "RENAME", "COMMENT", "GRANT", "REVOKE", "ANALYZE", "AUDIT", "NOAUDIT"):
+        return "DDL", None
+
+    return "DESCONHECIDO", f"Comando com início '{primeira}' não categorizado."
+
+
+def tokenizar_e_validar_sql(raw_sql: str) -> Tuple[bool, Optional[str], str, str, str]:
+    """
+    Tokeniza e valida o código SQL aplicando C1 (controle de blocos) e C2 (tipo real).
+    Retorna:
+        (valido, codigo_motivo, mensagem_erro, sql_execucao, tipo_real_detectado)
+    """
+    # 1. Verificação de Diretivas SQL*Plus por linha (SET, PROMPT, SPOOL, COL, @, /, EXEC sem bloco)
+    for num_linha, linha in enumerate(raw_sql.splitlines(), start=1):
+        strip_l = linha.strip()
+        if not strip_l:
+            continue
+
+        if strip_l == "/":
+            return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Barra isolada '/' detectada.", "", ""
+
+        if strip_l.startswith("@"):
+            return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Diretiva de script '{strip_l.split()[0]}' detectada.", "", ""
+
+        if strip_l.startswith("--"):
+            continue
+        if strip_l.startswith("/*") and strip_l.endswith("*/"):
+            continue
+
+        primeira_palavra = re.split(r"\s+", strip_l)[0].upper()
+        if primeira_palavra in SQLPLUS_DIRECTIVES:
+            return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Diretiva SQL*Plus '{primeira_palavra}' detectada.", "", ""
+
+        if primeira_palavra in ("EXEC", "EXECUTE"):
+            resto = strip_l[len(primeira_palavra):].strip().upper()
+            if not (resto.startswith("BEGIN") or resto.startswith("DECLARE")):
+                return False, "DIRETIVA_SQLPLUS", f"Linha {num_linha}: Diretiva 'EXEC' sem bloco detectada.", "", ""
+
+    # 2. Tokenização completa do stream
+    tokens = tokenizar_sql_stream(raw_sql)
+
+    # 3. Determinação do Tipo Real (C2)
+    tipo_real, erro_tipo = determinar_tipo_real_sql(tokens)
+    if erro_tipo and tipo_real == "TIPO_DIVERGENTE":
+        return False, "TIPO_DIVERGENTE", erro_tipo, "", tipo_real
+    if not tipo_real:
+        return False, "MULTIPLOS_STATEMENTS", "Arquivo vazio ou contendo apenas comentários.", "", ""
+
+    # 4. Validação Estrutural de Statements (C1 para PLSQL / Detecção em SQL comum)
+    if tipo_real == "PLSQL":
+        valido_plsql, motivo_plsql, msg_plsql = _analisar_blocos_plsql(tokens)
+        if not valido_plsql:
+            return False, motivo_plsql, msg_plsql, "", tipo_real
 
         sql_limpo = raw_sql.strip()
         if not sql_limpo.endswith(";"):
             sql_limpo += ";"
-        return True, None, "", sql_limpo
+        return True, None, "", sql_limpo, tipo_real
 
     else:
-        # Validação de Statement SQL Único (SELECT, INSERT, UPDATE, DELETE, etc.)
-        # Ponto e vírgula só é permitido no final absoluto do comando
+        # SQL comum (SELECT, DML, DDL tradicional)
         ja_viu_ponto_e_virgula = False
         tokens_apos_delimitador = False
 
         for t_type, t_val in tokens:
             if t_type == "SEMICOLON":
                 if ja_viu_ponto_e_virgula:
-                    return False, "MULTIPLOS_STATEMENTS", "Múltiplos delimitadores ';' detectados em SQL comum.", ""
+                    return False, "MULTIPLOS_STATEMENTS", "Múltiplos delimitadores ';' detectados em SQL comum.", "", tipo_real
                 ja_viu_ponto_e_virgula = True
             elif ja_viu_ponto_e_virgula:
                 if t_type not in ("WHITESPACE", "COMMENT_LINE", "COMMENT_BLOCK"):
@@ -285,23 +419,20 @@ def tokenizar_e_validar_sql(raw_sql: str) -> Tuple[bool, Optional[str], str, str
                     break
 
         if tokens_apos_delimitador:
-            return False, "MULTIPLOS_STATEMENTS", "Múltiplos statements SQL separados por ';' detectados.", ""
+            return False, "MULTIPLOS_STATEMENTS", "Múltiplos statements SQL separados por ';' detectados.", "", tipo_real
 
         sql_limpo = raw_sql.strip()
         if sql_limpo.endswith(";"):
             sql_limpo = sql_limpo[:-1].rstrip()
 
-        return True, None, "", sql_limpo
+        return True, None, "", sql_limpo, tipo_real
 
 
 def _validar_binds(
     binds_declarados: List[Any],
     binds_fornecidos: Optional[Dict[str, Any]],
 ) -> Tuple[bool, Optional[str], Dict[str, Any]]:
-    """
-    Valida se os parâmetros nomeados passados batem exatamente com o registro homologado.
-    Recusa se houver bind extra ou faltante.
-    """
+    """Valida correspondência exata de binds nomeados em relação ao registro homologado."""
     binds_input = binds_fornecidos or {}
     nomes_declarados = {b.nome for b in binds_declarados}
     nomes_recebidos = set(binds_input.keys())
@@ -316,7 +447,6 @@ def _validar_binds(
             msg_erro.append(f"Binds extras não declarados: {sorted(extras)}")
         return False, "; ".join(msg_erro), {}
 
-    # Conversão/validação de tipos básicos
     binds_processados: Dict[str, Any] = {}
     for def_b in binds_declarados:
         val = binds_input[def_b.nome]
@@ -343,18 +473,21 @@ def _validar_binds(
 
 def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> str:
     """
-    Executa um script Oracle homologado a partir de seu script_id e binds declarados.
+    Executa um script Oracle homologado por script_id e binds declarados.
     
-    Aplica as 9 regras obrigatórias:
+    Aplica ordem obrigatória de regras:
     1. Existência no registro (NAO_EXISTE) -> sem conectar
     2. Status homologado (BLOQUEADO) -> sem conectar
-    3. Validação de SHA256 dos bytes brutos (HASH_DIVERGENTE) -> sem conectar
-    4. Tokenização (MULTIPLOS_STATEMENTS / DIRETIVA_SQLPLUS) -> sem conectar
-    5. Validação exata de binds declarados (BIND_INVALIDO) -> sem conectar
-    6. Conexão segregada por tipo (ORACLE_USER_READ vs ORACLE_USER_MUT)
-    7. Configuração de call_timeout na conexão
-    8. Execução: SELECT fetchmany(50) com LOB truncado / DML com commit e rollback em erro
-    9. Retorno estruturado em JSON padronizado
+    3. Validação de Path Traversal (C4) resolve() e is_relative_to (PATH_INVALIDO) -> sem ler, sem conectar
+    4. Validação de SHA256 dos bytes brutos (HASH_DIVERGENTE) -> sem conectar
+    5. Tokenização estrita (C1: controle de blocos PL/SQL, MULTIPLOS_STATEMENTS, PLSQL_AMBIGUO, DIRETIVA_SQLPLUS)
+    6. Verificação de Tipo (C2: TIPO_DIVERGENTE) -> sem conectar
+    7. Validação estrita de binds declarados (BIND_INVALIDO) -> sem conectar
+    8. Credenciais segregadas sem fallback (C3: ERRO_CONFIG) -> sem conectar
+    9. Conexão Oracle com call_timeout configurado
+    10. Execução: SELECT fetchmany(50) com LOB truncado / DML com commit e rollback em erro
+        (C5: DDL é auto-commit nativo no Oracle e não sofre rollback)
+    11. Retorno JSON estruturado padronizado
     """
     # -------------------------------------------------------------------------
     # REGRA 1: script_id não existe no registro -> recusar, sem conectar
@@ -388,9 +521,38 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
         )
 
     # -------------------------------------------------------------------------
-    # REGRA 3: Calcular sha256 do arquivo; diferente do registro -> recusar, sem conectar
+    # REGRA 3 (C4): Campo arquivo: resolve() e is_relative_to(scripts_dir)
+    # Bloqueia ../ e caminhos absolutos antes de qualquer leitura de arquivo
     # -------------------------------------------------------------------------
-    caminho_arquivo = obter_caminho_scripts_dir() / registro.arquivo
+    scripts_dir = obter_caminho_scripts_dir().resolve()
+    try:
+        caminho_arquivo = (scripts_dir / registro.arquivo).resolve()
+        if not caminho_arquivo.is_relative_to(scripts_dir) or caminho_arquivo == scripts_dir:
+            return json.dumps(
+                {
+                    "status": "recusado",
+                    "motivo": "PATH_INVALIDO",
+                    "script_id": script_id,
+                    "sha256_verificado": None,
+                    "mensagem": (
+                        f"Caminho do arquivo '{registro.arquivo}' tenta acessar diretório externo "
+                        f"a '{scripts_dir}'."
+                    ),
+                },
+                ensure_ascii=False,
+            )
+    except Exception as e:
+        return json.dumps(
+            {
+                "status": "recusado",
+                "motivo": "PATH_INVALIDO",
+                "script_id": script_id,
+                "sha256_verificado": None,
+                "mensagem": f"Falha na validação do caminho do arquivo: {str(e)}",
+            },
+            ensure_ascii=False,
+        )
+
     if not caminho_arquivo.is_file():
         return json.dumps(
             {
@@ -398,11 +560,14 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                 "motivo": "HASH_DIVERGENTE",
                 "script_id": script_id,
                 "sha256_verificado": None,
-                "mensagem": f"Arquivo físico '{registro.arquivo}' não encontrado no diretório de scripts.",
+                "mensagem": f"Arquivo físico '{registro.arquivo}' não encontrado.",
             },
             ensure_ascii=False,
         )
 
+    # -------------------------------------------------------------------------
+    # REGRA 4: Calcular sha256 dos bytes brutos
+    # -------------------------------------------------------------------------
     with open(caminho_arquivo, "rb") as f:
         bytes_brutos = f.read()
     sha256_calculado = hashlib.sha256(bytes_brutos).hexdigest()
@@ -424,15 +589,14 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
         )
 
     # -------------------------------------------------------------------------
-    # REGRA 4: Tokenizar o arquivo (respeitar literais, comentários, aspas)
-    # Recusar se múltiplos statements ou diretiva SQL*Plus -> sem conectar
+    # REGRA 5 (C1 & C2): Tokenização, verificação de tipo e análise de blocos
     # -------------------------------------------------------------------------
     try:
         conteudo_sql = bytes_brutos.decode("utf-8")
     except UnicodeDecodeError:
         conteudo_sql = bytes_brutos.decode("latin-1", errors="replace")
 
-    valido, cod_motivo, msg_erro, sql_execucao = tokenizar_e_validar_sql(conteudo_sql)
+    valido, cod_motivo, msg_erro, sql_execucao, tipo_detectado = tokenizar_e_validar_sql(conteudo_sql)
     if not valido:
         return json.dumps(
             {
@@ -445,8 +609,31 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
             ensure_ascii=False,
         )
 
+    # C2: Verificação de divergência de tipo
+    # CREATE PROCEDURE/PACKAGE/FUNCTION/TRIGGER pode ser registrado como DDL ou PLSQL
+    tipo_compativel = (
+        (registro.tipo == tipo_detectado)
+        or (registro.tipo in ("DDL", "PLSQL") and tipo_detectado in ("DDL", "PLSQL"))
+    )
+    if not tipo_compativel:
+        return json.dumps(
+            {
+                "status": "recusado",
+                "motivo": "TIPO_DIVERGENTE",
+                "script_id": script_id,
+                "sha256_verificado": sha256_calculado,
+                "tipo_declarado": registro.tipo,
+                "tipo_detectado": tipo_detectado,
+                "mensagem": (
+                    f"Tipo declarado no registro ({registro.tipo}) diverge do tipo real "
+                    f"detectado no código ({tipo_detectado})."
+                ),
+            },
+            ensure_ascii=False,
+        )
+
     # -------------------------------------------------------------------------
-    # REGRA 5: Binds nomeados oracledb; coincidir estritamente com o registro -> recusar
+    # REGRA 6: Validação de Binds
     # -------------------------------------------------------------------------
     binds_ok, msg_binds, binds_validados = _validar_binds(registro.binds, binds)
     if not binds_ok:
@@ -462,56 +649,78 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
         )
 
     # -------------------------------------------------------------------------
-    # REGRA 6: Usuário Oracle pelo tipo: SELECT -> ORACLE_USER_READ; demais -> ORACLE_USER_MUT
+    # REGRA 7 (C3): Sem fallback de credenciais -> ERRO_CONFIG
     # -------------------------------------------------------------------------
     if registro.tipo == "SELECT":
-        user = os.getenv("ORACLE_USER_READ") or os.getenv("ORACLE_USER")
-        password = os.getenv("ORACLE_PASSWORD_READ") or os.getenv("ORACLE_PASSWORD")
+        user = os.getenv("ORACLE_USER_READ")
+        password = os.getenv("ORACLE_PASSWORD_READ")
+        if not user or not password:
+            return json.dumps(
+                {
+                    "status": "recusado",
+                    "motivo": "ERRO_CONFIG",
+                    "script_id": script_id,
+                    "sha256_verificado": sha256_calculado,
+                    "mensagem": (
+                        "Configuração incompleta: ORACLE_USER_READ ou ORACLE_PASSWORD_READ "
+                        "não configurados no ambiente (.env)."
+                    ),
+                },
+                ensure_ascii=False,
+            )
     else:
-        user = os.getenv("ORACLE_USER_MUT") or os.getenv("ORACLE_USER")
-        password = os.getenv("ORACLE_PASSWORD_MUT") or os.getenv("ORACLE_PASSWORD")
+        user = os.getenv("ORACLE_USER_MUT")
+        password = os.getenv("ORACLE_PASSWORD_MUT")
+        if not user or not password:
+            return json.dumps(
+                {
+                    "status": "recusado",
+                    "motivo": "ERRO_CONFIG",
+                    "script_id": script_id,
+                    "sha256_verificado": sha256_calculado,
+                    "mensagem": (
+                        "Configuração incompleta: ORACLE_USER_MUT ou ORACLE_PASSWORD_MUT "
+                        "não configurados no ambiente (.env)."
+                    ),
+                },
+                ensure_ascii=False,
+            )
 
     dsn = os.getenv("ORACLE_DSN")
-
-    if not all([user, password, dsn]):
+    if not dsn:
         return json.dumps(
             {
-                "status": "erro",
-                "motivo": "ERRO_ORACLE",
+                "status": "recusado",
+                "motivo": "ERRO_CONFIG",
                 "script_id": script_id,
                 "sha256_verificado": sha256_calculado,
-                "instancia": dsn or "NAO_CONFIGURADO",
-                "mensagem": "Credenciais do Oracle incompletas no arquivo de configuração (.env).",
+                "mensagem": "Configuração incompleta: ORACLE_DSN não configurado no ambiente (.env).",
             },
             ensure_ascii=False,
         )
 
+    # -------------------------------------------------------------------------
+    # REGRA 8: Conexão com o banco e call_timeout
+    # -------------------------------------------------------------------------
     connection: Optional[oracledb.Connection] = None
     cursor: Optional[oracledb.Cursor] = None
 
     try:
-        # Abertura da conexão com o banco
         connection = oracledb.connect(user=user, password=password, dsn=dsn)
-
-        # ---------------------------------------------------------------------
-        # REGRA 7: Conexão com call_timeout definido em configuração
-        # ---------------------------------------------------------------------
         call_timeout_ms = int(os.getenv("ORACLE_CALL_TIMEOUT_MS", "30000"))
         connection.call_timeout = call_timeout_ms
 
         cursor = connection.cursor()
-
-        # Coleta ID da instância Oracle via contexto nativo
         cursor.execute("SELECT SYS_CONTEXT('USERENV', 'INSTANCE') FROM dual")
         row_inst = cursor.fetchone()
         inst_id = str(row_inst[0]) if row_inst and row_inst[0] is not None else "1"
 
-        # ---------------------------------------------------------------------
-        # REGRA 8: Execução (SELECT fetchmany / DML commit e rollback em exceção)
-        # ---------------------------------------------------------------------
         limite_select = int(os.getenv("ORACLE_SELECT_LIMIT", str(LIMITE_PADRAO_SELECT)))
         limite_lob = int(os.getenv("ORACLE_LOB_LIMIT", str(LIMITE_PADRAO_LOB)))
 
+        # ---------------------------------------------------------------------
+        # REGRA 9 (C5): Execução e Transacionalidade
+        # ---------------------------------------------------------------------
         if registro.tipo == "SELECT":
             cursor.execute(sql_execucao, binds_validados)
             colunas = [col[0].lower() for col in cursor.description]
@@ -524,9 +733,6 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                     registro_map[col_nome] = _serializar_valor(val, limite_lob=limite_lob)
                 registros_saida.append(registro_map)
 
-            # -----------------------------------------------------------------
-            # REGRA 9: Retorno JSON estruturado de sucesso para SELECT
-            # -----------------------------------------------------------------
             return json.dumps(
                 {
                     "status": "sucesso",
@@ -542,7 +748,6 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
             )
 
         elif registro.tipo == "PLSQL":
-            # Habilita captura de DBMS_OUTPUT para blocos PL/SQL
             try:
                 cursor.callproc("dbms_output.enable", [None])
             except Exception:
@@ -580,8 +785,7 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                 ensure_ascii=False,
             )
 
-        else:
-            # DML ou DDL
+        elif registro.tipo == "DML":
             cursor.execute(sql_execucao, binds_validados)
             connection.commit()
             linhas_afetadas = max(cursor.rowcount, 0)
@@ -595,7 +799,26 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                     "inst_id": inst_id,
                     "tipo": registro.tipo,
                     "linhas_afetadas": linhas_afetadas,
-                    "saida": f"Comando {registro.tipo} executado e commit realizado com sucesso.",
+                    "saida": "Comando DML executado e commit realizado com sucesso.",
+                },
+                ensure_ascii=False,
+            )
+
+        else:
+            # DDL: Auto-commit nativo do Oracle (C5)
+            cursor.execute(sql_execucao, binds_validados)
+            linhas_afetadas = max(cursor.rowcount, 0)
+
+            return json.dumps(
+                {
+                    "status": "sucesso",
+                    "script_id": script_id,
+                    "sha256_verificado": sha256_calculado,
+                    "instancia": dsn,
+                    "inst_id": inst_id,
+                    "tipo": registro.tipo,
+                    "linhas_afetadas": linhas_afetadas,
+                    "saida": "Comando DDL executado com sucesso (auto-commit no Oracle).",
                 },
                 ensure_ascii=False,
             )

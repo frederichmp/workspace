@@ -1,0 +1,1 @@
+DECLARE v_x NUMBER; BEGIN v_x := 1; END;

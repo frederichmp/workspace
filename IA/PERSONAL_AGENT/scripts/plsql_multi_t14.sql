@@ -1,0 +1,1 @@
+BEGIN NULL; END; DELETE FROM startupadmin.tb_teste_executor WHERE id = -1;
