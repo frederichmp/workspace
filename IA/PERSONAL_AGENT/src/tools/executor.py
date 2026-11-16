@@ -1,9 +1,12 @@
 """
-Módulo Executor Seguro de Scripts Oracle por script_id (TAREFA 1 & 1.1 & 1.2).
+Módulo Executor Seguro de Scripts Oracle por script_id (TAREFA 1 & 1.1 & 1.2 & 1.4).
 Aplica regras estritas de validação em ordem obrigatória (fail-fast sem conexão).
 O LLM nunca envia SQL bruto; executa exclusivamente scripts homologados no registro.
 
 NOTA DE GOVERNANÇA (D5):
+CREATE PROCEDURE/FUNCTION/PACKAGE/TRIGGER/TYPE são DDL no Oracle.
+A classificação PLSQL é decisão de tipo de registro, para o caminho de execução.
+Não há atomicidade adicional para nenhum DDL.
 No Oracle Database, DDL executa COMMIT implícito antes e depois da instrução. Portanto,
 nenhuma alteração feita antes do DDL pode ser revertida por este executor. Se um DDL falhar
 no meio de sua execução, o próprio Oracle reverte a instrução; não há rollback de múltiplas
@@ -386,19 +389,27 @@ def verificar_diretivas_sqlplus(raw_sql: str, tokens: List[Tuple[str, str]]) -> 
 
 def determinar_tipo_real_sql(tokens: List[Tuple[str, str]]) -> Tuple[Optional[str], Optional[str]]:
     """
-    D2: Determina o tipo real do comando SQL com mapeamento fixo e igualdade exata:
+    D2 & B3 & B4: Determina o tipo real do comando SQL com mapeamento fixo e igualdade exata:
     - CREATE [OR REPLACE] PROCEDURE | FUNCTION | PACKAGE | PACKAGE BODY | TRIGGER | TYPE | TYPE BODY -> PLSQL
     - Demais CREATE, ALTER, DROP, TRUNCATE, RENAME, COMMENT, GRANT, REVOKE, ANALYZE, AUDIT, NOAUDIT -> DDL
     - SELECT ou WITH sem DML/DDL de nível superior -> SELECT
     - SELECT ou WITH com DML/DDL de nível superior -> TIPO_DIVERGENTE (tipo detectado: DML/DDL)
     - INSERT, UPDATE, DELETE, MERGE -> DML
     - DECLARE ou BEGIN -> PLSQL
+    - CREATE sem subcomando -> (None, "CREATE incompleto.")
+    - Primeiro token não-palavra -> (None, f"Primeiro token não-palavra: '{sig_tokens[0][1]}'.")
+    - Vazio ou só comentários -> (None, "Arquivo vazio ou contendo apenas comentários.")
     - Demais -> DESCONHECIDO (D3)
     """
-    sig_words = [t[1].upper() for t in tokens if t[0] == "WORD"]
-    if not sig_words:
-        return None, "Script vazio ou contendo apenas comentários."
+    sig_tokens = [t for t in tokens if t[0] not in ("WHITESPACE", "COMMENT_LINE", "COMMENT_BLOCK")]
+    if not sig_tokens:
+        return None, "Arquivo vazio ou contendo apenas comentários."
 
+    primeiro_token = sig_tokens[0]
+    if primeiro_token[0] != "WORD":
+        return None, f"Primeiro token não-palavra: '{primeiro_token[1]}'."
+
+    sig_words = [t[1].upper() for t in sig_tokens if t[0] == "WORD"]
     primeira = sig_words[0]
 
     if primeira in ("SELECT", "WITH"):
@@ -425,7 +436,9 @@ def determinar_tipo_real_sql(tokens: List[Tuple[str, str]]) -> Tuple[Optional[st
 
     elif primeira == "CREATE":
         sub = [w for w in sig_words[1:6] if w not in ("OR", "REPLACE", "EDITIONABLE", "NONEDITIONABLE")]
-        if sub and sub[0] in ("PROCEDURE", "FUNCTION", "PACKAGE", "TRIGGER", "TYPE"):
+        if not sub:
+            return None, "CREATE incompleto."
+        if sub[0] in ("PROCEDURE", "FUNCTION", "PACKAGE", "TRIGGER", "TYPE"):
             return "PLSQL", None
         return "DDL", None
 
@@ -450,14 +463,18 @@ def tokenizar_e_validar_sql(raw_sql: str) -> Tuple[bool, Optional[str], str, str
     if not valido_dir:
         return False, mot_dir, msg_dir, "", "DIRETIVA_SQLPLUS"
 
-    # 3. Determinação do Tipo Real (D2 & D3)
+    # 3. Determinação do Tipo Real (D2 & D3 & B3 & B4)
     tipo_real, erro_tipo = determinar_tipo_real_sql(tokens)
+    if erro_tipo == "CREATE incompleto.":
+        return False, "TIPO_NAO_RECONHECIDO", erro_tipo, "", "DESCONHECIDO"
+    if erro_tipo and erro_tipo.startswith("Primeiro token não-palavra"):
+        return False, "TIPO_NAO_RECONHECIDO", erro_tipo, "", "DESCONHECIDO"
     if tipo_real == "TIPO_DIVERGENTE":
         return False, "TIPO_DIVERGENTE", erro_tipo, "", "DML"
     if tipo_real == "DESCONHECIDO":
         return False, "TIPO_NAO_RECONHECIDO", erro_tipo or "Tipo de comando SQL não reconhecido.", "", "DESCONHECIDO"
     if not tipo_real:
-        return False, "MULTIPLOS_STATEMENTS", "Arquivo vazio ou contendo apenas comentários.", "", ""
+        return False, "ARQUIVO_VAZIO", erro_tipo or "Arquivo vazio ou contendo apenas comentários.", "", ""
 
     # 4. Validação Estrutural de Statements (C1 para PLSQL / Detecção em SQL comum)
     if tipo_real == "PLSQL":
