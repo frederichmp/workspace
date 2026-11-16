@@ -1,19 +1,25 @@
 """
 Ferramenta Reutilizável de Verificação de Integridade de Scripts Oracle.
 Calcula o hash SHA-256 dos bytes brutos de cada arquivo em scripts/
-e compara com o hash registrado em registry/scripts.yaml.
+e compara com o hash registrado em registry/scripts.yaml (ou SCRIPTS_REGISTRY_PATH).
+Opera exclusivamente em modo somente leitura (sem escrita automatica de hashes).
 """
 
+import os
 import sys
 import hashlib
 from pathlib import Path
 import yaml
 
 
-def verificar_hashes(atualizar: bool = False) -> int:
-    # Determina diretório base
+def verificar_hashes() -> int:
     base_dir = Path(__file__).resolve().parent.parent
-    yaml_path = base_dir / "registry" / "scripts.yaml"
+    caminho_env = os.getenv("SCRIPTS_REGISTRY_PATH")
+    if caminho_env:
+        yaml_path = Path(caminho_env).resolve()
+    else:
+        yaml_path = base_dir / "registry" / "scripts.yaml"
+
     scripts_dir = base_dir / "scripts"
 
     if not yaml_path.is_file():
@@ -29,8 +35,6 @@ def verificar_hashes(atualizar: bool = False) -> int:
     print("=" * 140)
     print(f"{'SCRIPT_ID':<26} | {'ARQUIVO':<28} | {'HASH REGISTRADO':<64} | {'STATUS'}")
     print("=" * 140)
-
-    alterado = False
 
     for item in scripts_list:
         script_id = item.get("script_id", "")
@@ -51,10 +55,6 @@ def verificar_hashes(atualizar: bool = False) -> int:
             else:
                 status = "DIVERGENTE"
                 divergencias += 1
-                if atualizar and script_id not in ("script_hash_divergente", "path_traversal_parent_t17", "path_traversal_abs_t17"):
-                    item["sha256"] = hash_calc
-                    alterado = True
-                    status = "DIVERGENTE (ATUALIZADO)"
 
         print(f"{script_id:<26} | {arquivo:<28} | {hash_reg:<64} | {status}")
         if status.startswith("DIVERGENTE") and hash_calc != "ARQUIVO_NAO_ENCONTRADO":
@@ -64,14 +64,8 @@ def verificar_hashes(atualizar: bool = False) -> int:
     print(f"Total de scripts avaliados: {len(scripts_list)} | Divergências encontradas: {divergencias}")
     print("=" * 140)
 
-    if atualizar and alterado:
-        with open(yaml_path, "w", encoding="utf-8") as f:
-            yaml.dump(registro_data, f, sort_keys=False, allow_unicode=True)
-        print("Arquivo registry/scripts.yaml atualizado com sucesso.")
-
     return 0 if divergencias == 0 else 1
 
 
 if __name__ == "__main__":
-    atualizar_flag = "--atualizar" in sys.argv or "--update" in sys.argv
-    sys.exit(verificar_hashes(atualizar=atualizar_flag))
+    sys.exit(verificar_hashes())
