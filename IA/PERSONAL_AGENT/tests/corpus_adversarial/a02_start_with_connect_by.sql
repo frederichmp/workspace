@@ -1,0 +1,3 @@
+SELECT id, pai FROM t
+START WITH pai IS NULL
+CONNECT BY PRIOR id = pai

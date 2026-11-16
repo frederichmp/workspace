@@ -1,0 +1,3 @@
+BEGIN
+    EXECUTE IMMEDIATE 'x';
+END;

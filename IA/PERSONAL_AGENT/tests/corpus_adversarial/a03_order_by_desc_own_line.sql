@@ -1,0 +1,3 @@
+SELECT id, nome FROM t
+ORDER BY nome
+DESC

@@ -1,0 +1,1 @@
+BEGIN IF a THEN b := 1; END IF; c := 2; END;

@@ -1,0 +1,1 @@
+EXEC dbms_output.put_line('x')

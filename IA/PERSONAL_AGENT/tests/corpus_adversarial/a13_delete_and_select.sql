@@ -1,0 +1,1 @@
+DELETE FROM t; SELECT 1 FROM dual;

@@ -1,0 +1,1 @@
+WITH c AS (SELECT 1 FROM dual) DELETE FROM t

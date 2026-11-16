@@ -1,0 +1,188 @@
+{
+  "a01_update_set_internal.sql": {
+    "id": "A1",
+    "tipo_declarado": "DML",
+    "expected_status": "VALID",
+    "expected_tipo": "DML"
+  },
+  "a02_start_with_connect_by.sql": {
+    "id": "A2",
+    "tipo_declarado": "SELECT",
+    "expected_status": "VALID",
+    "expected_tipo": "SELECT"
+  },
+  "a03_order_by_desc_own_line.sql": {
+    "id": "A3",
+    "tipo_declarado": "SELECT",
+    "expected_status": "VALID",
+    "expected_tipo": "SELECT"
+  },
+  "a04_execute_immediate_in_block.sql": {
+    "id": "A4",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a05_create_package_body.sql": {
+    "id": "A5",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "PLSQL_AMBIGUO",
+    "expected_tipo": null
+  },
+  "a06_comment_with_end.sql": {
+    "id": "A6",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a07_string_literal_end.sql": {
+    "id": "A7",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a08_string_q_literal_end.sql": {
+    "id": "A8",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a09_select_case_when.sql": {
+    "id": "A9",
+    "tipo_declarado": "SELECT",
+    "expected_status": "VALID",
+    "expected_tipo": "SELECT"
+  },
+  "a10_plsql_case_when.sql": {
+    "id": "A10",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a11_extra_semicolon.sql": {
+    "id": "A11",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a12_multiple_plsql_blocks.sql": {
+    "id": "A12",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "MULTIPLOS_STATEMENTS",
+    "expected_tipo": null
+  },
+  "a13_delete_and_select.sql": {
+    "id": "A13",
+    "tipo_declarado": "DML",
+    "expected_status": "MULTIPLOS_STATEMENTS",
+    "expected_tipo": null
+  },
+  "a14_select_with_slash_line.sql": {
+    "id": "A14",
+    "tipo_declarado": "SELECT",
+    "expected_status": "DIRETIVA_SQLPLUS",
+    "expected_tipo": null
+  },
+  "a15_set_define_off.sql": {
+    "id": "A15",
+    "tipo_declarado": "SELECT",
+    "expected_status": "DIRETIVA_SQLPLUS",
+    "expected_tipo": null
+  },
+  "a16_with_delete_dml.sql": {
+    "id": "A16",
+    "tipo_declarado": "SELECT",
+    "expected_status": "TIPO_DIVERGENTE",
+    "expected_tipo": null
+  },
+  "a17_create_table.sql": {
+    "id": "A17",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "TIPO_DIVERGENTE",
+    "expected_tipo": null
+  },
+  "a18_create_procedure.sql": {
+    "id": "A18",
+    "tipo_declarado": "DDL",
+    "expected_status": "TIPO_DIVERGENTE",
+    "expected_tipo": null
+  },
+  "a19_comment_on_table.sql": {
+    "id": "A19",
+    "tipo_declarado": "DDL",
+    "expected_status": "VALID",
+    "expected_tipo": "DDL"
+  },
+  "a20_foo_bar.sql": {
+    "id": "A20",
+    "tipo_declarado": "SELECT",
+    "expected_status": "TIPO_NAO_RECONHECIDO",
+    "expected_tipo": null
+  },
+  "a21_if_control_internal.sql": {
+    "id": "A21",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a22_loop_exit.sql": {
+    "id": "A22",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a23_while_loop.sql": {
+    "id": "A23",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a24_for_loop.sql": {
+    "id": "A24",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a25_mismatched_loop_endif.sql": {
+    "id": "A25",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "PLSQL_AMBIGUO",
+    "expected_tipo": null
+  },
+  "a26_nested_begin_blocks.sql": {
+    "id": "A26",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a27_declare_begin_block.sql": {
+    "id": "A27",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL"
+  },
+  "a28_slash_on_line_in_block.sql": {
+    "id": "A28",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "DIRETIVA_SQLPLUS",
+    "expected_tipo": null
+  },
+  "a29_exec_directive.sql": {
+    "id": "A29",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "DIRETIVA_SQLPLUS",
+    "expected_tipo": null
+  },
+  "a30_select_quoted_end.sql": {
+    "id": "A30",
+    "tipo_declarado": "SELECT",
+    "expected_status": "VALID",
+    "expected_tipo": "SELECT"
+  },
+  "a31_select_identifiers_end_case.sql": {
+    "id": "A31",
+    "tipo_declarado": "SELECT",
+    "expected_status": "VALID",
+    "expected_tipo": "SELECT"
+  }
+}

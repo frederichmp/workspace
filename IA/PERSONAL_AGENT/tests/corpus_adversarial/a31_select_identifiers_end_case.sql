@@ -1,0 +1,1 @@
+SELECT end_date, case_id FROM t
