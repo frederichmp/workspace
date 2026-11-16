@@ -31,6 +31,7 @@ PRIVILEGIOS_ESCRITA_PROIBIDOS = {
 }
 
 
+@pytest.mark.sandbox_only
 def test_privilegio_read_sem_permissoes_de_escrita():
     """Valida que o usuário de leitura possui apenas permissões de leitura."""
     user = os.getenv("ORACLE_USER_READ")

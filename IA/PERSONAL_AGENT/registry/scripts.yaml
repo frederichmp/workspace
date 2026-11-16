@@ -1,158 +1,143 @@
+# =============================================================================
+# Registro de Scripts Oracle Homologados (Produção)
+# Qualquer alteração requer processo formal de homologação e revisão via PR.
+# =============================================================================
+
 scripts:
-- script_id: verificar_dual
-  arquivo: verificar_dual.sql
-  sha256: 8a6ca62c8608a767d47baf076d918ed6f4bb7d3c98485351b7c59e84196892ed
-  tipo: SELECT
-  risco: baixo
-  status: homologado
-  binds: []
-- script_id: select_t5_complexo
-  arquivo: select_t5_complexo.sql
-  sha256: f9d85f77962527dd9847bd92504e32cf36e0d4e1fd76f1dfeb43ea06eef48b40
-  tipo: SELECT
-  risco: baixo
-  status: homologado
-  binds: []
-- script_id: select_param_t9
-  arquivo: select_param_t9.sql
-  sha256: 9c8185c9ce49e06f639304b5bfd6ee28330570498ab802b84d60647177d4b25c
-  tipo: SELECT
-  risco: baixo
-  status: homologado
-  binds:
-  - nome: nome
-    tipo: string
-- script_id: select_lob_t12
-  arquivo: select_lob_t12.sql
-  sha256: 1d2e90e09ea13efdb429ebb530a83669918f2cb289cc143987f6a22561236e38
-  tipo: SELECT
-  risco: baixo
-  status: homologado
-  binds: []
-- script_id: dml_simples
-  arquivo: dml_simples.sql
-  sha256: a075b190f59f656cd4193a900beab25a30b8efced510c6ffcef0c1c1c39f72b8
-  tipo: DML
-  risco: medio
-  status: homologado
-  binds:
-  - nome: id
-    tipo: int
-  - nome: nome
-    tipo: string
-- script_id: plsql_bloco_t6
-  arquivo: plsql_bloco_t6.sql
-  sha256: ed00f86029a908f944f4ecbc5865f16b1d12e0b9c5e06d01cd1f3132af4a67c5
-  tipo: PLSQL
-  risco: medio
-  status: homologado
-  binds: []
-- script_id: procedure_t7
-  arquivo: procedure_t7.sql
-  sha256: 99d677f823054e736374681ee1240c7bc21977775505871b546c332425c6d6a1
-  tipo: PLSQL
-  risco: alto
-  status: homologado
-  binds: []
-- script_id: script_bloqueado
-  arquivo: script_bloqueado.sql
-  sha256: 3d49728aba5d2f3ffd91c23ea3fb884f0de3d3ef847f02e3c5e3848f79aa5c0f
-  tipo: SELECT
-  risco: baixo
-  status: bloqueado
-  binds: []
-- script_id: script_hash_divergente
-  arquivo: script_hash_divergente.sql
-  sha256: '0000000000000000000000000000000000000000000000000000000000000000'
-  tipo: SELECT
-  risco: baixo
-  status: homologado
-  binds: []
-- script_id: multiplos_statements_t4
-  arquivo: multiplos_statements_t4.sql
-  sha256: 36e7613201f8ae3d80e4c227a60c4ffb21ef0c57fd14ab14b60497695cb3e797
-  tipo: SELECT
-  risco: baixo
-  status: homologado
-  binds: []
-- script_id: diretiva_sqlplus_t8
-  arquivo: diretiva_sqlplus_t8.sql
-  sha256: a63b3710c8568d4f6356e07c56e513ab3036d971ea1656d5319136d847721834
-  tipo: SELECT
-  risco: baixo
-  status: homologado
-  binds: []
-- script_id: diretiva_slash_t8
-  arquivo: diretiva_slash_t8.sql
-  sha256: 654ad724bed70ed7d77f995318fd39854148bd848ce3be38b30041b45eb72154
-  tipo: SELECT
-  risco: baixo
-  status: homologado
-  binds: []
-- script_id: dml_com_erro_t13
-  arquivo: dml_com_erro_t13.sql
-  sha256: e1eea52725fa8f7b588860b572493c6a2c1e5c42dd30d5ee777aef249e0c7c9a
-  tipo: PLSQL
-  risco: alto
-  status: homologado
-  binds:
-  - nome: id
-    tipo: int
-  - nome: nome
-    tipo: string
-- script_id: dml_tentativa_read_t11
-  arquivo: dml_tentativa_read_t11.sql
-  sha256: 1d5f0a70f17b95ab2bad38361d6e85efa2742a2aa3439b16c86c1e95b9d650d1
-  tipo: SELECT
-  risco: baixo
-  status: homologado
-  binds: []
-- script_id: plsql_multi_t14
-  arquivo: plsql_multi_t14.sql
-  sha256: c0c910e9584038f5b682faff8b9252a2e91ca906d38e52989c6a750dc7f8e835
-  tipo: PLSQL
-  risco: medio
-  status: homologado
-  binds: []
-- script_id: plsql_if_stmt_t15
-  arquivo: plsql_if_stmt_t15.sql
-  sha256: f99a3806a62eb06e0629f99148da660c29a6bdab3685275c3f7996c498cde465
-  tipo: PLSQL
-  risco: medio
-  status: homologado
-  binds: []
-- script_id: procedure_complex_t16
-  arquivo: procedure_complex_t16.sql
-  sha256: fd68149e98ad9a4ac496469eadbcb186b96790c80287409292ae3a81fa6431ef
-  tipo: PLSQL
-  risco: alto
-  status: homologado
-  binds: []
-- script_id: path_traversal_parent_t17
-  arquivo: ../secret.sql
-  sha256: '0000000000000000000000000000000000000000000000000000000000000000'
-  tipo: SELECT
-  risco: alto
-  status: homologado
-  binds: []
-- script_id: path_traversal_abs_t17
-  arquivo: C:/secret.sql
-  sha256: '0000000000000000000000000000000000000000000000000000000000000000'
-  tipo: SELECT
-  risco: alto
-  status: homologado
-  binds: []
-- script_id: select_como_dml_t18
-  arquivo: select_como_dml_t18.sql
-  sha256: 0cde98d6d00bc8891e12bf6bcf8cf953099fc8240f89068b3e8ada9e04715ba1
-  tipo: SELECT
-  risco: medio
-  status: homologado
-  binds: []
-- script_id: dml_como_select_t18
-  arquivo: dml_como_select_t18.sql
-  sha256: 272353ccf1c95086d031005e72a6ecc4036c3367d7e92c68ef161909e1315823
-  tipo: SELECT
-  risco: baixo
-  status: homologado
-  binds: []
+  - script_id: verificar_dual
+    arquivo: verificar_dual.sql
+    sha256: 8a6ca62c8608a767d47baf076d918ed6f4bb7d3c98485351b7c59e84196892ed
+    tipo: SELECT
+    risco: baixo
+    status: homologado
+    binds: []
+
+  - script_id: select_t5_complexo
+    arquivo: select_t5_complexo.sql
+    sha256: f9d85f77962527dd9847bd92504e32cf36e0d4e1fd76f1dfeb43ea06eef48b40
+    tipo: SELECT
+    risco: baixo
+    status: homologado
+    binds: []
+
+  - script_id: select_param_t9
+    arquivo: select_param_t9.sql
+    sha256: 9c8185c9ce49e06f639304b5bfd6ee28330570498ab802b84d60647177d4b25c
+    tipo: SELECT
+    risco: baixo
+    status: homologado
+    binds:
+      - nome: nome
+        tipo: string
+
+  - script_id: select_lob_t12
+    arquivo: select_lob_t12.sql
+    sha256: 1d2e90e09ea13efdb429ebb530a83669918f2cb289cc143987f6a22561236e38
+    tipo: SELECT
+    risco: baixo
+    status: homologado
+    binds: []
+
+  - script_id: dml_simples
+    arquivo: dml_simples.sql
+    sha256: a075b190f59f656cd4193a900beab25a30b8efced510c6ffcef0c1c1c39f72b8
+    tipo: DML
+    risco: medio
+    status: homologado
+    binds:
+      - nome: id
+        tipo: int
+      - nome: nome
+        tipo: string
+
+  - script_id: plsql_bloco_t6
+    arquivo: plsql_bloco_t6.sql
+    sha256: ed00f86029a908f944f4ecbc5865f16b1d12e0b9c5e06d01cd1f3132af4a67c5
+    tipo: PLSQL
+    risco: medio
+    status: homologado
+    binds: []
+
+  - script_id: procedure_t7
+    arquivo: procedure_t7.sql
+    sha256: 99d677f823054e736374681ee1240c7bc21977775505871b546c332425c6d6a1
+    tipo: PLSQL
+    risco: alto
+    status: homologado
+    binds: []
+
+  - script_id: script_bloqueado
+    arquivo: script_bloqueado.sql
+    sha256: 3d49728aba5d2f3ffd91c23ea3fb884f0de3d3ef847f02e3c5e3848f79aa5c0f
+    tipo: SELECT
+    risco: baixo
+    status: bloqueado
+    binds: []
+
+  - script_id: multiplos_statements_t4
+    arquivo: multiplos_statements_t4.sql
+    sha256: 36e7613201f8ae3d80e4c227a60c4ffb21ef0c57fd14ab14b60497695cb3e797
+    tipo: SELECT
+    risco: baixo
+    status: homologado
+    binds: []
+
+  - script_id: diretiva_sqlplus_t8
+    arquivo: diretiva_sqlplus_t8.sql
+    sha256: a63b3710c8568d4f6356e07c56e513ab3036d971ea1656d5319136d847721834
+    tipo: SELECT
+    risco: baixo
+    status: homologado
+    binds: []
+
+  - script_id: diretiva_slash_t8
+    arquivo: diretiva_slash_t8.sql
+    sha256: 654ad724bed70ed7d77f995318fd39854148bd848ce3be38b30041b45eb72154
+    tipo: SELECT
+    risco: baixo
+    status: homologado
+    binds: []
+
+  - script_id: dml_com_erro_t13
+    arquivo: dml_com_erro_t13.sql
+    sha256: e1eea52725fa8f7b588860b572493c6a2c1e5c42dd30d5ee777aef249e0c7c9a
+    tipo: PLSQL
+    risco: alto
+    status: homologado
+    binds:
+      - nome: id
+        tipo: int
+      - nome: nome
+        tipo: string
+
+  - script_id: dml_tentativa_read_t11
+    arquivo: dml_tentativa_read_t11.sql
+    sha256: 1d5f0a70f17b95ab2bad38361d6e85efa2742a2aa3439b16c86c1e95b9d650d1
+    tipo: SELECT
+    risco: baixo
+    status: homologado
+    binds: []
+
+  - script_id: plsql_multi_t14
+    arquivo: plsql_multi_t14.sql
+    sha256: c0c910e9584038f5b682faff8b9252a2e91ca906d38e52989c6a750dc7f8e835
+    tipo: PLSQL
+    risco: medio
+    status: homologado
+    binds: []
+
+  - script_id: plsql_if_stmt_t15
+    arquivo: plsql_if_stmt_t15.sql
+    sha256: f99a3806a62eb06e0629f99148da660c29a6bdab3685275c3f7996c498cde465
+    tipo: PLSQL
+    risco: medio
+    status: homologado
+    binds: []
+
+  - script_id: procedure_complex_t16
+    arquivo: procedure_complex_t16.sql
+    sha256: fd68149e98ad9a4ac496469eadbcb186b96790c80287409292ae3a81fa6431ef
+    tipo: PLSQL
+    risco: alto
+    status: homologado
+    binds: []

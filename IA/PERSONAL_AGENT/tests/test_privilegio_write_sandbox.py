@@ -53,6 +53,18 @@ def test_privilegio_write_insert_rejeitado_sandbox():
                 f"Esperado erro ORA-01031 (insufficient privileges), mas obteve: {erro_str}"
             )
 
+        # L5: Confirmação via conexão administrativa/mut de que nenhuma linha foi persistida
+        user_mut = os.getenv("ORACLE_USER_MUT")
+        pass_mut = os.getenv("ORACLE_PASSWORD_MUT")
+        if user_mut and pass_mut:
+            conn_mut = oracledb.connect(user=user_mut, password=pass_mut, dsn=dsn)
+            cur_mut = conn_mut.cursor()
+            cur_mut.execute("SELECT COUNT(*) FROM startupadmin.tb_teste_executor WHERE id = 9999")
+            count = cur_mut.fetchone()[0]
+            cur_mut.close()
+            conn_mut.close()
+            assert count == 0, "Falha de persistência: linha foi inserida indevidamente!"
+
     finally:
         if connection is not None:
             try:

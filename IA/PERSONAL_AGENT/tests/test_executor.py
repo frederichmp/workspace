@@ -36,7 +36,10 @@ def setup_banco_teste():
     """
     Fixture de sessão: garante que o ambiente de teste no Oracle esteja provisionado
     (tabela de teste startupadmin.tb_teste_executor e função autônoma para T11).
+    Só conecta ao banco se ORACLE_SANDBOX=1.
     """
+    if os.getenv("ORACLE_SANDBOX") != "1":
+        return
     user_mut = os.getenv("ORACLE_USER_MUT") or os.getenv("ORACLE_USER")
     pass_mut = os.getenv("ORACLE_PASSWORD_MUT") or os.getenv("ORACLE_PASSWORD")
     dsn = os.getenv("ORACLE_DSN")
@@ -194,6 +197,35 @@ def test_t7_create_procedure_sem_barra():
 
     assert resultado["status"] == "sucesso"
     assert resultado["tipo"] == "PLSQL"
+
+
+# =============================================================================
+# L1: procedure_t7 sem conexão: tipo detectado == PLSQL, recusado se registro for DDL
+# =============================================================================
+def test_l1_procedure_t7_tipo_divergente_com_mock():
+    """L1: Teste sem conexão para procedure_t7: tipo detectado == PLSQL, sem conexão quando registro for DDL."""
+    from src.tools.registry import obter_caminho_scripts_dir, obter_script
+
+    caminho_sql = obter_caminho_scripts_dir() / "procedure_t7.sql"
+    conteudo_sql = caminho_sql.read_text(encoding="utf-8")
+    valido, cod_motivo, msg_erro, sql_exec, tipo_detectado = tokenizar_e_validar_sql(conteudo_sql)
+
+    assert valido is True
+    assert tipo_detectado == "PLSQL"
+
+    # Simula o registro declarando procedure_t7 como DDL
+    entrada_real = obter_script("procedure_t7")
+    assert entrada_real is not None
+    entrada_mock = entrada_real.model_copy(update={"tipo": "DDL"})
+
+    with patch("src.tools.executor.obter_script", return_value=entrada_mock), \
+         patch("oracledb.connect") as mock_connect:
+        saida_str = executar_script("procedure_t7", {})
+        resultado = json.loads(saida_str)
+
+        assert resultado["status"] == "recusado"
+        assert resultado["motivo"] == "TIPO_DIVERGENTE"
+        mock_connect.assert_not_called()
 
 
 # =============================================================================
