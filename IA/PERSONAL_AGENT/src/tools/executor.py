@@ -389,25 +389,25 @@ def verificar_diretivas_sqlplus(raw_sql: str, tokens: List[Tuple[str, str]]) -> 
 
 def determinar_tipo_real_sql(tokens: List[Tuple[str, str]]) -> Tuple[Optional[str], Optional[str]]:
     """
-    D2 & B3 & B4: Determina o tipo real do comando SQL com mapeamento fixo e igualdade exata:
+    D2 & B3 & B4 & X4: Determina o tipo real do comando SQL com mapeamento fixo e igualdade exata:
     - CREATE [OR REPLACE] PROCEDURE | FUNCTION | PACKAGE | PACKAGE BODY | TRIGGER | TYPE | TYPE BODY -> PLSQL
     - Demais CREATE, ALTER, DROP, TRUNCATE, RENAME, COMMENT, GRANT, REVOKE, ANALYZE, AUDIT, NOAUDIT -> DDL
     - SELECT ou WITH sem DML/DDL de nível superior -> SELECT
     - SELECT ou WITH com DML/DDL de nível superior -> TIPO_DIVERGENTE (tipo detectado: DML/DDL)
     - INSERT, UPDATE, DELETE, MERGE -> DML
     - DECLARE ou BEGIN -> PLSQL
-    - CREATE sem subcomando -> (None, "CREATE incompleto.")
-    - Primeiro token não-palavra -> (None, f"Primeiro token não-palavra: '{sig_tokens[0][1]}'.")
-    - Vazio ou só comentários -> (None, "Arquivo vazio ou contendo apenas comentários.")
+    - CREATE sem subcomando -> ("CREATE_INCOMPLETO", "Comando CREATE incompleto sem subcomando.")
+    - Primeiro token não-palavra -> ("DESCONHECIDO", f"Primeiro token não-palavra: '{sig_tokens[0][1]}'.")
+    - Vazio ou só comentários -> ("ARQUIVO_VAZIO", "Arquivo vazio ou contendo apenas comentários.")
     - Demais -> DESCONHECIDO (D3)
     """
     sig_tokens = [t for t in tokens if t[0] not in ("WHITESPACE", "COMMENT_LINE", "COMMENT_BLOCK")]
     if not sig_tokens:
-        return None, "Arquivo vazio ou contendo apenas comentários."
+        return "ARQUIVO_VAZIO", "Arquivo vazio ou contendo apenas comentários."
 
     primeiro_token = sig_tokens[0]
     if primeiro_token[0] != "WORD":
-        return None, f"Primeiro token não-palavra: '{primeiro_token[1]}'."
+        return "DESCONHECIDO", f"Primeiro token não-palavra: '{primeiro_token[1]}'."
 
     sig_words = [t[1].upper() for t in sig_tokens if t[0] == "WORD"]
     primeira = sig_words[0]
@@ -437,7 +437,7 @@ def determinar_tipo_real_sql(tokens: List[Tuple[str, str]]) -> Tuple[Optional[st
     elif primeira == "CREATE":
         sub = [w for w in sig_words[1:6] if w not in ("OR", "REPLACE", "EDITIONABLE", "NONEDITIONABLE")]
         if not sub:
-            return None, "CREATE incompleto."
+            return "CREATE_INCOMPLETO", "Comando CREATE incompleto sem subcomando."
         if sub[0] in ("PROCEDURE", "FUNCTION", "PACKAGE", "TRIGGER", "TYPE"):
             return "PLSQL", None
         return "DDL", None
@@ -463,17 +463,15 @@ def tokenizar_e_validar_sql(raw_sql: str) -> Tuple[bool, Optional[str], str, str
     if not valido_dir:
         return False, mot_dir, msg_dir, "", "DIRETIVA_SQLPLUS"
 
-    # 3. Determinação do Tipo Real (D2 & D3 & B3 & B4)
+    # 3. Determinação do Tipo Real (D2 & D3 & B3 & B4 & X4)
     tipo_real, erro_tipo = determinar_tipo_real_sql(tokens)
-    if erro_tipo == "CREATE incompleto.":
-        return False, "TIPO_NAO_RECONHECIDO", erro_tipo, "", "DESCONHECIDO"
-    if erro_tipo and erro_tipo.startswith("Primeiro token não-palavra"):
-        return False, "TIPO_NAO_RECONHECIDO", erro_tipo, "", "DESCONHECIDO"
+    if tipo_real == "CREATE_INCOMPLETO":
+        return False, "TIPO_NAO_RECONHECIDO", erro_tipo or "Comando CREATE incompleto.", "", "DESCONHECIDO"
     if tipo_real == "TIPO_DIVERGENTE":
         return False, "TIPO_DIVERGENTE", erro_tipo, "", "DML"
     if tipo_real == "DESCONHECIDO":
         return False, "TIPO_NAO_RECONHECIDO", erro_tipo or "Tipo de comando SQL não reconhecido.", "", "DESCONHECIDO"
-    if not tipo_real:
+    if tipo_real == "ARQUIVO_VAZIO" or not tipo_real:
         return False, "ARQUIVO_VAZIO", erro_tipo or "Arquivo vazio ou contendo apenas comentários.", "", ""
 
     # 4. Validação Estrutural de Statements (C1 para PLSQL / Detecção em SQL comum)

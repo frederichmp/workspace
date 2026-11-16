@@ -508,14 +508,13 @@ def test_t20_corpus_plsql_tokenizacao(filename, is_valid, expected_code):
 
 
 # =============================================================================
-# B3: CREATE incompleto -> (None, "CREATE incompleto.") e TIPO_NAO_RECONHECIDO
+# B3 & X4: CREATE incompleto -> ("CREATE_INCOMPLETO", ...) e TIPO_NAO_RECONHECIDO
 # =============================================================================
 def test_b3_create_incompleto_recusado_tipo_nao_reconhecido():
-    """B3: CREATE incompleto retorna (None, 'CREATE incompleto.') e TIPO_NAO_RECONHECIDO sem conectar."""
+    """B3 & X4: CREATE incompleto retorna ('CREATE_INCOMPLETO', ...) e TIPO_NAO_RECONHECIDO sem conectar."""
     tokens_create = tokenizar_sql_stream("CREATE;")
     tipo_real, erro = determinar_tipo_real_sql(tokens_create)
-    assert tipo_real is None
-    assert erro == "CREATE incompleto."
+    assert tipo_real == "CREATE_INCOMPLETO"
 
     valido, cod, msg, _, _ = tokenizar_e_validar_sql("CREATE;")
     assert valido is False
@@ -523,8 +522,7 @@ def test_b3_create_incompleto_recusado_tipo_nao_reconhecido():
 
     tokens_replace = tokenizar_sql_stream("CREATE OR REPLACE;")
     tipo_real_rep, erro_rep = determinar_tipo_real_sql(tokens_replace)
-    assert tipo_real_rep is None
-    assert erro_rep == "CREATE incompleto."
+    assert tipo_real_rep == "CREATE_INCOMPLETO"
 
     valido_rep, cod_rep, msg_rep, _, _ = tokenizar_e_validar_sql("CREATE OR REPLACE;")
     assert valido_rep is False
