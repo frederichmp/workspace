@@ -70,7 +70,10 @@ def test_corpus_adversarial_tokenizacao(
 # L3: Testes de regras do executor via executar_script() sem conexão
 # Lê nomes e expectativas exclusivamente de manifest.json (fonte única)
 # =============================================================================
-L3_TARGET_IDS = {"A14", "A16", "A17", "A18", "A20"}
+L3_TARGET_IDS = {
+    "A14", "A16", "A17", "A18", "A20",
+    "A14_SPOOL", "A16_UPDATE", "A17_CREATE", "A18_SELECT", "A20_SYNTAX"
+}
 l3_cases = [
     (
         data["id"],

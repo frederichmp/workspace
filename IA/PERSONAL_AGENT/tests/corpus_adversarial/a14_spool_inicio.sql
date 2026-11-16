@@ -1,0 +1,1 @@
+SPOOL out.txt

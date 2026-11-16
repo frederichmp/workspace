@@ -184,5 +184,35 @@
     "tipo_declarado": "SELECT",
     "expected_status": "VALID",
     "expected_tipo": "SELECT"
+  },
+  "a14_spool_inicio.sql": {
+    "id": "A14_SPOOL",
+    "tipo_declarado": "SELECT",
+    "expected_status": "DIRETIVA_SQLPLUS",
+    "expected_tipo": null
+  },
+  "a16_tipo_select_com_update.sql": {
+    "id": "A16_UPDATE",
+    "tipo_declarado": "SELECT",
+    "expected_status": "TIPO_DIVERGENTE",
+    "expected_tipo": null
+  },
+  "a17_tipo_dml_com_create.sql": {
+    "id": "A17_CREATE",
+    "tipo_declarado": "DML",
+    "expected_status": "TIPO_DIVERGENTE",
+    "expected_tipo": null
+  },
+  "a18_tipo_plsql_com_select.sql": {
+    "id": "A18_SELECT",
+    "tipo_declarado": "PLSQL",
+    "expected_status": "TIPO_DIVERGENTE",
+    "expected_tipo": null
+  },
+  "a20_syntax_error.sql": {
+    "id": "A20_SYNTAX",
+    "tipo_declarado": "SELECT",
+    "expected_status": "TIPO_NAO_RECONHECIDO",
+    "expected_tipo": null
   }
 }
