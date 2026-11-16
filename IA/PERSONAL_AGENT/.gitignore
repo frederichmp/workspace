@@ -1,0 +1,35 @@
+# Ambiente Virtual
+.venv/
+venv/
+ENV/
+env/
+
+# Python Cache & Build
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+
+# Cofre de Credenciais (NUNCA COMMITAR)
+.env
+.env.local
+
+# Logs, RAG Vector DB e Dados Locais
+*.log
+chroma_db/
+MeusScripts/
+data/logs/*
+!data/logs/.gitkeep
+data/memory/*
+!data/memory/.gitkeep
+*.db
+*.sqlite3
+
+# IDEs
+.vscode/
+.idea/
+*.swp

@@ -1,1 +1,0 @@
-UPDATE startupadmin.tb_teste_executor SET nome = 'x' WHERE id = 1

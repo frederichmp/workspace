@@ -1,1 +1,0 @@
-CREATE TABLE startupadmin.tb_teste (id NUMBER)
