@@ -1,0 +1,1 @@
+SELECT /* T9_VALIDACAO_INJECTION_PARAM */ id, nome FROM startupadmin.tb_teste_executor WHERE nome = :nome

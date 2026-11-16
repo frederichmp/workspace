@@ -1,0 +1,4 @@
+BEGIN
+    NULL;
+    NULL;
+END;

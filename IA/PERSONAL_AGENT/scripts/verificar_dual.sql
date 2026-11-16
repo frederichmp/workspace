@@ -1,0 +1,1 @@
+SELECT sys_context('USERENV', 'INSTANCE') AS inst_id FROM dual

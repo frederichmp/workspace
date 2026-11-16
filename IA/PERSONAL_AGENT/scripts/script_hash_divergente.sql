@@ -1,0 +1,1 @@
+SELECT 100 FROM dual

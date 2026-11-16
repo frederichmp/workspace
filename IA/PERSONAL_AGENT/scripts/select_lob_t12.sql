@@ -1,0 +1,1 @@
+SELECT TO_CLOB(RPAD('DADO_CLOB_LONGO_', 1000, 'ABC_')) AS grande_lob FROM dual
