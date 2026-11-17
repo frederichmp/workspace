@@ -168,6 +168,11 @@ Nenhuma sessão é encerrada e nenhuma linha é gravada em `OPS_KILL_AUDIT`, por
 
 Entre 1 e 2, o kill fica indisponível (Python v2 × PKG v1 dá ERRO_ORACLE), de forma segura.
 
+**Ensaio sem banco** (`docs/entregas/1.11/verif_item9_ensaio_rollback.md`, parte B):
+- Num clone descartável, aplicou-se a v2 em `db/ops_kill.sql` e depois restauraram-se a spec e o body a partir de `rollback_ops_kill_v1.sql`. O resultado foi **idêntico** à v1 do repositório (sha `4823ecca4cfd8b21`), com as colunas v2 mantidas.
+- `tests/test_oracle_kill.py` no clone deu 33 passed e 6 skipped. Entre os que passaram está `test_lista_protegida_alinhada_ao_pacote`, que lê `c_protegidos` do `db/ops_kill.sql` restaurado.
+- Os testes sandbox de kill **não foram executados**, porque exigem Oracle. O ensaio do rollback **no banco** continua pendente para uma sessão sandbox autorizada.
+
 ## 5. Testes que provam cada parte
 
 **Sem conexão** (suíte padrão; provam o lado Python):
@@ -197,4 +202,4 @@ Entre 1 e 2, o kill fica indisponível (Python v2 × PKG v1 dá ERRO_ORACLE), de
 3. `program` e `machine` podem ser NULL (comparação null-safe); `username` e `logon_time`, não.
 4. Confirmar no passo 0 que não há outros chamadores do pacote.
 5. Os testes sandbox de transição dependem da versão do PKG implantada. Proposta: variável `OPS_KILL_PKG_VERSAO=1|2` definida pelo operador, com skip quando não bate.
-6. Janela de implantação (passos 3 a 5).
+6. Janela de implantação (seção 3.2): começa no `inicio_janela` da parte 2, antes da spec v2, e termina no primeiro kill sandbox v2 com ENCERRADA. Ou, em vez dela, a alternativa sem janela, que não é recomendada.
