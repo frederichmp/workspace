@@ -235,7 +235,7 @@ O clone de arquivo **não substitui** nenhum desses passos. A checagem de `DBA_E
 | # | Pendência | Depende de |
 |---|---|---|
 | 1 | Aprovar o texto do SQL v2, da migração e do rollback | Ensaio de banco em sandbox (seção 4.1), que é pré-requisito |
-| 4 | Quem pode chamar o pacote (redação do responsável, 2026-11-17). **EXECUTE explícito**: só `STARTUP_KILL`. **EXECUTE efetivo**: também as contas administrativas `STARTUPADMIN`, `SYS` e `SYSTEM`, por herança de `DBA`/`DV_REALM_OWNER`/`EXP_FULL_DATABASE`/`IMP_FULL_DATABASE`, mais `OUTLN` e `WMSYS`, por concessão direta (EXPIRED & LOCKED). **Decisão 4 reaberta:** a conta MUT do executor é DBA, e isso dá EXECUTE efetivo a conta de aplicação (seção 7.6) | Parte de privilégios **fechada** (7.3 encerrada). Ainda faltam 0.1 (`DBA_DEPENDENCIES`), 0.3 (jobs) e 0.4 (`GV$SQL`), lidos na parte 1 |
+| 4 | Quem pode chamar o pacote (redação do responsável, 2026-11-17). **EXECUTE explícito**: só `STARTUP_KILL`. **EXECUTE efetivo**: também as contas administrativas `STARTUPADMIN`, `SYS` e `SYSTEM`, por herança de `DBA`/`DV_REALM_OWNER`/`EXP_FULL_DATABASE`/`IMP_FULL_DATABASE`, mais `OUTLN` e `WMSYS`, por concessão direta (EXPIRED & LOCKED). A conta MUT do executor (`startupadmin`) é DBA, e isso dá EXECUTE efetivo a conta de aplicação. **Decisão 4: ACEITA COM RISCO, pelo responsável, em 2026-11-17.** Escopo: exclusivamente MODELO, para validações e simulações. Texto literal da aceitação na seção 7.6 | **Aceita com risco** (7.6). Leituras de chamadores 0.1, 0.3 e 0.4 feitas (7.5) |
 | 7.1 | Contas READ/MUT do executor: nomes **informados** em 2026-11-17 (seção 7.6). **Pendentes:** verificar os privilégios de `STARTUP_READ` (teste de privilégio em sandbox); decidir o mínimo privilégio do executor, porque a conta MUT é a conta DBA (achado da 7.6) | Teste em sandbox; decisão do responsável |
 | 7.2 | Database Vault: **encerrada** (DV inativo). Residual **encerrado**: `DV_REALM_OWNER` só chega a contas administrativas (7.3) | — |
 | 7.3 | Leituras 1 e 2: **ENCERRADA** em 2026-11-17 (seção 7.3). Não altera a janela nem a decisão 1 | — |
@@ -418,6 +418,16 @@ Informada pelo responsável:
 - A decisão 4 (seção 6), a 7.1 e a 7.3 classificam `STARTUPADMIN` como **conta de administração** e concluem que **nenhuma conta de aplicação** tem EXECUTE efetivo no pacote.
 - Com `STARTUPADMIN` também como conta MUT do executor, essa conclusão deixa de valer. Pela conta MUT, a aplicação tem `EXECUTE ANY PROCEDURE`, que permite chamar `KILL_SESSION` fora do fluxo HITL, e pelo papel `DBA` pode emitir `ALTER SYSTEM KILL SESSION` diretamente.
 - **Decisão 4 reaberta:** a conta MUT do executor é DBA, e isso dá EXECUTE efetivo a conta de aplicação.
+
+**Aceitação da decisão 4 (texto literal do responsável):**
+
+> Decisão 4: ACEITA COM RISCO, pelo responsável, em 2026-11-17.
+> - Risco: a conta MUT do executor (startupadmin) tem DBA; EXECUTE efetivo no PKG_OPS_KILL a qualquer chamador do executor, inclusive a aplicação, fora do fluxo de aprovação humana. Qualquer chamada à conta MUT pode encerrar sessão de usuário sem aprovação humana, enquanto a conta tiver DBA.
+> - Escopo: exclusivamente MODELO, para validações e simulações.
+> - Vigência: indeterminada, até projeto piloto funcional e sem erros.
+> - Restrição: nenhum uso em outro ambiente sem revisão, homologação e avaliação de todos os pontos.
+> - Revisão: aceitação não vale para outro ambiente. Nova jornada exige nova aceitação.
+> - Compromisso do responsável: eliminar fatores que impeçam o escopo de executar tarefas (fora do registro de risco).
 
 **Condição a do ensaio (seção 4.1): tabelas do schema STARTUPADMIN** (registro do responsável, 2026-11-17)
 - A consulta de `dba_objects` (2026-11-17) mostrou duas tabelas no schema STARTUPADMIN: `TB_TESTE_EXECUTOR` e `T1`.
