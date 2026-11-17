@@ -247,92 +247,13 @@ def test_hash_canonico_determinismo_e_formato_log(tmp_path):
 # Credenciais fictícias definidas só no processo de teste (nenhum valor do .env é usado
 # nem impresso). oracledb.connect é substituído por um falso que separa DIAG e KILL.
 
-USER_DIAG_FAKE = "diag_teste_fake"
-USER_KILL_FAKE = "kill_teste_fake"
-
-COLUNAS_ALVO = ["INST_ID", "SID", "serial#", "USERNAME", "PROGRAM", "MACHINE", "STATUS", "SQL_ID", "EVENT", "TYPE"]
-
-
-def _linha_alvo(
-    username="APP_USER",
-    program="app.exe",
-    machine="srv-app01",
-    status="ACTIVE",
-    sql_id="2z0udr4rc402m",
-    event="SQL*Net message from client",
-    tipo="USER",
-    inst_id=1,
-    sid=101,
-    serial=202,
-):
-    return (inst_id, sid, serial, username, program, machine, status, sql_id, event, tipo)
-
-
-class _VarFake:
-    def __init__(self, valor):
-        self._valor = valor
-
-    def getvalue(self):
-        return self._valor
-
-
-class _CursorFake:
-    def __init__(self, oracle_fake, conta):
-        self.oracle = oracle_fake
-        self.conta = conta
-        self.description = [(c,) for c in COLUNAS_ALVO]
-        self._linha = None
-
-    def execute(self, sql, **binds):
-        self.oracle.sql_executado.append((self.conta, sql, binds))
-        if self.conta == "DIAG":
-            self._linha = self.oracle.linhas_diag.pop(0) if self.oracle.linhas_diag else None
-
-    def fetchone(self):
-        return self._linha
-
-    def var(self, *args, **kwargs):
-        return _VarFake(self.oracle.status_pkg)
-
-    def close(self):
-        pass
-
-
-class _ConexaoFake:
-    def __init__(self, oracle_fake, conta):
-        self.oracle = oracle_fake
-        self.conta = conta
-
-    def cursor(self):
-        return _CursorFake(self.oracle, self.conta)
-
-    def close(self):
-        pass
-
-
-class _OracleFake:
-    """Simula oracledb.connect: fila de linhas para a conta DIAG e p_status para a conta KILL."""
-
-    def __init__(self, linhas_diag, status_pkg=None, kill_permitido=True):
-        self.linhas_diag = list(linhas_diag)
-        self.status_pkg = status_pkg
-        self.kill_permitido = kill_permitido
-        self.conexoes = []
-        self.sql_executado = []
-
-    def connect(self, user=None, password=None, dsn=None, **kwargs):
-        self.conexoes.append(user)
-        if user == USER_KILL_FAKE:
-            if not self.kill_permitido:
-                pytest.fail("oracledb.connect não deve ser chamado para a conta KILL neste cenário")
-            return _ConexaoFake(self, "KILL")
-        if user == USER_DIAG_FAKE:
-            return _ConexaoFake(self, "DIAG")
-        pytest.fail(f"Conexão com conta inesperada: {user!r}")
-
-    @property
-    def conexoes_kill(self):
-        return [u for u in self.conexoes if u == USER_KILL_FAKE]
+from tests.fakes_oracle import (  # noqa: E402
+    COLUNAS_ALVO,
+    USER_DIAG_FAKE,
+    USER_KILL_FAKE,
+    _OracleFake,
+    _linha_alvo,
+)
 
 
 @pytest.fixture
