@@ -359,9 +359,18 @@ Critérios:
 
 **Fechamento dos residuais (2026-11-17):**
 - **`STARTUP_KILL`:** `user_role_privs` sem linhas, então não há papel concedido, nem habilitado nem não-default. O conjunto efetivo é CREATE SESSION mais o EXECUTE de objeto em `PKG_OPS_KILL` (0.2a).
-- **`HS_ADMIN_SELECT_ROLE` em `STARTUP_DIAG`:** é herança de `SELECT_CATALOG_ROLE`, que foi concedido diretamente. Pela regra do responsável, **não revogar**.
+- **`HS_ADMIN_SELECT_ROLE` em `STARTUP_DIAG`:** é herança de `SELECT_CATALOG_ROLE`, que foi concedido diretamente; não há concessão direta (leitura 2, `DBA_ROLE_PRIVS`). **Decisão do responsável: não revogar, porque a origem é o papel de catálogo.**
   - **Consequência registrada pelo responsável:** `STARTUP_DIAG` tem leitura via Heterogeneous Services, sem escrita nem kill.
-  - **Precisão:** o papel dá `SELECT` nas visões de dicionário `HS_*` (configuração do Heterogeneous Services). Sozinho, ele não dá acesso a dados remotos, que exigiria database link.
+  - **Escopo do papel — EXPECTATIVA, não verificação:** pela documentação do Oracle, o papel dá `SELECT` nas visões de dicionário `HS_*` (configuração do Heterogeneous Services) e, sozinho, não dá acesso a dados remotos, que exigiria database link. **Isso não foi verificado neste banco.**
+  - **Verificação opcional** (leitura de dicionário, como STARTUPADMIN). Não é condição para a janela nem para a decisão 1; só se o responsável quiser o registro como fato:
+    ```sql
+    SELECT privilege FROM role_sys_privs WHERE role = 'HS_ADMIN_SELECT_ROLE';
+    SELECT table_name, privilege FROM role_tab_privs WHERE role = 'HS_ADMIN_SELECT_ROLE';
+    -- Equivalentes que não dependem de a conta conectada ter acesso ao papel:
+    -- SELECT privilege FROM dba_sys_privs WHERE grantee = 'HS_ADMIN_SELECT_ROLE';
+    -- SELECT owner, table_name, privilege FROM dba_tab_privs WHERE grantee = 'HS_ADMIN_SELECT_ROLE';
+    ```
+    Resultado esperado, se a expectativa se confirmar: nenhum privilégio de sistema e só `SELECT` em visões `HS_*`.
 - **Consultas efetivamente usadas** (informadas pelo responsável, 2026-11-17):
   - Leitura 1, conectado como `STARTUP_KILL`: `SELECT granted_role FROM user_role_privs ORDER BY granted_role;`, sem filtro de grantee, porque a visão já mostra os papéis da conta conectada. Resultado: `no rows selected`. **Válida.**
   - Leitura 2, como STARTUPADMIN: `DBA_ROLE_PRIVS`, a visão correta para concessões a outras contas. **Válida.**
