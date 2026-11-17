@@ -382,3 +382,16 @@ Critérios:
   - Critério registrado pelo responsável: uma leitura 1 feita com `WHERE grantee` seria **inválida** e teria de ser repetida. `USER_ROLE_PRIVS` não tem coluna `GRANTEE`.
 - **Contas READ/MUT do executor:** não constam desta leitura (pendência 7.1).
 
+
+### 7.4 Leitura 0.1 (2026-11-17, STARTUPADMIN, só leitura)
+
+Informada pelo responsável:
+- **Grant direto:** em `dba_tab_privs`, `OPS_OWNER.PKG_OPS_KILL` tem `STARTUP_KILL` / `EXECUTE` / grantable `NO`. É o único grant direto.
+- **Herança por papel** a partir de `STARTUP_KILL` (`dba_role_privs`): sem linhas. Nenhum papel concede EXECUTE no pacote.
+- **Escopo:** grant explícito e herança por papel. Não cobre `EXECUTE ANY PROCEDURE`, tratado em 0.2b e 0.2c.
+- **Conclusão de chamadores:** nenhum além de `STARTUP_KILL` por grant explícito ou papel. As contas com `EXECUTE ANY PROCEDURE` (0.2c, leitura 2 da 7.3) seguem como risco aceito.
+
+**Diferença em relação ao arquivo da parte 1 (registro da sessão principal):**
+- No arquivo `ops_kill_v2_migracao_parte1.sql`, a consulta numerada **0.1** é `DBA_DEPENDENCIES` (*"Nenhum outro objeto depende do pacote"*), não a de grants.
+- A leitura acima cobre grants e papéis. Ela **não** cobre objetos PL/SQL que dependem do pacote, como uma procedure do próprio `OPS_OWNER`, que chama o pacote sem precisar de grant.
+- Por isso a consulta `DBA_DEPENDENCIES` do arquivo continua **sem leitura registrada**.
