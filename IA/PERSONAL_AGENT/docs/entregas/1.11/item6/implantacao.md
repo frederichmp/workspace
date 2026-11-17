@@ -131,6 +131,7 @@ Portanto a ordem possível é **spec v2 e logo em seguida body v2, no mesmo scri
 
 | Passo | Ação | Kill disponível? |
 |---|---|---|
+| P | **Pré-requisito, antes de marcar a janela:** ensaio de banco em sandbox (seção 4.1) concluído, com `DBA_ERRORS` vazio para a v2 **e** para a v1 restaurada, e saídas registradas. Sem isso, a janela não é marcada | sim (v1) |
 | 0 | **Parte 1.** Pré-condições: dependências, grants, `EXECUTE ANY PROCEDURE`, jobs (scheduler, programas, `DBA_JOBS`), `GV$SQL` (só indício), privilégios do OPS_OWNER, `UTL_RAW`. **Responsável confirma que não há outros chamadores.** | sim (v1) |
 | 1 | **Parte 1.** Backup via `DBMS_METADATA` (spec, body, tabela, grants). Comparar com `rollback_ops_kill_v1.sql`; se divergir, **parar** | sim (v1) |
 | 2 | **Parte 1.** `ALTER TABLE ... ADD` (aditivo); conferir que o body continua VALID | sim (v1) |
@@ -168,21 +169,44 @@ Nenhuma sessão é encerrada e nenhuma linha é gravada em `OPS_KILL_AUDIT`, por
 
 Entre 1 e 2, o kill fica indisponível (Python v2 × PKG v1 dá ERRO_ORACLE), de forma segura.
 
-**Ensaio sem banco** (`docs/entregas/1.11/verif_item9_ensaio_rollback.md`, parte B):
-- Num clone descartável, aplicou-se a v2 em `db/ops_kill.sql` e depois restauraram-se a spec e o body a partir de `rollback_ops_kill_v1.sql`. O resultado foi **idêntico** à v1 do repositório (sha `4823ecca4cfd8b21`), com as colunas v2 mantidas.
-- `tests/test_oracle_kill.py` no clone deu 33 passed e 6 skipped. Entre os que passaram está `test_lista_protegida_alinhada_ao_pacote`, que lê `c_protegidos` do `db/ops_kill.sql` restaurado.
-- Os testes sandbox de kill **não foram executados**, porque exigem Oracle. O ensaio do rollback **no banco** continua pendente para uma sessão sandbox autorizada.
+**O rollback foi ensaiado SÓ COMO ARQUIVO. Ele NÃO foi ensaiado no banco.** Até aqui, nada prova que a spec e o body v1 restaurados compilam, que o grant se mantém ou que o kill v1 volta a funcionar. **O ensaio no banco (seção 4.1) é pré-requisito da janela de implantação** (passo P da seção 3.2).
+
+O que o ensaio como arquivo prova (`docs/entregas/1.11/verif_item9_ensaio_rollback.md`, parte B):
+- Num clone descartável, aplicou-se a v2 em `db/ops_kill.sql` e depois restauraram-se a spec e o body a partir de `rollback_ops_kill_v1.sql`. O texto ficou **idêntico** ao da v1 do repositório (sha `4823ecca4cfd8b21`), com as colunas v2 mantidas.
+- `tests/test_oracle_kill.py` no clone deu 33 passed e 6 skipped. Esses testes exercitam o Python. O único que lê o arquivo SQL é `test_lista_protegida_alinhada_ao_pacote` (`c_protegidos`), e ele **não compila nada**.
+- Os testes sandbox de kill **não foram executados**, porque exigem Oracle.
+
+### 4.1 Ensaio de banco em sandbox (pré-requisito da janela)
+
+Executado só em **sandbox autorizado**: banco de teste, com `ORACLE_SANDBOX=1` definida apenas na sessão de execução autorizada. Quem executa é o STARTUPADMIN. Todas as saídas vão para `docs/entregas/<tarefa>/` e para o GOVERNANCA_LOG.
+
+1. **Estado inicial:** v1 instalada, Python v1. Rodar os `test_sandbox_kill_*` atuais e registrar que passam (linha de base).
+2. **Parte 1** no sandbox (pré-condições, backup, `ALTER TABLE`).
+3. **Parte 2** no sandbox. Conferências da v2: `DBA_ERRORS` **vazio**; spec e body VALID; `DBA_ARGUMENTS` com 9 linhas, sem sobrecarga e sem DEFAULT; grant presente.
+4. **Testes sandbox de transição:** bloco v1 contra o PKG v2 dá PLS-00306, com o alvo vivo e sem auditoria. Com o Python v2 (branch do item 6): testes sandbox v2 da seção 5.
+5. **Rollback:** `rollback_ops_kill_v1.sql` no sandbox. Conferências que **provam que a v1 restaurada compila**:
+   - `DBA_ERRORS` **vazio** para `OPS_OWNER.PKG_OPS_KILL`;
+   - spec e body **VALID** em `DBA_OBJECTS`;
+   - `DBA_ARGUMENTS` com **4** linhas (`P_INST_ID`, `P_SID`, `P_SERIAL`, `P_STATUS`), sem sobrecarga;
+   - grant EXECUTE para STARTUP_KILL presente.
+6. **Depois do rollback**, com o Python v1: os `test_sandbox_kill_*` atuais passam de novo, como na linha de base do passo 1. As colunas v2 continuam na tabela e não atrapalham.
+7. **Registro:** saídas brutas de cada passo e veredito. Só com os passos 3 e 5 limpos a janela de produção pode ser marcada.
+
+O clone de arquivo **não substitui** nenhum desses passos. A checagem de `DBA_ERRORS` só tem valor no banco.
 
 ## 5. Testes que provam cada parte
 
 **Sem conexão** (suíte padrão; provam o lado Python):
 - `test_kill_chamada_nomeada_nove_formais`: o fake da conta KILL captura o SQL e exige as 9 associações `nome => :nome`, sem argumento posicional, e binds iguais à reconsulta.
-- `test_kill_ponto_unico_de_chamada`: `inspect.getsource(oracle_dba)` contém exatamente uma ocorrência de `KILL_SESSION(`.
-- `test_kill_pls00306_vira_erro_oracle`: o fake KILL levanta `oracledb.DatabaseError("ORA-06550 ... PLS-00306")`. O teste exige:
-  - 1 execute na conta KILL;
-  - `resultado_banco = ERRO_ORACLE` e `executado False`;
-  - e-mail "NÃO executada", nunca "Aprovada";
-  - nenhuma segunda tentativa.
+- `test_kill_ponto_unico_de_chamada` — **teste de Python com fake**:
+  - O fake da conta KILL (`_CursorFake.execute`) registra cada `execute`.
+  - O teste conduz o fluxo completo (`conduzir_kill_hitl` com APROVADO) em três cenários: o PKG devolve ENCERRADA; o PKG devolve ALVO_DIVERGENTE; o `execute` levanta erro.
+  - Em cada cenário exige **exatamente 1** `execute` na conta KILL e **exatamente 1** conexão KILL. Esse único `execute` tem o SQL `OPS_OWNER.PKG_OPS_KILL.KILL_SESSION` com os 9 binds nomeados.
+  - Prova pelo comportamento, não por busca no código-fonte, que não existe segunda chamada nem chamada alternativa de 4 parâmetros em nenhum dos caminhos.
+- `test_kill_pls00306_vira_erro_oracle` — **teste de Python com fake; não prova nada sobre o banco**:
+  - O fake da conta KILL simula o erro levantando `oracledb.DatabaseError("ORA-06550 ... PLS-00306 ...")` no `execute`.
+  - O teste prova só o lado Python: diante desse erro, há 1 `execute` e nenhuma nova tentativa; `resultado_banco = ERRO_ORACLE` e `executado False`; o e-mail é "NÃO executada", nunca "Aprovada"; o RESULTADO é gravado.
+  - Que o banco v1 **de fato** devolve PLS-00306 para a chamada v2 só fica provado pelo teste sandbox "Python v2 × PKG v1" (abaixo e seção 4.1).
 - `test_identidade_obrigatoria_param_invalido`: identidade vazia ou incompleta, ou `ref` inválida, dá PARAM_INVALIDO antes de qualquer `getenv` ou `connect`.
 
 **Sandbox** (`ORACLE_SANDBOX=1`, só em sessão autorizada; provam o lado banco):
@@ -202,4 +226,5 @@ Entre 1 e 2, o kill fica indisponível (Python v2 × PKG v1 dá ERRO_ORACLE), de
 3. `program` e `machine` podem ser NULL (comparação null-safe); `username` e `logon_time`, não.
 4. Confirmar no passo 0 que não há outros chamadores do pacote.
 5. Os testes sandbox de transição dependem da versão do PKG implantada. Proposta: variável `OPS_KILL_PKG_VERSAO=1|2` definida pelo operador, com skip quando não bate.
+7. Executar, em sessão autorizada, as consultas de pré-condição 0.2a (EXECUTE em `PKG_OPS_KILL`), 0.2b (`EXECUTE ANY PROCEDURE`) e 0.6 (`UTL_RAW`) da parte 1 e registrar a saída. Ela ainda **não existe**, porque essas consultas leem o dicionário do Oracle e nesta rodada não se executa nada no banco.
 6. Janela de implantação (seção 3.2): começa no `inicio_janela` da parte 2, antes da spec v2, e termina no primeiro kill sandbox v2 com ENCERRADA. Ou, em vez dela, a alternativa sem janela, que não é recomendada.

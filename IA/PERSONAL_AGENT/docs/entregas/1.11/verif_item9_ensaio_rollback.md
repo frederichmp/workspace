@@ -295,3 +295,7 @@ Nota: Os testes sandbox de kill não foram executados: exigem ORACLE_SANDBOX=1 e
 ## Nota da sessão principal sobre a saída do B1
 
 A linha `argumentos kill_session na spec=0` do passo 1 do ensaio está **errada por defeito do script de ensaio**: a expressão regular foi escrita com barra invertida duplicada dentro de string bruta (`\w`) e procura uma barra invertida literal, que não existe no texto, então conta zero. A spec v2 aplicada tem 9 parâmetros (ver `docs/entregas/1.11/item6/ops_kill.sql`). Essa contagem era só informativa; o critério de PASSA/FALHA do ensaio é a comparação textual do bloco spec+body restaurado com a v1 do repositório (`IDENTICO=True`), que não depende dela.
+
+## Nota da sessão principal sobre o alcance da parte B
+
+A parte B é um ensaio **só de arquivo**. Ela prova que o texto da spec e do body restaurados é idêntico ao da v1, mas **não prova que a v1 restaurada compila**. A checagem de `DBA_ERRORS` (vazio), VALID e `DBA_ARGUMENTS` com 4 argumentos só tem valor no **ensaio de banco em sandbox**, descrito em `docs/entregas/1.11/item6/implantacao.md`, seção 4.1. Esse ensaio é pré-requisito da janela de implantação.
