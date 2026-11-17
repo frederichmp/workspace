@@ -442,4 +442,14 @@ SELECT o.object_name, o.created, o.last_ddl_time, t.last_analyzed, t.num_rows
  WHERE o.owner = 'STARTUPADMIN' AND o.object_type = 'TABLE'
  ORDER BY o.object_name;
 ```
-**Situação:** pendente (origem de `T1` não verificada).
+**Situação:** atendida. O responsável confirma que `T1` é de teste (ver condição 1 abaixo).
+
+**Pré-requisitos do ensaio (registro do responsável, 2026-11-17). A parte 1 e a parte 2 AINDA NÃO foram executadas.**
+
+| # | Condição | Situação |
+|---|---|---|
+| 1 | **`T1`** (condição a acima): o responsável confirma que `T1` é de teste. O ambiente é de teste, sem processos além dos deste trabalho | **Atendida** (confirmação do responsável) |
+| 2 | **Backup:** `DBMS_METADATA` do pacote instalado, comparado com `rollback_ops_kill_v1.sql`. **Idêntico em semântica.** Diferenças cosméticas: `EDITIONABLE` e formatação. Arquivo de destino: `docs/entregas/1.11/item6/backup_instalado_v1.sql` | Comparação **feita** pelo responsável. **Arquivo ainda não salvo**: a saída do `DBMS_METADATA` está na sessão do responsável e não foi entregue a esta sessão, que não o reconstrói |
+| 3 | **Dependência:** a parte 1 (três colunas novas em `OPS_KILL_AUDIT`) precede a parte 2. Sem ela, o INSERT da v2 falha. **Precisão:** o `INSERT` do `registra` é SQL estático, então a falha aparece já na **compilação** do body v2 (`ORA-00904`, coluna inexistente). O pacote fica INVALID, e toda chamada recebe `ORA-04063` | Regra registrada. A ordem já é a das partes 1 → 2 (seção 3.2) |
+| 4 | **Autorização:** texto literal do responsável, a confirmar pela frase combinada | **Pendente.** Nenhuma frase combinada está registrada nesta conversa nem nos documentos; o responsável deve defini-la |
+| 5 | **Escopo do poder de mutação:** só objetos de teste deste ensaio. **Sessões-alvo:** somente sessões descartáveis criadas pelo ensaio. **Não encerrar** sessões de SYS, de background ou de terceiros | Regra registrada |
