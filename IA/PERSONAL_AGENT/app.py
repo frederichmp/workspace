@@ -256,7 +256,7 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
                     inst_id=inst_id_int, sid=sid_int, serial=serial_int
                 )
 
-                if not check_alvo.get("encontrado"):
+                if not check_alvo.get("elegivel"):
                     motivo_falha = check_alvo.get("motivo", "ALVO_NAO_ENCONTRADO")
                     resultado_tool = json.dumps(
                         {
@@ -278,7 +278,7 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
                             "content": resultado_tool,
                         }
                     )
-                    yield f"⚠️ **Sessão Não Encontrada ({motivo_falha}):** Alvo não localizado na GV$SESSION. Ação cancelada sem solicitação de aprovação."
+                    yield f"⚠️ **Alvo Recusado ({motivo_falha}):** {check_alvo.get('mensagem', 'Alvo não elegível na GV$SESSION.')} Ação cancelada sem solicitação de aprovação."
                     continue
 
                 # 3. Alvo localizado: gera hash SHA-256 e ativa barreira HITL

@@ -213,7 +213,7 @@ def executar_agente(prompt_usuario: str) -> None:
                             inst_id=inst_id_val, sid=sid_val, serial=serial_val
                         )
 
-                        if not check_alvo.get("encontrado"):
+                        if not check_alvo.get("elegivel"):
                             motivo_falha = check_alvo.get("motivo", "ALVO_NAO_ENCONTRADO")
                             resultado_tool = json.dumps(
                                 {
@@ -227,9 +227,9 @@ def executar_agente(prompt_usuario: str) -> None:
                                 },
                                 ensure_ascii=False,
                             )
-                            print(f"[Sistema]: Sessão não encontrada ({motivo_falha}). Ação cancelada sem solicitação de aprovação.")
+                            print(f"[Sistema]: Alvo recusado ({motivo_falha}). Ação cancelada sem solicitação de aprovação.")
                             logging.warning(
-                                f"HITL CANCELADO: Alvo não encontrado na GV$SESSION | "
+                                f"HITL CANCELADO: Alvo recusado na pré-consulta GV$SESSION | "
                                 f"inst_id={inst_id_val}, sid={sid_val}, serial={serial_val} | Motivo={motivo_falha}"
                             )
                         else:

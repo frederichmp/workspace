@@ -21,6 +21,19 @@ from dotenv import load_dotenv
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
+# Usuários que nunca podem ser alvo de encerramento.
+# Fonte única no Python; deve permanecer idêntica a c_protegidos em
+# OPS_OWNER.PKG_OPS_KILL (db/ops_kill.sql): ',SYS,SYSTEM,DBSNMP,SYSMAN,OUTLN,STARTUPADMIN,OPS_OWNER,'
+USUARIOS_PROTEGIDOS: Tuple[str, ...] = (
+    "SYS",
+    "SYSTEM",
+    "DBSNMP",
+    "SYSMAN",
+    "OUTLN",
+    "STARTUPADMIN",
+    "OPS_OWNER",
+)
+
 
 def _extrair_host_porta(dsn: str) -> Tuple[str, int]:
     """
@@ -437,8 +450,14 @@ def consultar_alvo_sessao_diag(
 ) -> Dict[str, Any]:
     """
     Consulta os metadados da sessão na GV$SESSION utilizando a conta ORACLE_USER_DIAG.
-    Retorna os campos: inst_id, sid, serial#, username, program, machine, status, sql_id, event.
-    Se a sessão não existir, retorna status com motivo ALVO_NAO_ENCONTRADO, sem solicitar aprovação.
+    Retorna os campos: inst_id, sid, serial#, username, program, machine, status, sql_id, event, type.
+
+    Elegibilidade (mesma ordem de checagem de PKG_OPS_KILL):
+      - sessão inexistente            -> encontrado=False, motivo ALVO_NAO_ENCONTRADO;
+      - TYPE <> 'USER'                -> encontrado=True, elegivel=False, motivo NAO_USUARIO;
+      - username nulo ou protegido    -> encontrado=True, elegivel=False, motivo USUARIO_PROTEGIDO;
+      - caso contrário                -> encontrado=True, elegivel=True.
+    Somente alvos elegíveis podem seguir para a solicitação de aprovação.
     """
     # 1. Validação local antes de qualquer conexão: inteiros positivos
     try:
@@ -499,12 +518,13 @@ def consultar_alvo_sessao_diag(
             SELECT inst_id,
                    sid,
                    serial# AS "serial#",
-                   NVL(username, 'BACKGROUND') AS username,
+                   username,
                    program,
                    machine,
                    status,
                    sql_id,
-                   event
+                   event,
+                   type
             FROM GV$SESSION
             WHERE inst_id = :p_inst_id
               AND sid = :p_sid
@@ -534,8 +554,36 @@ def consultar_alvo_sessao_diag(
             dados_alvo[col] = val
         dados_alvo["serial#"] = row[2]  # preserva chave explícita serial#
 
+        tipo_sessao = str(dados_alvo.get("type") or "").upper()
+        username = dados_alvo.get("username")
+
+        if tipo_sessao != "USER":
+            return {
+                "encontrado": True,
+                "elegivel": False,
+                "motivo": "NAO_USUARIO",
+                "alvo": dados_alvo,
+                "mensagem": (
+                    f"Sessão inst_id={inst_id_int}, sid={sid_int}, serial={serial_int} "
+                    f"não é de usuário (TYPE={tipo_sessao or 'NULO'}). Encerramento não permitido."
+                ),
+            }
+
+        if not username or str(username).upper() in USUARIOS_PROTEGIDOS:
+            return {
+                "encontrado": True,
+                "elegivel": False,
+                "motivo": "USUARIO_PROTEGIDO",
+                "alvo": dados_alvo,
+                "mensagem": (
+                    f"Sessão inst_id={inst_id_int}, sid={sid_int}, serial={serial_int} "
+                    f"pertence a usuário protegido ({username or 'NULO'}). Encerramento não permitido."
+                ),
+            }
+
         return {
             "encontrado": True,
+            "elegivel": True,
             "alvo": dados_alvo,
         }
     except oracledb.Error as db_err:
