@@ -400,7 +400,7 @@ Informada pelo responsável:
 
 | Consulta | Situação | Observação |
 |---|---|---|
-| **0.1 do arquivo** (`DBA_DEPENDENCIES`) | **SEM LEITURA** | Não é coberta pela leitura de grants da 7.4. Objetos do próprio `OPS_OWNER` que chamam o pacote sem grant só aparecem aqui |
+| **0.1 do arquivo** (`DBA_DEPENDENCIES`) | **LIDA** (2026-11-17, STARTUPADMIN, só leitura) | **Saída:** `OPS_OWNER.PKG_OPS_KILL` (PACKAGE BODY) → `OPS_OWNER.PKG_OPS_KILL` (PACKAGE). Única linha. **Conclusão:** nenhum objeto PL/SQL compilado depende do pacote a partir de outra conta. **Observação:** como a única linha é a do próprio body, também não há outro objeto do `OPS_OWNER` dependendo do pacote; esse era o caso que a 7.4 não cobria. **Limite:** a visão é estática e não cobre `EXECUTE IMMEDIATE` nem referência em texto. A cobertura dinâmica depende das leituras 0.3 e 0.4, ainda pendentes |
 | **7.4** (grants e herança por papel) | Lida | É **outra consulta** e **não substitui** a 0.1 do arquivo |
 | **0.3** (jobs: `dba_scheduler_jobs`, `dba_scheduler_programs`, `dba_jobs`) | **Sem leitura** | — |
 | **0.4** (`GV$SQL`) | Sem leitura | **Indício, não prova.** Exclui `STARTUP_KILL` e `STARTUPADMIN` pelo `parsing_schema_name` e só vê o shared pool. Ausência de linhas **não conclui nada** sobre chamadores |
