@@ -427,6 +427,7 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
     st.session_state.messages.append(
         {"role": "assistant", "content": laudo_fechamento}
     )
+    return True
 
 
 # ==============================================================================
