@@ -418,3 +418,18 @@ Informada pelo responsável:
 - A decisão 4 (seção 6), a 7.1 e a 7.3 classificam `STARTUPADMIN` como **conta de administração** e concluem que **nenhuma conta de aplicação** tem EXECUTE efetivo no pacote.
 - Com `STARTUPADMIN` também como conta MUT do executor, essa conclusão deixa de valer. Pela conta MUT, a aplicação tem `EXECUTE ANY PROCEDURE`, que permite chamar `KILL_SESSION` fora do fluxo HITL, e pelo papel `DBA` pode emitir `ALTER SYSTEM KILL SESSION` diretamente.
 - **Decisão 4 reaberta:** a conta MUT do executor é DBA, e isso dá EXECUTE efetivo a conta de aplicação.
+
+**Condição a do ensaio (seção 4.1): tabelas do schema STARTUPADMIN** (registro do responsável, 2026-11-17)
+- A consulta de `dba_objects` (2026-11-17) mostrou duas tabelas no schema STARTUPADMIN: `TB_TESTE_EXECUTOR` e `T1`.
+- A finalidade de `T1` não pode ser confirmada pelo nome. Antes do ensaio, verificar a origem: data de criação, última análise e número de linhas. Se for o caso, o responsável confirma que é de teste.
+- O ensaio não toca nas tabelas. A condição é só que nenhuma delas seja de cliente ou de produção.
+
+Consulta de verificação (só leitura). `CREATED` está em `DBA_OBJECTS`; `LAST_ANALYZED` e `NUM_ROWS` estão em `DBA_TABLES`:
+```sql
+SELECT o.object_name, o.created, o.last_ddl_time, t.last_analyzed, t.num_rows
+  FROM dba_objects o
+  JOIN dba_tables t ON t.owner = o.owner AND t.table_name = o.object_name
+ WHERE o.owner = 'STARTUPADMIN' AND o.object_type = 'TABLE'
+ ORDER BY o.object_name;
+```
+**Situação:** pendente (origem de `T1` não verificada).
