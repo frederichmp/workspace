@@ -1,0 +1,191 @@
+-- PROPOSTA (tarefa 1.11, item 6) — PENDENTE APROVAÇÃO. NÃO EXECUTAR.
+-- Migração v1 -> v2, PARTE 2 de 2: spec e body v2 e conferências.
+-- Executar como STARTUPADMIN SOMENTE depois que a PARTE 1 terminou e suas saídas foram avaliadas.
+-- INÍCIO DA JANELA DE INDISPONIBILIDADE DO KILL: a partir daqui, a chamada v1
+-- (Python atual, 4 argumentos) recebe PLS-00306, até o Python v2 ser implantado.
+-- Spec e body abaixo são cópia literal de ops_kill.sql (proposta v2, mesma pasta).
+
+WHENEVER SQLERROR EXIT FAILURE ROLLBACK
+SET ECHO ON
+
+ALTER SESSION SET CURRENT_SCHEMA = OPS_OWNER;
+
+CREATE OR REPLACE PACKAGE pkg_ops_kill AS
+  -- Única procedure pública. Todos os parâmetros IN são obrigatórios (sem DEFAULT).
+  PROCEDURE kill_session (
+    p_inst_id             IN  NUMBER,
+    p_sid                 IN  NUMBER,
+    p_serial              IN  NUMBER,
+    p_username_esperado   IN  VARCHAR2,
+    p_program_esperado    IN  VARCHAR2,
+    p_machine_esperado    IN  VARCHAR2,
+    p_logon_time_esperado IN  DATE,
+    p_ref_aprovacao       IN  VARCHAR2,
+    p_status              OUT VARCHAR2
+  );
+END pkg_ops_kill;
+/
+
+CREATE OR REPLACE PACKAGE BODY pkg_ops_kill AS
+  -- Usuários que esta rotina nunca derruba
+  c_protegidos CONSTANT VARCHAR2(200) :=
+    ',SYS,SYSTEM,DBSNMP,SYSMAN,OUTLN,STARTUPADMIN,OPS_OWNER,';
+
+  PROCEDURE registra (
+    p_solicitante VARCHAR2, p_inst NUMBER, p_sid NUMBER, p_serial NUMBER,
+    p_user VARCHAR2, p_prog VARCHAR2, p_mach VARCHAR2, p_logon DATE,
+    p_ref VARCHAR2, p_div VARCHAR2,
+    p_status VARCHAR2, p_msg VARCHAR2
+  ) IS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+  BEGIN
+    INSERT INTO ops_kill_audit (solicitante, inst_id, sid, serial_no,
+      alvo_username, alvo_program, alvo_machine, alvo_logon_time,
+      ref_aprovacao, campos_divergentes, status_codigo, mensagem)
+    VALUES (p_solicitante, p_inst, p_sid, p_serial,
+      p_user, p_prog, p_mach, p_logon,
+      SUBSTRB(p_ref, 1, 64), SUBSTRB(p_div, 1, 64), p_status, SUBSTRB(p_msg, 1, 400));
+    COMMIT;
+  END registra;
+
+  PROCEDURE kill_session (
+    p_inst_id             IN  NUMBER,
+    p_sid                 IN  NUMBER,
+    p_serial              IN  NUMBER,
+    p_username_esperado   IN  VARCHAR2,
+    p_program_esperado    IN  VARCHAR2,
+    p_machine_esperado    IN  VARCHAR2,
+    p_logon_time_esperado IN  DATE,
+    p_ref_aprovacao       IN  VARCHAR2,
+    p_status              OUT VARCHAR2
+  ) IS
+    v_solicitante VARCHAR2(128) := SYS_CONTEXT('USERENV', 'SESSION_USER');
+    v_user   VARCHAR2(128);
+    v_prog   VARCHAR2(128);
+    v_mach   VARCHAR2(128);
+    v_type   VARCHAR2(10);
+    v_logon  DATE;
+    v_div    VARCHAR2(64);
+    v_status VARCHAR2(40);
+    v_msg    VARCHAR2(400);
+  BEGIN
+    -- 1. Parâmetros. program e machine podem ser NULL (a GV$SESSION pode trazê-los
+    --    nulos; a comparação abaixo é null-safe). username e logon_time não.
+    --    Tamanhos limitados aos das colunas da GV$SESSION (bytes), para que nenhum
+    --    valor estoure variáveis/colunas e a chamada sempre termine com auditoria.
+    --    REGEXP_LIKE com 'c': sensível a maiúsculas independentemente do NLS_SORT.
+    IF p_inst_id IS NULL OR p_sid IS NULL OR p_serial IS NULL
+       OR p_inst_id <= 0 OR p_sid <= 0 OR p_serial <= 0
+       OR p_username_esperado IS NULL
+       OR p_logon_time_esperado IS NULL
+       OR LENGTHB(p_username_esperado) > 128
+       OR LENGTHB(p_program_esperado) > 128
+       OR LENGTHB(p_machine_esperado) > 128
+       OR p_ref_aprovacao IS NULL
+       OR NOT REGEXP_LIKE(p_ref_aprovacao, '^[0-9a-f]{32}$', 'c') THEN
+      v_status := 'PARAM_INVALIDO';
+
+    -- 2. Própria sessão
+    ELSIF p_inst_id = SYS_CONTEXT('USERENV', 'INSTANCE')
+      AND p_sid = SYS_CONTEXT('USERENV', 'SID') THEN
+      v_status := 'PROPRIA_SESSAO';
+
+    ELSE
+      -- 3. Um único SELECT: lê o alvo e calcula os campos divergentes na mesma leitura.
+      --    DECODE trata NULL = NULL como igual (comparação null-safe). Textos comparados
+      --    como RAW (binário): o resultado não depende de NLS_COMP/NLS_SORT da sessão
+      --    chamadora (BINARY_CI/AI tratariam 'App.exe' e 'app.exe' como iguais).
+      BEGIN
+        SELECT username, program, machine, type, logon_time,
+               RTRIM(
+                 CASE WHEN DECODE(UTL_RAW.CAST_TO_RAW(username), UTL_RAW.CAST_TO_RAW(p_username_esperado), 0, 1) = 1 THEN 'USERNAME,' END ||
+                 CASE WHEN DECODE(UTL_RAW.CAST_TO_RAW(program),  UTL_RAW.CAST_TO_RAW(p_program_esperado),  0, 1) = 1 THEN 'PROGRAM,'  END ||
+                 CASE WHEN DECODE(UTL_RAW.CAST_TO_RAW(machine),  UTL_RAW.CAST_TO_RAW(p_machine_esperado),  0, 1) = 1 THEN 'MACHINE,'  END ||
+                 CASE WHEN DECODE(logon_time, p_logon_time_esperado, 0, 1) = 1 THEN 'LOGON_TIME,' END,
+                 ',')
+          INTO v_user, v_prog, v_mach, v_type, v_logon, v_div
+          FROM sys.gv_$session
+         WHERE inst_id = p_inst_id
+           AND sid = p_sid
+           AND serial# = p_serial;
+      EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+          v_status := 'ALVO_NAO_ENCONTRADO';
+      END;
+
+      -- 4. Identidade divergente: não encerra. Observados vão nas colunas alvo_*;
+      --    esperados (só dos campos divergentes) vão em mensagem.
+      IF v_status IS NULL AND v_div IS NOT NULL THEN
+        v_status := 'ALVO_DIVERGENTE';
+        v_msg := SUBSTRB('divergente: ' || v_div || ' | esperado:'
+          || CASE WHEN INSTR(v_div, 'USERNAME')   > 0 THEN ' username='   || p_username_esperado END
+          || CASE WHEN INSTR(v_div, 'PROGRAM')    > 0 THEN ' program='    || NVL(p_program_esperado, '<null>') END
+          || CASE WHEN INSTR(v_div, 'MACHINE')    > 0 THEN ' machine='    || NVL(p_machine_esperado, '<null>') END
+          || CASE WHEN INSTR(v_div, 'LOGON_TIME') > 0 THEN ' logon_time=' || TO_CHAR(p_logon_time_esperado, 'YYYY-MM-DD HH24:MI:SS') END,
+          1, 400);
+      END IF;
+
+      -- 5/6. Tipo e usuário protegido, sobre os valores OBSERVADOS
+      IF v_status IS NULL THEN
+        IF v_type <> 'USER' THEN
+          v_status := 'NAO_USUARIO';
+        ELSIF v_user IS NULL
+           OR INSTR(c_protegidos, ',' || UPPER(v_user) || ',') > 0 THEN
+          v_status := 'USUARIO_PROTEGIDO';
+        END IF;
+      END IF;
+
+      -- 7. Encerramento. Micro-janela residual SELECT -> ALTER SYSTEM aceita: o comando
+      --    é endereçado por sid + serial#; se a sessão sair e o SID for reutilizado,
+      --    o serial# muda e o Oracle devolve ORA-00030 (ALVO_NAO_ENCONTRADO).
+      IF v_status IS NULL THEN
+        BEGIN
+          EXECUTE IMMEDIATE 'ALTER SYSTEM KILL SESSION '''
+            || TO_CHAR(p_sid) || ',' || TO_CHAR(p_serial)
+            || ',@' || TO_CHAR(p_inst_id) || ''' IMMEDIATE';
+          v_status := 'ENCERRADA';
+        EXCEPTION
+          WHEN OTHERS THEN
+            IF SQLCODE = -31 THEN
+              v_status := 'MARCADA_PARA_KILL';
+            ELSIF SQLCODE = -30 THEN
+              v_status := 'ALVO_NAO_ENCONTRADO';
+            ELSE
+              v_status := 'ERRO_ORACLE';
+              v_msg := SUBSTRB(SQLERRM, 1, 400);
+            END IF;
+        END;
+      END IF;
+    END IF;
+
+    registra(v_solicitante, p_inst_id, p_sid, p_serial,
+             v_user, v_prog, v_mach, v_logon,
+             p_ref_aprovacao, v_div, v_status, v_msg);
+    p_status := v_status;
+  END kill_session;
+END pkg_ops_kill;
+/
+
+SHOW ERRORS PACKAGE BODY pkg_ops_kill
+
+ALTER SESSION SET CURRENT_SCHEMA = STARTUPADMIN;
+
+-- ============================================================================
+-- Conferências pós-compilação (esperado entre parênteses)
+-- ============================================================================
+-- (0 linhas)
+SELECT name, type, line, text FROM dba_errors
+ WHERE owner = 'OPS_OWNER' AND name = 'PKG_OPS_KILL';
+-- (PACKAGE VALID; PACKAGE BODY VALID)
+SELECT object_type, status FROM dba_objects
+ WHERE owner = 'OPS_OWNER' AND object_name = 'PKG_OPS_KILL';
+-- (9 linhas, posições 1 a 9, OVERLOAD nulo, nenhuma DEFAULTED = 'Y')
+SELECT position, argument_name, data_type, in_out, overload, defaulted
+  FROM dba_arguments
+ WHERE owner = 'OPS_OWNER' AND package_name = 'PKG_OPS_KILL' AND object_name = 'KILL_SESSION'
+ ORDER BY position;
+-- (STARTUP_KILL / EXECUTE; CREATE OR REPLACE preserva o grant)
+SELECT grantee, privilege FROM dba_tab_privs
+ WHERE owner = 'OPS_OWNER' AND table_name = 'PKG_OPS_KILL';
+
+-- PASSO 5 (implantar o Python do item 6) e PASSO 6 (testes sandbox): ver implantacao.md.
