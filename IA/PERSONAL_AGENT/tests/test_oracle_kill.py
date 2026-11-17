@@ -23,7 +23,7 @@ b) Sandbox (sandbox_only, requer ORACLE_SANDBOX=1):
    - STARTUP_DIAG tentando comando direto -> ORA-01031;
    - STARTUP_KILL tentando comando direto -> ORA-01031.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import inspect
 import json
 import os
@@ -46,6 +46,7 @@ from src.tools.oracle_dba import (
     matar_sessao_oracle,
     gerar_payload_e_hash_aprovacao,
     oracle_tools_schema,
+    registrar_decisao_kill,
     registrar_log_aprovacao_kill,
 )
 
@@ -434,6 +435,127 @@ def test_assinatura_sem_default_para_inst_id():
         if param is not None and param.default is not inspect.Parameter.empty:
             com_default.append(nome)
     assert not com_default, f"inst_id com default em: {com_default}"
+
+
+def _solicitar_capturando(captura, decisao="APROVADO", aprovador="dba_teste", motivo=None):
+    """Prompt falso que guarda timestamp e hash do preparo e devolve a decisão pedida."""
+    def _solicitar(prep):
+        captura["ts"] = prep["timestamp"]
+        captura["hash"] = prep["hash_identidade"]
+        return decisao, aprovador, motivo
+    return _solicitar
+
+
+def _relogio_relativo(captura, delta):
+    """Relógio injetado: instante da preparação (capturado no prompt) + delta."""
+    return lambda: datetime.fromisoformat(captura["ts"]) + delta
+
+
+@pytest.mark.parametrize(
+    "delta",
+    [timedelta(seconds=300), timedelta(seconds=301), timedelta(days=1), timedelta(seconds=-1)],
+    ids=["fronteira_300s", "301s", "1_dia", "futuro"],
+)
+def test_aprovacao_expirada_vira_timeout(monkeypatch, tmp_path, ambiente_fake, delta):
+    """APROVADO fora de [0, TTL) -> TIMEOUT/APROVACAO_EXPIRADA, sem reconsulta, 0 KILL, 0 e-mail."""
+    assert oracle_dba.APROVACAO_TTL_SEGUNDOS == 300
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo()], kill_permitido=False))
+    log = tmp_path / "kill.log"
+    cap = {}
+
+    desfecho = conduzir_kill_hitl(
+        dict(ARGS_ALVO),
+        solicitar_aprovacao=_solicitar_capturando(cap),
+        canal="TESTE",
+        caminho_log=log,
+        agora=_relogio_relativo(cap, delta),
+    )
+
+    assert desfecho["prompt_exibido"] is True
+    assert desfecho["decisao"] == "TIMEOUT"
+    assert desfecho["motivo"] == "APROVACAO_EXPIRADA"
+    assert desfecho["executado"] is False
+    assert desfecho["resultado_banco"] is None
+    assert desfecho["assunto_email"] is None
+    assert oracle_fake.conexoes_kill == []
+    assert oracle_fake.conexoes.count(USER_DIAG_FAKE) == 1, "não deve haver reconsulta DIAG após expirar"
+    assert ambiente_fake == []
+
+    tool = json.loads(desfecho["resultado_tool"])
+    assert tool["decisao"] == "TIMEOUT"
+    assert tool["executado"] is False
+    assert tool["motivo"] == "APROVACAO_EXPIRADA"
+
+    registros = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()]
+    assert len(registros) == 1
+    reg = registros[0]
+    assert reg["decisao"] == "TIMEOUT"
+    assert reg["motivo"] == "APROVACAO_EXPIRADA"
+    assert reg["resultado_banco"] is None
+    assert reg["aprovador"] == "dba_teste"
+    assert reg["hash_payload"] == cap["hash"]
+    assert "status_banco" not in reg
+
+    # Fail-closed: preparado_em ausente, vazio, inválido ou sem fuso -> TIMEOUT, 0 KILL
+    instante = datetime(2026, 11, 17, 12, 0, tzinfo=timezone.utc)
+    for preparado_em in (None, "", "lixo", "2026-11-17T12:00:00"):
+        res = registrar_decisao_kill(
+            decisao="APROVADO", aprovador="dba_teste", inst_id=1, sid=101, serial=202,
+            alvo={}, hash_aprovado="hash-fake", canal="TESTE", preparado_em=preparado_em,
+            caminho_log=log, agora=lambda: instante,
+        )
+        assert res["decisao"] == "TIMEOUT", f"preparado_em={preparado_em!r}"
+        assert res["motivo"] == "APROVACAO_EXPIRADA"
+        assert res["executado"] is False
+    assert oracle_fake.conexoes_kill == []
+    assert ambiente_fake == []
+
+    # Só APROVADO é convertido: REJEITADO após o TTL continua REJEITADO
+    oracle_fake.linhas_diag.append(_linha_alvo())
+    cap_rej = {}
+    desfecho_rej = conduzir_kill_hitl(
+        dict(ARGS_ALVO),
+        solicitar_aprovacao=_solicitar_capturando(cap_rej, decisao="REJEITADO", motivo="REJEITADO_PELO_APROVADOR"),
+        canal="TESTE",
+        caminho_log=log,
+        agora=_relogio_relativo(cap_rej, timedelta(seconds=301)),
+    )
+    assert desfecho_rej["decisao"] == "REJEITADO"
+    assert desfecho_rej["motivo"] == "REJEITADO_PELO_APROVADOR"
+    assert oracle_fake.conexoes_kill == []
+
+
+@pytest.mark.parametrize(
+    "delta",
+    [timedelta(0), timedelta(seconds=299, microseconds=999999)],
+    ids=["0s", "299_999999s"],
+)
+def test_aprovacao_dentro_do_ttl_executa(monkeypatch, tmp_path, ambiente_fake, delta):
+    """APROVADO dentro de [0, TTL) segue o fluxo normal: reconsulta, 1 KILL, e-mail de aprovada."""
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo(), _linha_alvo()], status_pkg="ENCERRADA"))
+    log = tmp_path / "kill.log"
+    cap = {}
+
+    desfecho = conduzir_kill_hitl(
+        dict(ARGS_ALVO),
+        solicitar_aprovacao=_solicitar_capturando(cap),
+        canal="TESTE",
+        caminho_log=log,
+        agora=_relogio_relativo(cap, delta),
+    )
+
+    assert desfecho["decisao"] == "APROVADO"
+    assert desfecho["executado"] is True
+    assert desfecho["resultado_banco"] == "ENCERRADA"
+    assert oracle_fake.conexoes_kill == [USER_KILL_FAKE]
+    assert oracle_fake.conexoes.count(USER_DIAG_FAKE) == 2
+    assert len(ambiente_fake) == 1
+    assert ambiente_fake[0]["assunto"].startswith("[AGENTE DBA] Intervenção Aprovada por dba_teste")
+
+    registros = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()]
+    assert len(registros) == 1
+    assert registros[0]["decisao"] == "APROVADO"
+    assert registros[0]["motivo"] is None
 
 
 def test_resultado_nao_usuario_com_aprovacao_nao_envia_email_de_aprovada(monkeypatch, tmp_path, ambiente_fake):

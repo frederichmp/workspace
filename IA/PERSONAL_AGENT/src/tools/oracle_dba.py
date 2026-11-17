@@ -4,7 +4,7 @@ Aplica isolamento estrito de credenciais via variáveis de ambiente (.env),
 papéis segregados (ORACLE_USER_DIAG para leitura/diagnóstico e ORACLE_USER_KILL para intervenção via PKG_OPS_KILL),
 pré-validação rápida de rede/VPN (Socket TCP), Edge Filtering e trilha de auditoria HITL.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import logging
@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 # Decisões humanas possíveis sobre uma intervenção de kill
 DECISOES_KILL: Tuple[str, ...] = ("APROVADO", "REJEITADO", "TIMEOUT")
+
+# Validade da aprovação humana, contada a partir da preparação (exibição dos dados do alvo).
+# Verificação passiva no momento da decisão: APROVADO fora de [0, TTL) vira TIMEOUT.
+APROVACAO_TTL_SEGUNDOS = 300
 
 # Resultados de PKG_OPS_KILL que significam execução efetiva do encerramento
 RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = ("ENCERRADA", "MARCADA_PARA_KILL")
@@ -1009,6 +1013,26 @@ def montar_notificacao_kill(
     return assunto, corpo
 
 
+def _agora_utc() -> datetime:
+    """Relógio padrão (UTC, com fuso) usado na verificação de expiração da aprovação."""
+    return datetime.now(timezone.utc)
+
+
+def _aprovacao_expirada(preparado_em: Optional[str], instante: datetime) -> bool:
+    """
+    True se a aprovação está fora da janela válida [0, APROVACAO_TTL_SEGUNDOS) desde a preparação.
+    Fail-closed: preparado_em ausente, inválido, sem fuso ou no futuro conta como expirado.
+    """
+    try:
+        inicio = datetime.fromisoformat(preparado_em)
+        if inicio.tzinfo is None or instante.tzinfo is None:
+            return True
+        decorrido = instante - inicio
+    except (TypeError, ValueError):
+        return True
+    return decorrido < timedelta(0) or decorrido >= timedelta(seconds=APROVACAO_TTL_SEGUNDOS)
+
+
 def registrar_decisao_kill(
     decisao: str,
     aprovador: str,
@@ -1018,8 +1042,10 @@ def registrar_decisao_kill(
     alvo: Dict[str, Any],
     hash_aprovado: str,
     canal: str,
+    preparado_em: Optional[str],
     motivo: Optional[str] = None,
     caminho_log: Optional[Path] = None,
+    agora: Optional[Callable[[], datetime]] = None,
 ) -> Dict[str, Any]:
     """
     Aplica a decisão humana sobre uma intervenção já preparada (alvo elegível e hash exibido).
@@ -1027,7 +1053,12 @@ def registrar_decisao_kill(
     - APROVADO com aprovador identificado: executa o encerramento, grava decisao e
       resultado_banco separados e envia e-mail conforme o resultado efetivo.
     - APROVADO sem aprovador: convertido em REJEITADO (motivo SEM_IDENTIFICACAO), sem execução.
+    - APROVADO fora da validade (preparado_em + APROVACAO_TTL_SEGUNDOS, fail-closed): convertido
+      em TIMEOUT (motivo APROVACAO_EXPIRADA), sem reconsulta, sem execução e sem e-mail.
     - REJEITADO / TIMEOUT: grava a decisão sem execução e sem e-mail.
+
+    preparado_em: timestamp ISO-8601 com fuso devolvido por preparar_intervencao_kill.
+    agora: relógio injetável (padrão: UTC atual); lido uma única vez, antes de qualquer conexão.
 
     Retorna dict com decisao, resultado_banco, executado, motivo, resultado_tool (JSON para o LLM),
     registro gravado e dados da notificação.
@@ -1035,12 +1066,21 @@ def registrar_decisao_kill(
     if decisao not in DECISOES_KILL:
         raise ValueError(f"Decisão inválida: {decisao!r}. Esperado um de {DECISOES_KILL}.")
 
+    instante_decisao = (agora or _agora_utc)()
     parametros = {"inst_id": inst_id, "sid": sid, "serial": serial}
     aprovador_limpo = (aprovador or "").strip()
 
     if decisao == "APROVADO" and not aprovador_limpo:
         decisao = "REJEITADO"
         motivo = "SEM_IDENTIFICACAO"
+
+    if decisao == "APROVADO" and _aprovacao_expirada(preparado_em, instante_decisao):
+        logger.warning(
+            f"AUDITORIA HITL: aprovação expirada ({canal}) | preparado_em={preparado_em!r} | "
+            f"decidido_em={instante_decisao.isoformat()} | TTL={APROVACAO_TTL_SEGUNDOS}s"
+        )
+        decisao = "TIMEOUT"
+        motivo = "APROVACAO_EXPIRADA"
 
     if decisao != "APROVADO":
         if motivo is None:
@@ -1060,6 +1100,18 @@ def registrar_decisao_kill(
             f"AUDITORIA HITL: {decisao} ({motivo}) por {aprovador_registro} ({canal}) | "
             f"inst_id={inst_id}, sid={sid}, serial={serial} | Hash={hash_aprovado}"
         )
+        if motivo == "APROVACAO_EXPIRADA":
+            mensagem = (
+                f"Aprovação expirada: decisão registrada após o prazo de {APROVACAO_TTL_SEGUNDOS} s "
+                "desde a preparação; os dados exibidos podem estar vencidos. "
+                "Nenhuma chamada à conta KILL foi feita. "
+                "Para prosseguir, reconsulte a sessão e solicite nova aprovação."
+            )
+        else:
+            mensagem = (
+                f"Intervenção não aprovada ({decisao}/{motivo}) por '{aprovador_registro}'. "
+                "Nenhuma chamada à conta KILL foi feita."
+            )
         resultado_tool = json.dumps(
             {
                 "status": "abortado",
@@ -1067,10 +1119,7 @@ def registrar_decisao_kill(
                 "motivo": motivo,
                 "resultado_banco": None,
                 "executado": False,
-                "mensagem": (
-                    f"Intervenção não aprovada ({decisao}/{motivo}) por '{aprovador_registro}'. "
-                    "Nenhuma chamada à conta KILL foi feita."
-                ),
+                "mensagem": mensagem,
             },
             ensure_ascii=False,
         )
@@ -1233,9 +1282,12 @@ def conduzir_kill_hitl(
     solicitar_aprovacao: Callable[[Dict[str, Any]], Tuple[str, str, Optional[str]]],
     canal: str,
     caminho_log: Optional[Path] = None,
+    agora: Optional[Callable[[], datetime]] = None,
 ) -> Dict[str, Any]:
     """
     Fluxo síncrono completo (usado pela CLI): preparar -> solicitar aprovação -> registrar decisão.
+    A validade da aprovação é medida em registrar_decisao_kill, logo após o retorno de
+    solicitar_aprovacao (relógio injetável via agora).
 
     solicitar_aprovacao recebe o resultado de preparar_intervencao_kill e devolve
     (decisao, aprovador, motivo). Só é chamado quando o alvo é elegível; recusas da
@@ -1266,8 +1318,10 @@ def conduzir_kill_hitl(
         alvo=prep["alvo"],
         hash_aprovado=prep["hash_identidade"],
         canal=canal,
+        preparado_em=prep["timestamp"],
         motivo=motivo,
         caminho_log=caminho_log,
+        agora=agora,
     )
     desfecho["prompt_exibido"] = True
     desfecho["aprovador"] = (aprovador or "").strip()

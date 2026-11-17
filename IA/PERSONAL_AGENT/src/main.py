@@ -49,6 +49,7 @@ from tools.oracle_dba import (
     coletar_top_sql,
     coletar_plano_execucao,
     conduzir_kill_hitl,
+    APROVACAO_TTL_SEGUNDOS,
 )
 
 # 3. Importando a Ferramenta de Nuvem (Gemini), o Notificador SMTP e a Busca RAG Local
@@ -143,6 +144,11 @@ def _exibir_desfecho_kill_cli(desfecho: dict) -> None:
     """Mensagens de tela que diferenciam recusa, aprovado-e-executado e aprovado-sem-execução."""
     if not desfecho.get("prompt_exibido"):
         print(f"[Sistema]: Alvo recusado ({desfecho['motivo']}). Ação cancelada sem solicitação de aprovação.")
+    elif desfecho["decisao"] == "TIMEOUT":
+        print(
+            f"[Sistema]: Aprovação EXPIRADA (mais de {APROVACAO_TTL_SEGUNDOS} s desde a preparação). "
+            "Nenhuma execução no banco. Solicite novamente."
+        )
     elif desfecho["decisao"] != "APROVADO":
         print(f"[Sistema]: Intervenção NÃO aprovada ({desfecho['motivo']}). Nenhuma execução no banco.")
     elif desfecho["executado"]:

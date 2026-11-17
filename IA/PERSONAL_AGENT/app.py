@@ -62,6 +62,7 @@ from tools.oracle_dba import (
     coletar_plano_execucao,
     preparar_intervencao_kill,
     registrar_decisao_kill,
+    APROVACAO_TTL_SEGUNDOS,
 )
 from tools.gemini_router import (
     gemini_tools_schema,
@@ -354,10 +355,17 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
         alvo=dados_alvo,
         hash_aprovado=hash_payload,
         canal="Web UI",
+        preparado_em=pendencia.get("timestamp"),  # validade medida no clique; ausente -> TIMEOUT
     )
     resultado_tool = desfecho["resultado_tool"]
 
-    if desfecho["decisao"] != "APROVADO":
+    if desfecho["decisao"] == "TIMEOUT":
+        aviso_ui = (
+            f"⏱️ **Aprovação expirada (`{id_aprovador_limpo}`):** a pendência da sessão `{sid},{serial}` "
+            f"passou do prazo de {APROVACAO_TTL_SEGUNDOS} s. Nenhuma execução no banco. "
+            "Peça ao agente para reconsultar a sessão."
+        )
+    elif desfecho["decisao"] != "APROVADO":
         aprovador_registro = id_aprovador_limpo or "NAO_INFORMADO"
         aviso_ui = (
             f"🛑 **Ação Abortada pelo Aprovador (`{aprovador_registro}`):** "
