@@ -1,6 +1,7 @@
 -- PROPOSTA (tarefa 1.11, item 6) — PENDENTE APROVAÇÃO. NÃO EXECUTAR.
 -- Substituiria db/ops_kill.sql como script de INSTALAÇÃO COMPLETA (ambiente novo).
--- Para ambiente já instalado, usar ops_kill_v2_migracao.sql (mesma pasta).
+-- Para ambiente já instalado, usar ops_kill_v2_migracao_parte1.sql e depois
+-- ops_kill_v2_migracao_parte2.sql (mesma pasta), conforme implantacao.md.
 --
 -- db/ops_kill.sql (v2)
 -- Executar como STARTUPADMIN (DBA) no MODELO. Objetos criados no schema OPS_OWNER
