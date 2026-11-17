@@ -101,14 +101,16 @@
     "tipo_declarado": "PLSQL",
     "expected_status": "VALID",
     "expected_tipo": "DDL",
-    "expected_l3_motivo": "TIPO_DIVERGENTE"
+    "expected_l3_motivo": "TIPO_DIVERGENTE",
+    "justificativa_expectativa": "Tokenização: VALID com tipo real DDL (CREATE TABLE). Checagem contra registro (L3): TIPO_DIVERGENTE devido à divergência com tipo_declarado=PLSQL."
   },
   "a18_create_procedure.sql": {
     "id": "A18",
     "tipo_declarado": "DDL",
     "expected_status": "VALID",
     "expected_tipo": "PLSQL",
-    "expected_l3_motivo": "TIPO_DIVERGENTE"
+    "expected_l3_motivo": "TIPO_DIVERGENTE",
+    "justificativa_expectativa": "Tokenização: VALID com tipo real PLSQL (CREATE PROCEDURE). Checagem contra registro (L3): TIPO_DIVERGENTE devido à divergência com tipo_declarado=DDL."
   },
   "a19_comment_on_table.sql": {
     "id": "A19",
@@ -206,14 +208,16 @@
     "tipo_declarado": "DML",
     "expected_status": "VALID",
     "expected_tipo": "DDL",
-    "expected_l3_motivo": "TIPO_DIVERGENTE"
+    "expected_l3_motivo": "TIPO_DIVERGENTE",
+    "justificativa_expectativa": "Tokenização: VALID com tipo real DDL (CREATE TABLE). Checagem contra registro (L3): TIPO_DIVERGENTE devido à divergência com tipo_declarado=DML."
   },
   "a18_tipo_plsql_com_select.sql": {
     "id": "A18_SELECT",
     "tipo_declarado": "PLSQL",
     "expected_status": "VALID",
     "expected_tipo": "SELECT",
-    "expected_l3_motivo": "TIPO_DIVERGENTE"
+    "expected_l3_motivo": "TIPO_DIVERGENTE",
+    "justificativa_expectativa": "Tokenização: VALID com tipo real SELECT (SELECT 1 FROM dual). Checagem contra registro (L3): TIPO_DIVERGENTE devido à divergência com tipo_declarado=PLSQL."
   },
   "a20_syntax_error.sql": {
     "id": "A20_SYNTAX",
