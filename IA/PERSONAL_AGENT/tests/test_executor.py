@@ -41,8 +41,8 @@ def setup_banco_teste():
     """
     if os.getenv("ORACLE_SANDBOX") != "1":
         return
-    user_mut = os.getenv("ORACLE_USER_MUT") or os.getenv("ORACLE_USER")
-    pass_mut = os.getenv("ORACLE_PASSWORD_MUT") or os.getenv("ORACLE_PASSWORD")
+    user_mut = os.getenv("ORACLE_USER_MUT")
+    pass_mut = os.getenv("ORACLE_PASSWORD_MUT")
     dsn = os.getenv("ORACLE_DSN")
 
     if not all([user_mut, pass_mut, dsn]):
@@ -253,8 +253,8 @@ def test_t8_diretivas_sqlplus_recusadas():
 @pytest.mark.sandbox_only
 def test_t9_bind_injetado_sem_alteracao_statement_v_sql():
     """T9: SQL Injection via bind nomeado preserva :nome inalterado na V$SQL e valida efeito."""
-    user_mut = os.getenv("ORACLE_USER_MUT") or os.getenv("ORACLE_USER")
-    pass_mut = os.getenv("ORACLE_PASSWORD_MUT") or os.getenv("ORACLE_PASSWORD")
+    user_mut = os.getenv("ORACLE_USER_MUT")
+    pass_mut = os.getenv("ORACLE_PASSWORD_MUT")
     dsn = os.getenv("ORACLE_DSN")
 
     conn = oracledb.connect(user=user_mut, password=pass_mut, dsn=dsn)
@@ -363,8 +363,8 @@ def test_t12_select_com_lob_truncado():
 @pytest.mark.sandbox_only
 def test_t13_falha_no_meio_de_dml_rollback():
     """T13: Falha no meio de DML dispara rollback imediato e nenhuma linha é persistida."""
-    user_mut = os.getenv("ORACLE_USER_MUT") or os.getenv("ORACLE_USER")
-    pass_mut = os.getenv("ORACLE_PASSWORD_MUT") or os.getenv("ORACLE_PASSWORD")
+    user_mut = os.getenv("ORACLE_USER_MUT")
+    pass_mut = os.getenv("ORACLE_PASSWORD_MUT")
     dsn = os.getenv("ORACLE_DSN")
 
     conn = oracledb.connect(user=user_mut, password=pass_mut, dsn=dsn)

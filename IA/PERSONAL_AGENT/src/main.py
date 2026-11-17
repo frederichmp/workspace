@@ -43,12 +43,16 @@ from tools.os_tools import (
 )
 
 # 2. Importando as Ferramentas do Oracle (Incluindo matar_sessao_oracle - Fase 4 HITL)
+from datetime import datetime, timezone
 from tools.oracle_dba import (
     oracle_tools_schema,
     coletar_sessoes_ativas,
     coletar_top_sql,
     coletar_plano_execucao,
+    consultar_alvo_sessao_diag,
     matar_sessao_oracle,
+    gerar_payload_e_hash_aprovacao,
+    registrar_log_aprovacao_kill,
 )
 
 # 3. Importando a Ferramenta de Nuvem (Gemini), o Notificador SMTP e a Busca RAG Local
@@ -176,50 +180,168 @@ def executar_agente(prompt_usuario: str) -> None:
                 elif nome_funcao == "matar_sessao_oracle":
                     sid = argumentos.get("sid")
                     serial = argumentos.get("serial")
+                    inst_id = argumentos.get("inst_id", 1)
 
-                    # 1. Barreira HITL (Pausa a execução)
-                    print(
-                        f"\n\033[91m[ALERTA CRÍTICO]: O agente deseja matar a sessão SID {sid}, SERIAL {serial}.\033[0m"
-                    )
-                    aprovacao = (
-                        input("Você aprova esta ação destrutiva? [S/N]: ")
-                        .strip()
-                        .upper()
-                    )
-
-                    if aprovacao == "S":
-                        logging.info(
-                            f"AUDITORIA HITL: APROVADO pelo DBA humano | "
-                            f"AÇÃO: {nome_funcao} | SID={sid}, SERIAL={serial}"
-                        )
-                        # 2. Dispara e-mail de alerta de intervenção
-                        assunto = f"[AGENTE DBA] Intervenção Crítica Aprovada: Kill Session {sid},{serial}"
-                        corpo = (
-                            f"O agente identificou anomalias e o encerramento da sessão "
-                            f"SID {sid} (Serial: {serial}) foi aprovado manualmente via terminal."
-                        )
-                        sucesso_email, msg_email = enviar_alerta_email(assunto, corpo)
-                        print(f"[Sistema]: Notificação por e-mail: {msg_email}")
-                        logging.info(
-                            f"NOTIFICAÇÃO SMTP: Sucesso={sucesso_email} | Detalhe: {msg_email}"
-                        )
-
-                        # 3. Executa a ação no banco
-                        resultado_tool = matar_sessao_oracle(sid, serial)
-                    else:
-                        # 4. Aborta e avisa o LLM
-                        print("[Sistema]: Ação abortada pelo administrador.")
-                        logging.warning(
-                            f"AUDITORIA HITL: REJEITADO pelo DBA humano | "
-                            f"AÇÃO: {nome_funcao} | SID={sid}, SERIAL={serial}"
-                        )
+                    # 1. Validação local antes de qualquer consulta ou conexão: inteiros positivos
+                    try:
+                        inst_id_val = int(inst_id)
+                        sid_val = int(sid)
+                        serial_val = int(serial)
+                        if inst_id_val <= 0 or sid_val <= 0 or serial_val <= 0:
+                            raise ValueError()
+                    except (ValueError, TypeError):
                         resultado_tool = json.dumps(
                             {
-                                "status": "abortado",
-                                "mensagem": "O DBA humano negou a execução da ação.",
+                                "status": "recusado",
+                                "motivo": "PARAM_INVALIDO",
+                                "status_banco": "PARAM_INVALIDO",
+                                "mensagem": (
+                                    f"Parâmetros inválidos: inst_id={inst_id}, sid={sid}, serial={serial}. "
+                                    "Devem ser inteiros estritamente positivos (> 0)."
+                                ),
                             },
                             ensure_ascii=False,
                         )
+                        print(f"[Sistema]: Parâmetros inválidos recusados localmente (PARAM_INVALIDO).")
+                        logging.warning(f"HITL RECUSADO LOCALMENTE: PARAM_INVALIDO | inst_id={inst_id}, sid={sid}, serial={serial}")
+                        # Devolve o resultado diretamente sem prosseguir para aprovação
+                        st_p = None
+                    else:
+                        # 2. Consulta prévia do alvo pela conta DIAG na GV$SESSION
+                        print(f"[Sistema]: Consultando alvo inst_id={inst_id_val}, sid={sid_val}, serial={serial_val} via DIAG...")
+                        check_alvo = consultar_alvo_sessao_diag(
+                            inst_id=inst_id_val, sid=sid_val, serial=serial_val
+                        )
+
+                        if not check_alvo.get("encontrado"):
+                            motivo_falha = check_alvo.get("motivo", "ALVO_NAO_ENCONTRADO")
+                            resultado_tool = json.dumps(
+                                {
+                                    "status": "recusado",
+                                    "motivo": motivo_falha,
+                                    "status_banco": motivo_falha,
+                                    "mensagem": check_alvo.get(
+                                        "mensagem",
+                                        "Sessão alvo não encontrada na GV$SESSION.",
+                                    ),
+                                },
+                                ensure_ascii=False,
+                            )
+                            print(f"[Sistema]: Sessão não encontrada ({motivo_falha}). Ação cancelada sem solicitação de aprovação.")
+                            logging.warning(
+                                f"HITL CANCELADO: Alvo não encontrado na GV$SESSION | "
+                                f"inst_id={inst_id_val}, sid={sid_val}, serial={serial_val} | Motivo={motivo_falha}"
+                            )
+                        else:
+                            alvo_dados = check_alvo["alvo"]
+                            timestamp_str = datetime.now(timezone.utc).isoformat()
+                            payload_dict, hash_sha256 = gerar_payload_e_hash_aprovacao(
+                                ferramenta=nome_funcao,
+                                parametros={"inst_id": inst_id_val, "sid": sid_val, "serial": serial_val},
+                                alvo=alvo_dados,
+                                timestamp=timestamp_str,
+                            )
+
+                            # Exibe detalhes do alvo e aviso explícito de encerramento imediato
+                            print("\n" + "=" * 70)
+                            print("\033[91m[ALERTA CRÍTICO DE SEGURANÇA - INTERVENÇÃO HITL]\033[0m")
+                            print("A SESSÃO SERÁ ENCERRADA IMEDIATAMENTE (KILL SESSION IMMEDIATE).")
+                            print("=" * 70)
+                            print(f"Ação Solicitada : {nome_funcao}")
+                            print(f"Alvo Identificado: inst_id={alvo_dados.get('inst_id')}, sid={alvo_dados.get('sid')}, serial#={alvo_dados.get('serial#')}")
+                            print(f"Usuário Oracle  : {alvo_dados.get('username')}")
+                            print(f"Programa/Máquina: {alvo_dados.get('program')} / {alvo_dados.get('machine')}")
+                            print(f"Status Atual    : {alvo_dados.get('status')}")
+                            print(f"SQL ID          : {alvo_dados.get('sql_id')}")
+                            print(f"Evento Espera   : {alvo_dados.get('event')}")
+                            print(f"Hash SHA-256    : {hash_sha256}")
+                            print("=" * 70)
+
+                            # Exige identificação do aprovador
+                            id_aprovador = input("Informe sua identificação de aprovador (obrigatório, ex: dba_nome): ").strip()
+
+                            if not id_aprovador:
+                                print("\033[93m[Recusa]: Identificação do aprovador é obrigatória. Intervenção cancelada.\033[0m")
+                                registrar_log_aprovacao_kill(
+                                    aprovador="NAO_INFORMADO",
+                                    decisao="REJEITADO",
+                                    hash_payload=hash_sha256,
+                                    parametros={"inst_id": inst_id_val, "sid": sid_val, "serial": serial_val},
+                                    alvo=alvo_dados,
+                                    status_banco="SEM_IDENTIFICACAO",
+                                )
+                                logging.warning(
+                                    f"AUDITORIA HITL: REJEITADO (Sem Identificação) | "
+                                    f"AÇÃO: {nome_funcao} | SID={sid_val}, SERIAL={serial_val} | Hash={hash_sha256}"
+                                )
+                                resultado_tool = json.dumps(
+                                    {
+                                        "status": "recusado",
+                                        "motivo": "APROVADOR_NAO_IDENTIFICADO",
+                                        "mensagem": "Ação recusada: identificação do aprovador é obrigatória.",
+                                    },
+                                    ensure_ascii=False,
+                                )
+                            else:
+                                confirmacao = input(
+                                    f"Confirma o encerramento imediato da sessão pelo aprovador '{id_aprovador}'? [S/N]: "
+                                ).strip().upper()
+
+                                if confirmacao == "S":
+                                    # Executa a ação no banco via conta KILL
+                                    resultado_tool = matar_sessao_oracle(
+                                        sid=sid_val, serial=serial_val, inst_id=inst_id_val
+                                    )
+                                    status_retornado = json.loads(resultado_tool).get("status_banco", "DESCONHECIDO")
+
+                                    # Registra no log formal de aprovação da aplicação
+                                    registrar_log_aprovacao_kill(
+                                        aprovador=id_aprovador,
+                                        decisao="APROVADO",
+                                        hash_payload=hash_sha256,
+                                        parametros={"inst_id": inst_id_val, "sid": sid_val, "serial": serial_val},
+                                        alvo=alvo_dados,
+                                        status_banco=status_retornado,
+                                    )
+
+                                    logging.info(
+                                        f"AUDITORIA HITL: APROVADO por {id_aprovador} | "
+                                        f"AÇÃO: {nome_funcao} | SID={sid_val}, SERIAL={serial_val} | "
+                                        f"Hash={hash_sha256} | Status Banco={status_retornado}"
+                                    )
+
+                                    # Dispara e-mail de alerta de intervenção
+                                    assunto = f"[AGENTE DBA] Intervenção Aprovada por {id_aprovador}: Kill Session {sid_val},{serial_val}"
+                                    corpo = (
+                                        f"O encerramento da sessão SID={sid_val}, SERIAL={serial_val}, INST_ID={inst_id_val} "
+                                        f"foi aprovado por {id_aprovador}.\n"
+                                        f"Status retornado pelo banco: {status_retornado}\n"
+                                        f"Hash SHA-256 do payload: {hash_sha256}"
+                                    )
+                                    sucesso_email, msg_email = enviar_alerta_email(assunto, corpo)
+                                    print(f"[Sistema]: Notificação por e-mail: {msg_email}")
+                                    logging.info(f"NOTIFICAÇÃO SMTP: Sucesso={sucesso_email} | Detalhe: {msg_email}")
+                                else:
+                                    print("[Sistema]: Ação rejeitada pelo aprovador.")
+                                    registrar_log_aprovacao_kill(
+                                        aprovador=id_aprovador,
+                                        decisao="REJEITADO",
+                                        hash_payload=hash_sha256,
+                                        parametros={"inst_id": inst_id_val, "sid": sid_val, "serial": serial_val},
+                                        alvo=alvo_dados,
+                                        status_banco="REJEITADO_PELO_APROVADOR",
+                                    )
+                                    logging.warning(
+                                        f"AUDITORIA HITL: REJEITADO por {id_aprovador} | "
+                                        f"AÇÃO: {nome_funcao} | SID={sid_val}, SERIAL={serial_val} | Hash={hash_sha256}"
+                                    )
+                                    resultado_tool = json.dumps(
+                                        {
+                                            "status": "abortado",
+                                            "mensagem": f"O aprovador '{id_aprovador}' negou a execução da ação.",
+                                        },
+                                        ensure_ascii=False,
+                                    )
 
                 # Rota: Nuvem / Gemini
                 elif nome_funcao == "analisar_log_complexo":

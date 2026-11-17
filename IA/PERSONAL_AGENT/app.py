@@ -54,13 +54,17 @@ from tools.os_tools import (
     coletar_metricas_hardware,
     verificar_espaco_disco,
 )
+from datetime import datetime, timezone
 from tools.oracle_dba import (
     oracle_tools_schema,
     verificar_acessibilidade_host,
     coletar_sessoes_ativas,
     coletar_top_sql,
     coletar_plano_execucao,
+    consultar_alvo_sessao_diag,
     matar_sessao_oracle,
+    gerar_payload_e_hash_aprovacao,
+    registrar_log_aprovacao_kill,
 )
 from tools.gemini_router import (
     gemini_tools_schema,
@@ -208,19 +212,95 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
                 logging.info(f"AGENTE ACIONOU: {nome_funcao} | PARÂMETROS: {argumentos}")
 
             # ------------------------------------------------------------------
-            # BARREIRA HITL BASEADA EM ESTADO (Pausa o fluxo sem usar input())
+            # BARREIRA HITL BASEADA EM ESTADO COM PRÉ-CONSULTA DIAG E TRILHA
             # ------------------------------------------------------------------
             if nome_funcao == "matar_sessao_oracle":
                 sid_alvo = argumentos.get("sid")
                 serial_alvo = argumentos.get("serial")
+                inst_id_alvo = argumentos.get("inst_id", 1)
 
-                # Se houver outras tool_calls na mesma resposta que ainda não rodaram, guarda-as
+                # 1. Validação local antes de qualquer conexão: inteiros positivos
+                try:
+                    inst_id_int = int(inst_id_alvo)
+                    sid_int = int(sid_alvo)
+                    serial_int = int(serial_alvo)
+                    if inst_id_int <= 0 or sid_int <= 0 or serial_int <= 0:
+                        raise ValueError()
+                except (ValueError, TypeError):
+                    resultado_tool = json.dumps(
+                        {
+                            "status": "recusado",
+                            "motivo": "PARAM_INVALIDO",
+                            "status_banco": "PARAM_INVALIDO",
+                            "mensagem": (
+                                f"Parâmetros inválidos: inst_id={inst_id_alvo}, sid={sid_alvo}, serial={serial_alvo}. "
+                                "Devem ser inteiros estritamente positivos (> 0)."
+                            ),
+                        },
+                        ensure_ascii=False,
+                    )
+                    st.session_state.llm_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": nome_funcao,
+                            "content": resultado_tool,
+                        }
+                    )
+                    yield f"⚠️ **Parâmetros Inválidos (PARAM_INVALIDO):** `inst_id={inst_id_alvo}, sid={sid_alvo}, serial={serial_alvo}`. Intervenção cancelada sem conexão."
+                    continue
+
+                # 2. Pré-consulta do alvo na GV$SESSION via conta DIAG
+                yield f"🔍 Consultando sessão `inst_id={inst_id_int}, sid={sid_int}, serial={serial_int}` via DIAG..."
+                check_alvo = consultar_alvo_sessao_diag(
+                    inst_id=inst_id_int, sid=sid_int, serial=serial_int
+                )
+
+                if not check_alvo.get("encontrado"):
+                    motivo_falha = check_alvo.get("motivo", "ALVO_NAO_ENCONTRADO")
+                    resultado_tool = json.dumps(
+                        {
+                            "status": "recusado",
+                            "motivo": motivo_falha,
+                            "status_banco": motivo_falha,
+                            "mensagem": check_alvo.get(
+                                "mensagem",
+                                "Sessão não encontrada na GV$SESSION.",
+                            ),
+                        },
+                        ensure_ascii=False,
+                    )
+                    st.session_state.llm_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": nome_funcao,
+                            "content": resultado_tool,
+                        }
+                    )
+                    yield f"⚠️ **Sessão Não Encontrada ({motivo_falha}):** Alvo não localizado na GV$SESSION. Ação cancelada sem solicitação de aprovação."
+                    continue
+
+                # 3. Alvo localizado: gera hash SHA-256 e ativa barreira HITL
+                dados_alvo = check_alvo["alvo"]
+                ts_aprovacao = datetime.now(timezone.utc).isoformat()
+                payload_dict, hash_sha256 = gerar_payload_e_hash_aprovacao(
+                    ferramenta=nome_funcao,
+                    parametros={"inst_id": inst_id_int, "sid": sid_int, "serial": serial_int},
+                    alvo=dados_alvo,
+                    timestamp=ts_aprovacao,
+                )
+
                 calls_restantes = mensagem_resposta.tool_calls[idx + 1 :]
                 st.session_state.hitl_pendente = {
                     "tool_call_id": tool_call.id,
                     "nome_funcao": nome_funcao,
-                    "sid": sid_alvo,
-                    "serial": serial_alvo,
+                    "inst_id": inst_id_int,
+                    "sid": sid_int,
+                    "serial": serial_int,
+                    "dados_alvo": dados_alvo,
+                    "hash_payload": hash_sha256,
+                    "timestamp": ts_aprovacao,
                     "calls_restantes": [
                         {
                             "id": c.id,
@@ -231,8 +311,9 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
                     ],
                 }
                 yield (
-                    f"🛑 **BARREIRA HITL ATIVADA:** Aguardando aprovação humana para "
-                    f"`ALTER SYSTEM KILL SESSION '{sid_alvo},{serial_alvo}' IMMEDIATE`..."
+                    f"🛑 **BARREIRA HITL ATIVADA:** Sessão identificada na GV$SESSION "
+                    f"(Usuário: `{dados_alvo.get('username')}`, Programa: `{dados_alvo.get('program')}`). "
+                    f"Aguardando autorização formal no painel abaixo..."
                 )
                 return
 
@@ -290,53 +371,87 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
             )
 
 
-def processar_decisao_hitl(aprovado: bool) -> None:
+def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
     """
-    Processa o clique do DBA nos botões 'Aprovar Execução' ou 'Abortar' da barreira HITL,
-    registra na trilha de auditoria, dispara o alerta SMTP (se aprovado) e retoma o LLM.
+    Processa a decisão formal de aprovação ou rejeição da intervenção HITL.
+    Exige identificação do aprovador para aprovação, gera log formal sem senhas,
+    executa matar_sessao_oracle via PKG_OPS_KILL e retoma o orquestrador.
     """
     pendencia = st.session_state.hitl_pendente
     if not pendencia:
-        return
+        return True
 
     sid = pendencia["sid"]
     serial = pendencia["serial"]
+    inst_id = pendencia.get("inst_id", 1)
     tool_call_id = pendencia["tool_call_id"]
     nome_funcao = pendencia["nome_funcao"]
+    dados_alvo = pendencia.get("dados_alvo", {})
+    hash_payload = pendencia.get("hash_payload", "")
+
+    id_aprovador_limpo = id_aprovador.strip()
 
     if aprovado:
-        logging.info(
-            f"AUDITORIA HITL: APROVADO pelo DBA humano (Web UI) | "
-            f"AÇÃO: {nome_funcao} | SID={sid}, SERIAL={serial}"
-        )
-        assunto = f"[AGENTE DBA] Intervenção Crítica Aprovada: Kill Session {sid},{serial}"
-        corpo = (
-            f"O agente identificou anomalias e o encerramento da sessão "
-            f"SID {sid} (Serial: {serial}) foi aprovado manualmente via Dashboard Web Streamlit."
-        )
-        sucesso_email, msg_email = enviar_alerta_email(assunto, corpo)
-        logging.info(
-            f"NOTIFICAÇÃO SMTP: Sucesso={sucesso_email} | Detalhe: {msg_email}"
+        if not id_aprovador_limpo:
+            st.error("Identificação do aprovador é obrigatória (não pode ser vazia).")
+            return False
+
+        # Executa matar_sessao_oracle via conta KILL homologada
+        resultado_tool = matar_sessao_oracle(sid=sid, serial=serial, inst_id=inst_id)
+        status_banco = json.loads(resultado_tool).get("status_banco", "DESCONHECIDO")
+
+        # Registra formalmente na trilha de aprovação da aplicação
+        registrar_log_aprovacao_kill(
+            aprovador=id_aprovador_limpo,
+            decisao="APROVADO",
+            hash_payload=hash_payload,
+            parametros={"inst_id": inst_id, "sid": sid, "serial": serial},
+            alvo=dados_alvo,
+            status_banco=status_banco,
         )
 
-        resultado_tool = matar_sessao_oracle(sid=sid, serial=serial)
+        logging.info(
+            f"AUDITORIA HITL: APROVADO por {id_aprovador_limpo} (Web UI) | "
+            f"AÇÃO: {nome_funcao} | SID={sid}, SERIAL={serial}, INST_ID={inst_id} | "
+            f"Hash={hash_payload} | Status Banco={status_banco}"
+        )
+
+        assunto = f"[AGENTE DBA] Intervenção Crítica Aprovada por {id_aprovador_limpo}: Kill Session {sid},{serial}"
+        corpo = (
+            f"O encerramento da sessão SID={sid}, SERIAL={serial}, INST_ID={inst_id} "
+            f"foi aprovado formalmente por {id_aprovador_limpo} via Dashboard Web.\n"
+            f"Status retornado pelo banco: {status_banco}\n"
+            f"Hash SHA-256 do payload: {hash_payload}"
+        )
+        sucesso_email, msg_email = enviar_alerta_email(assunto, corpo)
+        logging.info(f"NOTIFICAÇÃO SMTP: Sucesso={sucesso_email} | Detalhe: {msg_email}")
+
         aviso_ui = (
-            f"✅ **Intervenção Aprovada pelo DBA:** Comando `KILL SESSION '{sid},{serial}'` enviado ao Oracle. "
-            f"*(Notificação SMTP: {msg_email})*"
+            f"✅ **Intervenção Aprovada por `{id_aprovador_limpo}`:** Encerramento executado via PKG_OPS_KILL "
+            f"(Status retornado: `{status_banco}`). *(Notificação SMTP: {msg_email})*"
         )
     else:
+        aprovador_registro = id_aprovador_limpo or "NAO_INFORMADO"
+        registrar_log_aprovacao_kill(
+            aprovador=aprovador_registro,
+            decisao="REJEITADO",
+            hash_payload=hash_payload,
+            parametros={"inst_id": inst_id, "sid": sid, "serial": serial},
+            alvo=dados_alvo,
+            status_banco="REJEITADO_PELO_APROVADOR",
+        )
         logging.warning(
-            f"AUDITORIA HITL: REJEITADO pelo DBA humano (Web UI) | "
-            f"AÇÃO: {nome_funcao} | SID={sid}, SERIAL={serial}"
+            f"AUDITORIA HITL: REJEITADO por {aprovador_registro} (Web UI) | "
+            f"AÇÃO: {nome_funcao} | SID={sid}, SERIAL={serial} | Hash={hash_payload}"
         )
         resultado_tool = json.dumps(
             {
                 "status": "abortado",
-                "mensagem": "O DBA humano negou a execução da ação via Dashboard.",
+                "mensagem": f"O aprovador '{aprovador_registro}' negou a execução da ação via Dashboard.",
             },
             ensure_ascii=False,
         )
-        aviso_ui = f"🛑 **Ação Abortada pelo DBA:** O encerramento da sessão `{sid},{serial}` foi negado."
+        aviso_ui = f"🛑 **Ação Abortada pelo Aprovador (`{aprovador_registro}`):** O encerramento da sessão `{sid},{serial}` foi negado."
 
     logging.info(f"RESULTADO ORACLE: {resultado_tool}")
 
@@ -590,11 +705,24 @@ with col_chat:
         # ----------------------------------------------------------------------
         if st.session_state.hitl_pendente:
             pend = st.session_state.hitl_pendente
+            alvo = pend.get("dados_alvo", {})
             st.error(
-                f"🚨 **BARREIRA DE SEGURANÇA (HITL) - APROVAÇÃO OBRIGATÓRIA**\n\n"
-                f"O Agente Coordenador solicitou a execução de um comando **destrutivo** na instância `{dsn_atual}`:\n"
-                f"```sql\nALTER SYSTEM KILL SESSION '{pend['sid']},{pend['serial']}' IMMEDIATE;\n```\n"
-                f"Ao aprovar, um alerta de governança também será disparado por e-mail para `{email_dest}`."
+                f"🚨 **BARREIRA DE SEGURANÇA (HITL) — APROVAÇÃO OBRIGATÓRIA**\n\n"
+                f"⚠️ **ATENÇÃO: A SESSÃO SERÁ ENCERRADA IMEDIATAMENTE (KILL SESSION IMMEDIATE).**\n\n"
+                f"**Ação Solicitada:** `{pend['nome_funcao']}` via procedure `OPS_OWNER.PKG_OPS_KILL.KILL_SESSION` na instância `{dsn_atual}`.\n\n"
+                f"**Dados da Sessão Alvo (GV$SESSION):**\n"
+                f"- **Instância / SID / Serial#:** `inst_id={alvo.get('inst_id')}`, `sid={alvo.get('sid')}`, `serial#={alvo.get('serial#')}`\n"
+                f"- **Usuário Oracle:** `{alvo.get('username')}`\n"
+                f"- **Programa / Máquina:** `{alvo.get('program')}` / `{alvo.get('machine')}`\n"
+                f"- **Status Atual:** `{alvo.get('status')}`\n"
+                f"- **SQL ID:** `{alvo.get('sql_id')}`\n"
+                f"- **Evento de Espera:** `{alvo.get('event')}`\n\n"
+                f"🔒 **Hash Canônico SHA-256 do Payload:** `{pend.get('hash_payload')}`\n\n"
+                f"Ao aprovar, um alerta de governança será disparado por e-mail para `{email_dest}`."
+            )
+            id_aprovador_input = st.text_input(
+                "Identificação do Aprovador (obrigatório, ex: dba_nome):",
+                key="input_hitl_aprovador",
             )
             btn_col_aprovar, btn_col_abortar = st.columns(2)
             with btn_col_aprovar:
@@ -604,9 +732,12 @@ with col_chat:
                     use_container_width=True,
                     key="btn_hitl_approve",
                 ):
-                    with st.spinner("Disparando alerta SMTP e executando KILL SESSION no Oracle..."):
-                        processar_decisao_hitl(aprovado=True)
-                    st.rerun()
+                    if not id_aprovador_input.strip():
+                        st.warning("Informe a identificação do aprovador antes de confirmar a execução.")
+                    else:
+                        with st.spinner("Registrando aprovação e executando PKG_OPS_KILL no Oracle..."):
+                            if processar_decisao_hitl(aprovado=True, id_aprovador=id_aprovador_input):
+                                st.rerun()
             with btn_col_abortar:
                 if st.button(
                     "🛑 Abortar",
@@ -615,7 +746,7 @@ with col_chat:
                     key="btn_hitl_abort",
                 ):
                     with st.spinner("Registrando bloqueio na auditoria e notificando o Agente..."):
-                        processar_decisao_hitl(aprovado=False)
+                        processar_decisao_hitl(aprovado=False, id_aprovador=id_aprovador_input)
                     st.rerun()
 
     # Entrada de texto do usuário (desabilitada enquanto houver decisão HITL pendente)
