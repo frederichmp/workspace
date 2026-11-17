@@ -17,3 +17,11 @@
 ## Governança
 - Não alterar expectativas de teste para fazer código passar; reportar a falha.
 - Não enfraquecer asserções sem justificativa na lista de alterações.
+
+## Processo de tarefa
+- Toda tarefa começa em `/plan`. O plano vai para `docs/plans/<tarefa>.md` e só é executado após aprovação.
+- Um commit por correção. Nunca `git push`.
+- Subagentes: Sonnet para mecânico, Haiku para execução de testes, Opus só para decisão de segurança.
+- Paralelizar apenas com conjuntos de arquivos disjuntos. Nunca dois agentes em `oracle_dba.py`, `main.py` ou `app.py`.
+- Saídas grandes vão para `docs/entregas/`; o chat recebe caminho e resumo.
+- Antes de cada aceite: `git status`, `pytest -q`, greps de regressão.
