@@ -93,19 +93,22 @@
     "id": "A16",
     "tipo_declarado": "SELECT",
     "expected_status": "TIPO_DIVERGENTE",
-    "expected_tipo": null
+    "expected_tipo": null,
+    "expected_l3_motivo": "TIPO_DIVERGENTE"
   },
   "a17_create_table.sql": {
     "id": "A17",
     "tipo_declarado": "PLSQL",
-    "expected_status": "TIPO_DIVERGENTE",
-    "expected_tipo": null
+    "expected_status": "VALID",
+    "expected_tipo": "DDL",
+    "expected_l3_motivo": "TIPO_DIVERGENTE"
   },
   "a18_create_procedure.sql": {
     "id": "A18",
     "tipo_declarado": "DDL",
-    "expected_status": "TIPO_DIVERGENTE",
-    "expected_tipo": null
+    "expected_status": "VALID",
+    "expected_tipo": "PLSQL",
+    "expected_l3_motivo": "TIPO_DIVERGENTE"
   },
   "a19_comment_on_table.sql": {
     "id": "A19",
@@ -194,25 +197,29 @@
   "a16_tipo_select_com_update.sql": {
     "id": "A16_UPDATE",
     "tipo_declarado": "SELECT",
-    "expected_status": "TIPO_DIVERGENTE",
-    "expected_tipo": null
+    "expected_status": "VALID",
+    "expected_tipo": "DML",
+    "expected_l3_motivo": "TIPO_DIVERGENTE"
   },
   "a17_tipo_dml_com_create.sql": {
     "id": "A17_CREATE",
     "tipo_declarado": "DML",
-    "expected_status": "TIPO_DIVERGENTE",
-    "expected_tipo": null
+    "expected_status": "VALID",
+    "expected_tipo": "DDL",
+    "expected_l3_motivo": "TIPO_DIVERGENTE"
   },
   "a18_tipo_plsql_com_select.sql": {
     "id": "A18_SELECT",
     "tipo_declarado": "PLSQL",
-    "expected_status": "TIPO_DIVERGENTE",
-    "expected_tipo": null
+    "expected_status": "VALID",
+    "expected_tipo": "SELECT",
+    "expected_l3_motivo": "TIPO_DIVERGENTE"
   },
   "a20_syntax_error.sql": {
     "id": "A20_SYNTAX",
     "tipo_declarado": "SELECT",
     "expected_status": "TIPO_NAO_RECONHECIDO",
-    "expected_tipo": null
+    "expected_tipo": null,
+    "expected_l3_motivo": "TIPO_NAO_RECONHECIDO"
   }
 }

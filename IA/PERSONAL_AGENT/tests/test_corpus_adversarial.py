@@ -45,15 +45,8 @@ def test_corpus_adversarial_tokenizacao(
 
     valido, cod_motivo, msg_erro, sql_exec, tipo_detectado = tokenizar_e_validar_sql(sql_content)
 
-    if not valido:
-        status_obtido = cod_motivo
-        tipo_obtido = None
-    elif tipo_declarado != tipo_detectado:
-        status_obtido = "TIPO_DIVERGENTE"
-        tipo_obtido = None
-    else:
-        status_obtido = "VALID"
-        tipo_obtido = tipo_detectado
+    status_obtido = "VALID" if valido else cod_motivo
+    tipo_obtido = tipo_detectado if valido else None
 
     assert status_obtido == expected_status, (
         f"Falha no caso {case_id} ({filename}): "
@@ -79,7 +72,7 @@ l3_cases = [
         data["id"],
         fname,
         data["tipo_declarado"],
-        data["expected_status"],
+        data.get("expected_l3_motivo", data["expected_status"]),
     )
     for fname, data in corpus_manifest.items()
     if data["id"] in L3_TARGET_IDS
