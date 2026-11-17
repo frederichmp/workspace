@@ -33,3 +33,4 @@ data/memory/*
 .vscode/
 .idea/
 *.swp
+.claude/settings.local.json
