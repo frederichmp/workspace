@@ -20,15 +20,22 @@ SELECT grantee, privilege FROM dba_tab_privs
  WHERE owner = 'OPS_OWNER' AND table_name = 'PKG_OPS_KILL';
 -- 0.2b Quem pode executar qualquer procedure (documentar; esperado: só contas DBA conhecidas)
 SELECT grantee FROM dba_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE' ORDER BY grantee;
--- 0.2c Quem recebe EXECUTE ANY PROCEDURE INDIRETAMENTE, por papéis (inclusive aninhados).
---      Esperado: nenhuma conta de aplicação do projeto (STARTUP_DIAG, STARTUP_KILL e as
---      contas READ/MUT do executor). Contas DBA (ex.: STARTUPADMIN via DBA) são esperadas.
-SELECT DISTINCT grantee, granted_role FROM dba_role_privs
- START WITH granted_role IN (SELECT grantee FROM dba_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE')
- CONNECT BY PRIOR grantee = granted_role
- ORDER BY grantee;
--- 0.2d Privilégios de sistema e papéis das contas do fluxo de kill (esperado: STARTUP_KILL sem
---      privilégio de sistema além de CREATE SESSION e sem papéis; STARTUP_DIAG com SELECT_CATALOG_ROLE)
+-- 0.2c (= leitura 2, implantacao.md 7.3) Contas com EXECUTE ANY PROCEDURE EFETIVO, direto ou
+--      herdado por papel (inclusive aninhado). 0.2b usa DBA_SYS_PRIVS e só mostra concessões diretas.
+--      Esperado: nenhuma conta de aplicação (STARTUP_DIAG, STARTUP_KILL, contas READ/MUT).
+WITH detentores AS (
+  SELECT grantee FROM dba_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE'
+  UNION
+  SELECT grantee FROM dba_role_privs
+   START WITH granted_role IN (SELECT grantee FROM dba_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE')
+   CONNECT BY PRIOR grantee = granted_role
+)
+SELECT u.username, u.account_status
+  FROM dba_users u JOIN detentores d ON d.grantee = u.username
+ ORDER BY u.username;
+-- 0.2d Privilégios de sistema e papéis DIRETOS das contas do fluxo de kill. Só concessões diretas:
+--      o conjunto efetivo de STARTUP_KILL é confirmado pela leitura 1 (session_privs/session_roles,
+--      conectado como STARTUP_KILL; implantacao.md 7.3), fora deste script.
 SELECT grantee, privilege FROM dba_sys_privs
  WHERE grantee IN ('STARTUP_DIAG', 'STARTUP_KILL', 'OPS_OWNER') ORDER BY grantee, privilege;
 SELECT grantee, granted_role FROM dba_role_privs

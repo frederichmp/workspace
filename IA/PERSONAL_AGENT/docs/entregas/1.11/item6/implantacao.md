@@ -235,9 +235,10 @@ O clone de arquivo **não substitui** nenhum desses passos. A checagem de `DBA_E
 | # | Pendência | Depende de |
 |---|---|---|
 | 1 | Aprovar o texto do SQL v2, da migração e do rollback | Ensaio de banco em sandbox (seção 4.1), que é pré-requisito |
-| 4 | Confirmar que não há outros chamadores do pacote | Parcial: 0.2a (EXECUTE só para STARTUP_KILL) e 0.2b (seção 7.1) feitos. Faltam 0.1 (`DBA_DEPENDENCIES`), 0.3 (jobs) e 0.4 (`GV$SQL`), lidos na parte 1 |
+| 4 | Confirmar quem pode chamar o pacote. **EXECUTE explícito** no pacote: só `STARTUP_KILL` (0.2a, confirmado). **EXECUTE efetivo**: `STARTUP_KILL` **e** toda conta que herda `EXECUTE ANY PROCEDURE`, direto ou por papel, inclusive aninhado; a lista é a da leitura 2 (7.3), **ainda não relatada** | Leitura 2 (7.3). Faltam também 0.1 (`DBA_DEPENDENCIES`), 0.3 (jobs) e 0.4 (`GV$SQL`), lidos na parte 1 |
 | 7.1 | Contas READ/MUT do executor na conferência de papéis | Nomes a informar pelo responsável |
-| 7.2 | Database Vault: **encerrada** (DV inativo). Residual: detentores de `DV_REALM_OWNER` (não bloqueia a janela) | Uma leitura de `DBA_ROLE_PRIVS` (seção 7.2) |
+| 7.2 | Database Vault: **encerrada** (DV inativo). Residual: detentores de `DV_REALM_OWNER` (não bloqueia a janela); coberto pela leitura 2 | Leitura 2 (7.3) |
+| 7.3 | **Leituras 1 e 2**: privilégios e papéis efetivos de `STARTUP_KILL`, e contas com `EXECUTE ANY PROCEDURE` efetivo | Autorização do responsável; nada alterado, só leitura (seção 7.3) |
 
 ## 7. Resultados das leituras autorizadas (MODELO, STARTUPADMIN, somente leitura)
 
@@ -247,7 +248,7 @@ Informados pelo responsável em 2026-11-17. **Não executado:** partes 1 e 2, ro
 |---|---|---|
 | Estado | `PACKAGE` e `PACKAGE BODY` `PKG_OPS_KILL` VALID; `DBA_ARGUMENTS` de `KILL_SESSION` = 4 | Linha de base v1 confirmada. É a mesma assinatura de `rollback_ops_kill_v1.sql` |
 | 0.2a | EXECUTE em `OPS_OWNER.PKG_OPS_KILL` concedido **só** a `STARTUP_KILL` | Conforme o esperado |
-| 0.2b | `EXECUTE ANY PROCEDURE` concedido a `DBA`, `DV_REALM_OWNER`, `EXP_FULL_DATABASE`, `IMP_FULL_DATABASE`, `OUTLN`, `SYS`, `WMSYS` | `DBA`, `DV_REALM_OWNER`, `EXP_FULL_DATABASE` e `IMP_FULL_DATABASE` são **papéis**: todo usuário que os tenha, inclusive por papel aninhado, pode chamar `KILL_SESSION` sem passar pelo grant restrito. **Correção:** a versão anterior desta linha os chamava de "fornecidos pelo Oracle" como se isso tivesse sido verificado. Não tinha sido. A verificação está na seção 7.1, e `DV_REALM_OWNER` continua não verificado (7.2) |
+| 0.2b | `EXECUTE ANY PROCEDURE` concedido a `DBA`, `DV_REALM_OWNER`, `EXP_FULL_DATABASE`, `IMP_FULL_DATABASE`, `OUTLN`, `SYS`, `WMSYS` | **Alcance da consulta (correção de 2026-11-17):** usou `DBA_SYS_PRIVS`, que mostra **só concessões diretas**. Ela não cobre `EXECUTE ANY PROCEDURE` herdado por papel; isso é a leitura 2 (seção 7.3). `DBA`, `DV_REALM_OWNER`, `EXP_FULL_DATABASE` e `IMP_FULL_DATABASE` são **papéis**: todo usuário que os tenha, inclusive por papel aninhado, pode chamar `KILL_SESSION` sem passar pelo grant restrito. **Correção:** a versão anterior desta linha os chamava de "fornecidos pelo Oracle" como se isso tivesse sido verificado. Não tinha sido. A verificação está na seção 7.1, e `DV_REALM_OWNER` continua não verificado (7.2) |
 | 0.6 | EXECUTE em `SYS.UTL_RAW` concedido a `PUBLIC` | A compilação da v2 não é bloqueada por esta checagem (definer-rights aceita grant a PUBLIC) |
 
 **Leitura do risco de 0.2b:**
@@ -266,6 +267,8 @@ Informado pelo responsável:
 O que isso fecha e o que não fecha:
 - **Fecha:** o caminho por `EXP_FULL_DATABASE`/`IMP_FULL_DATABASE` não alcança contas de aplicação; `WMSYS` e `OUTLN` estão inativas.
 - **Não muda:** o papel `DBA` dá `EXECUTE ANY PROCEDURE` a quem o tem. Essas contas também podem encerrar sessões diretamente com `ALTER SYSTEM`, e o pacote não é a barreira para elas, nem na v1 nem na v2. É risco aceito e documentado; não é uma regressão da v2.
+- **Contas que herdam esse risco:** a listar pela **leitura 2** (seção 7.3). Ainda não foram relatadas, então este registro **não** afirma que se limitam a contas DBA conhecidas.
+- **Correção do registro de 7.1 (2026-11-17):** o 0.2b usou `DBA_SYS_PRIVS`, só concessões diretas. O fechamento acima vale para o caminho `EXP_FULL_DATABASE`/`IMP_FULL_DATABASE` relatado. Ele **não** encerra a questão do `EXECUTE ANY PROCEDURE` herdado por papel, que é a leitura 2.
 - **Fora do relato:** as contas READ/MUT do executor (nomes no `.env`, que esta sessão não lê) não foram citadas na leitura. Se fizerem parte da conferência do responsável, registrar aqui.
 
 ### 7.2 Pendência reaberta: Database Vault (não bloqueia a janela)
@@ -298,3 +301,49 @@ Critério: nenhuma conta de aplicação do projeto tem `DV_REALM_OWNER`. **Corre
 - Conclusão: Database Vault inativo; nenhuma regra de DV bloqueia `ALTER SYSTEM` ou KILL neste banco.
 
 **Checagem residual (não bloqueante, leitura):** quem detém `DV_REALM_OWNER`, direta ou indiretamente. Ela ainda não foi relatada; a leitura de 7.1 cobriu só `EXP_FULL_DATABASE` e `IMP_FULL_DATABASE`. A segunda consulta acima (`START WITH granted_role = 'DV_REALM_OWNER'`) responde a isso. Esperado: nenhuma conta de aplicação.
+
+### 7.3 Pendência: leituras 1 e 2 (somente leitura; nada alterado)
+
+**Correção de registro (2026-11-17):** a afirmação "`STARTUP_KILL` só tem CREATE SESSION" foi confirmada **apenas para privilégios e papéis diretos** (`DBA_SYS_PRIVS` e `DBA_ROLE_PRIVS`, consulta 0.2d). Ela não cobre papéis aninhados nem o que fica efetivo na sessão, e fica **substituída pela leitura 1** quando autorizada.
+
+**Leitura 1 — privilégios e papéis efetivos de `STARTUP_KILL`.** O operador executa conectado **como `STARTUP_KILL`**; a credencial não passa por esta sessão.
+```sql
+-- Privilégios de sistema efetivos na sessão (diretos + herdados por papéis habilitados)
+-- Esperado: só CREATE SESSION
+SELECT privilege FROM session_privs ORDER BY privilege;
+-- Papéis habilitados na sessão (esperado: nenhum)
+SELECT role FROM session_roles ORDER BY role;
+-- Papéis concedidos, inclusive os não-default que session_roles não mostra (esperado: nenhum)
+SELECT granted_role, default_role FROM user_role_privs ORDER BY granted_role;
+```
+EXECUTE no pacote é privilégio de objeto e não aparece em `session_privs`; ele já foi confirmado pelo 0.2a.
+
+**Leitura 2 — contas com `EXECUTE ANY PROCEDURE` efetivo**, direto ou herdado por papel (inclusive aninhado). Executar como STARTUPADMIN.
+```sql
+WITH detentores AS (
+  SELECT grantee FROM dba_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE'
+  UNION
+  SELECT grantee FROM dba_role_privs
+   START WITH granted_role IN (SELECT grantee FROM dba_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE')
+   CONNECT BY PRIOR grantee = granted_role
+)
+SELECT u.username, u.account_status
+  FROM dba_users u JOIN detentores d ON d.grantee = u.username
+ ORDER BY u.username;
+-- Se PUBLIC estiver entre os detentores, TODA conta herda (esperado: 0 linhas)
+WITH detentores AS (
+  SELECT grantee FROM dba_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE'
+  UNION
+  SELECT grantee FROM dba_role_privs
+   START WITH granted_role IN (SELECT grantee FROM dba_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE')
+   CONNECT BY PRIOR grantee = granted_role
+)
+SELECT grantee FROM detentores WHERE grantee = 'PUBLIC';
+```
+
+Critérios:
+- Nenhuma conta de aplicação do projeto (`STARTUP_KILL`, `STARTUP_DIAG` e as contas READ/MUT, cujos nomes o responsável informa) aparece na leitura 2.
+- `PUBLIC` não aparece.
+- A lista resultante passa a ser, por escrito, o conjunto de contas com **EXECUTE efetivo** no pacote (decisão 4) e o conjunto do risco aceito do DBA (7.1).
+
+**Resultado:** pendente (não executado).
