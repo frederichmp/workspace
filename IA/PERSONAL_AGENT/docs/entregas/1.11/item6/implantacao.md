@@ -219,15 +219,25 @@ O clone de arquivo **não substitui** nenhum desses passos. A checagem de `DBA_E
 - **Esperado com mais de 128 bytes, ou `ref` em hexadecimal maiúsculo:** PARAM_INVALIDO, com linha de auditoria.
 - **Usuário protegido com a conexão alvo aberta:** USUARIO_PROTEGIDO (corrige o achado 6.5).
 
-## 6. Decisões do responsável pendentes neste item
+## 6. Decisões do responsável neste item
 
-1. Aprovar o texto de `ops_kill.sql` (v2), a migração e o rollback.
-2. `p_ref_aprovacao` obrigatório (recomendado: liga o JSONL a `OPS_KILL_AUDIT` sem ambiguidade).
-3. `program` e `machine` podem ser NULL (comparação null-safe); `username` e `logon_time`, não.
-4. Confirmar no passo 0 que não há outros chamadores do pacote.
-5. Os testes sandbox de transição dependem da versão do PKG implantada. Proposta: variável `OPS_KILL_PKG_VERSAO=1|2` definida pelo operador, com skip quando não bate.
-6. Janela de implantação (seção 3.2): começa no `inicio_janela` da parte 2, antes da spec v2, e termina no primeiro kill sandbox v2 com ENCERRADA. Ou, em vez dela, a alternativa sem janela, que não é recomendada.
-7. Leituras de pré-condição 0.2a, 0.2b e 0.6: **feitas**. Pendência do 0.2b **fechada** em 2026-11-17 (seção 7.1). Reaberta apenas a identificação do Database Vault (seção 7.2), que **não bloqueia** a janela.
+**Aprovadas pelo responsável (2026-11-17):**
+
+| # | Decisão | Status |
+|---|---|---|
+| 2 | `p_ref_aprovacao` obrigatório | **aprovado** |
+| 3 | `program` e `machine` podem ser NULL (comparação null-safe); `username` e `logon_time`, não | **aprovado** |
+| 5 | Variável `OPS_KILL_PKG_VERSAO=1\|2`, definida pelo operador; testes sandbox de transição com skip quando a versão não bate | **aprovado** |
+| 6 | Janela de implantação da seção 3.2: início no `inicio_janela` da parte 2, antes da spec v2; fim no primeiro kill sandbox v2 com ENCERRADA. A alternativa sem janela foi **rejeitada** | **aprovado** |
+
+**Pendentes:**
+
+| # | Pendência | Depende de |
+|---|---|---|
+| 1 | Aprovar o texto do SQL v2, da migração e do rollback | Ensaio de banco em sandbox (seção 4.1), que é pré-requisito |
+| 4 | Confirmar que não há outros chamadores do pacote | Parcial: 0.2a (EXECUTE só para STARTUP_KILL) e 0.2b (seção 7.1) feitos. Faltam 0.1 (`DBA_DEPENDENCIES`), 0.3 (jobs) e 0.4 (`GV$SQL`), lidos na parte 1 |
+| 7.1 | Contas READ/MUT do executor na conferência de papéis | Nomes a informar pelo responsável |
+| 7.2 | Identificação do Database Vault (não bloqueia a janela) | Leituras de `DBA_ROLES` e `V$OPTION` (seção 7.2) |
 
 ## 7. Resultados das leituras autorizadas (MODELO, STARTUPADMIN, somente leitura)
 
