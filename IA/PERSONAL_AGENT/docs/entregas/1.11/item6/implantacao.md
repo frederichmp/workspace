@@ -227,7 +227,7 @@ O clone de arquivo **não substitui** nenhum desses passos. A checagem de `DBA_E
 4. Confirmar no passo 0 que não há outros chamadores do pacote.
 5. Os testes sandbox de transição dependem da versão do PKG implantada. Proposta: variável `OPS_KILL_PKG_VERSAO=1|2` definida pelo operador, com skip quando não bate.
 6. Janela de implantação (seção 3.2): começa no `inicio_janela` da parte 2, antes da spec v2, e termina no primeiro kill sandbox v2 com ENCERRADA. Ou, em vez dela, a alternativa sem janela, que não é recomendada.
-7. Leituras de pré-condição: 0.2a, 0.2b e 0.6 **feitas** pelo responsável (seção 7). **Pendente:** executar 0.2c e 0.2d (papéis, inclusive aninhados) e confirmar que nenhuma conta de aplicação do projeto recebe `EXECUTE ANY PROCEDURE`.
+7. Leituras de pré-condição 0.2a, 0.2b e 0.6: **feitas**. Pendência do 0.2b **fechada** em 2026-11-17 (seção 7.1). Reaberta apenas a identificação do Database Vault (seção 7.2), que **não bloqueia** a janela.
 
 ## 7. Resultados das leituras autorizadas (MODELO, STARTUPADMIN, somente leitura)
 
@@ -237,7 +237,7 @@ Informados pelo responsável em 2026-11-17. **Não executado:** partes 1 e 2, ro
 |---|---|---|
 | Estado | `PACKAGE` e `PACKAGE BODY` `PKG_OPS_KILL` VALID; `DBA_ARGUMENTS` de `KILL_SESSION` = 4 | Linha de base v1 confirmada. É a mesma assinatura de `rollback_ops_kill_v1.sql` |
 | 0.2a | EXECUTE em `OPS_OWNER.PKG_OPS_KILL` concedido **só** a `STARTUP_KILL` | Conforme o esperado |
-| 0.2b | `EXECUTE ANY PROCEDURE` concedido a `DBA`, `DV_REALM_OWNER`, `EXP_FULL_DATABASE`, `IMP_FULL_DATABASE`, `OUTLN`, `SYS`, `WMSYS` | São papéis e contas fornecidos pelo Oracle. **Mas** `DBA`, `DV_REALM_OWNER`, `EXP_FULL_DATABASE` e `IMP_FULL_DATABASE` são **papéis**: todo usuário que os tenha, inclusive por papel aninhado, pode chamar `KILL_SESSION` sem passar pelo grant restrito. A lista de 0.2b não mostra esses usuários. **Pendente: 0.2c e 0.2d** |
+| 0.2b | `EXECUTE ANY PROCEDURE` concedido a `DBA`, `DV_REALM_OWNER`, `EXP_FULL_DATABASE`, `IMP_FULL_DATABASE`, `OUTLN`, `SYS`, `WMSYS` | `DBA`, `DV_REALM_OWNER`, `EXP_FULL_DATABASE` e `IMP_FULL_DATABASE` são **papéis**: todo usuário que os tenha, inclusive por papel aninhado, pode chamar `KILL_SESSION` sem passar pelo grant restrito. **Correção:** a versão anterior desta linha os chamava de "fornecidos pelo Oracle" como se isso tivesse sido verificado. Não tinha sido. A verificação está na seção 7.1, e `DV_REALM_OWNER` continua não verificado (7.2) |
 | 0.6 | EXECUTE em `SYS.UTL_RAW` concedido a `PUBLIC` | A compilação da v2 não é bloqueada por esta checagem (definer-rights aceita grant a PUBLIC) |
 
 **Leitura do risco de 0.2b:**
@@ -245,3 +245,38 @@ Informados pelo responsável em 2026-11-17. **Não executado:** partes 1 e 2, ro
 - A v2 não piora esse quadro: quem a chama por esse caminho ainda precisa passar a identidade correta, senão recebe ALVO_DIVERGENTE.
 - O risco que importa é uma **conta de aplicação** do projeto ter um desses papéis: `STARTUP_DIAG`, `STARTUP_KILL` ou as contas READ/MUT do executor, cujos nomes estão no `.env`, que esta sessão não lê.
 - As consultas 0.2c e 0.2d, acrescentadas à parte 1, respondem a isso. O responsável deve incluir na conferência os nomes das contas READ/MUT.
+
+### 7.1 Fechamento da pendência 0.2b (2026-11-17, leitura autorizada, MODELO)
+
+Informado pelo responsável:
+- Os papéis `EXP_FULL_DATABASE` e `IMP_FULL_DATABASE` estão concedidos **somente** a `DATAPUMP_EXP_FULL_DATABASE`, `DATAPUMP_IMP_FULL_DATABASE`, `DBA` e `SYS`.
+- **Nenhuma conta de aplicação** (`STARTUP_KILL`, `STARTUP_DIAG`) recebeu esses papéis. `STARTUPADMIN` também está fora dessa lista.
+- `WMSYS` e `OUTLN` estão **EXPIRED & LOCKED**: não fazem login, então não usam o privilégio.
+
+O que isso fecha e o que não fecha:
+- **Fecha:** o caminho por `EXP_FULL_DATABASE`/`IMP_FULL_DATABASE` não alcança contas de aplicação; `WMSYS` e `OUTLN` estão inativas.
+- **Não muda:** o papel `DBA` dá `EXECUTE ANY PROCEDURE` a quem o tem. Essas contas também podem encerrar sessões diretamente com `ALTER SYSTEM`, e o pacote não é a barreira para elas, nem na v1 nem na v2. É risco aceito e documentado; não é uma regressão da v2.
+- **Fora do relato:** as contas READ/MUT do executor (nomes no `.env`, que esta sessão não lê) não foram citadas na leitura. Se fizerem parte da conferência do responsável, registrar aqui.
+
+### 7.2 Pendência reaberta: Database Vault (não bloqueia a janela)
+
+`DV_REALM_OWNER` aparece em 0.2b como detentor de `EXECUTE ANY PROCEDURE`. Ele **é um papel** do Database Vault, não uma conta. Por isso não aparece em `DBA_USERS`, e a ausência ali não diz nada sobre ele. Consultas de leitura para identificar o que existe:
+
+```sql
+-- O papel existe? (esperado: 1 linha se o Database Vault estiver instalado no catálogo)
+SELECT role FROM dba_roles WHERE role LIKE 'DV\_%' ESCAPE '\' ORDER BY role;
+-- Quem tem o papel (direta ou indiretamente)
+SELECT DISTINCT grantee FROM dba_role_privs
+ START WITH granted_role = 'DV_REALM_OWNER'
+ CONNECT BY PRIOR grantee = granted_role
+ ORDER BY grantee;
+-- O Database Vault está habilitado? (12c+: dba_dv_status; alternativa: v$option)
+SELECT name, status FROM dba_dv_status;
+SELECT parameter, value FROM v$option WHERE parameter = 'Oracle Database Vault';
+-- Contas típicas de DV (o nome real é definido na configuração do DV)
+SELECT username, account_status FROM dba_users
+ WHERE username IN (SELECT grantee FROM dba_role_privs WHERE granted_role IN ('DV_OWNER', 'DV_ACCTMGR'))
+ ORDER BY username;
+```
+
+Critério: nenhuma conta de aplicação do projeto tem `DV_REALM_OWNER`. Se o DV não estiver habilitado, o papel existe só no catálogo e a pendência se encerra com esse registro.
