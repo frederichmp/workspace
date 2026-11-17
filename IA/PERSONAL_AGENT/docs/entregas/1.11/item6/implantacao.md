@@ -395,3 +395,11 @@ Informada pelo responsável:
 - No arquivo `ops_kill_v2_migracao_parte1.sql`, a consulta numerada **0.1** é `DBA_DEPENDENCIES` (*"Nenhum outro objeto depende do pacote"*), não a de grants.
 - A leitura acima cobre grants e papéis. Ela **não** cobre objetos PL/SQL que dependem do pacote, como uma procedure do próprio `OPS_OWNER`, que chama o pacote sem precisar de grant.
 - Por isso a consulta `DBA_DEPENDENCIES` do arquivo continua **sem leitura registrada**.
+
+### 7.5 Situação das leituras de chamadores da parte 1 (registro do responsável, 2026-11-17)
+
+| Consulta | Situação | Observação |
+|---|---|---|
+| **0.1 do arquivo** (`DBA_DEPENDENCIES`) | **SEM LEITURA** | Não é coberta pela leitura de grants da 7.4. Objetos do próprio `OPS_OWNER` que chamam o pacote sem grant só aparecem aqui |
+| **7.4** (grants e herança por papel) | Lida | É **outra consulta** e **não substitui** a 0.1 do arquivo |
+| **0.4** (`GV$SQL`) | Sem leitura | **Indício, não prova.** Exclui `STARTUP_KILL` e `STARTUPADMIN` pelo `parsing_schema_name` e só vê o shared pool. Ausência de linhas **não conclui nada** sobre chamadores |
