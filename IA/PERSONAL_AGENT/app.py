@@ -64,6 +64,7 @@ from tools.oracle_dba import (
     consultar_alvo_sessao_diag,
     gerar_payload_e_hash_aprovacao,
     registrar_decisao_kill,
+    validar_parametros_kill,
 )
 from tools.gemini_router import (
     gemini_tools_schema,
@@ -215,16 +216,11 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
             if nome_funcao == "matar_sessao_oracle":
                 sid_alvo = argumentos.get("sid")
                 serial_alvo = argumentos.get("serial")
-                inst_id_alvo = argumentos.get("inst_id", 1)
+                inst_id_alvo = argumentos.get("inst_id")  # obrigatório, sem valor padrão
 
                 # 1. Validação local antes de qualquer conexão: inteiros positivos
-                try:
-                    inst_id_int = int(inst_id_alvo)
-                    sid_int = int(sid_alvo)
-                    serial_int = int(serial_alvo)
-                    if inst_id_int <= 0 or sid_int <= 0 or serial_int <= 0:
-                        raise ValueError()
-                except (ValueError, TypeError):
+                params_validados = validar_parametros_kill(inst_id_alvo, sid_alvo, serial_alvo)
+                if params_validados is None:
                     resultado_tool = json.dumps(
                         {
                             "status": "recusado",
@@ -232,7 +228,7 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
                             "status_banco": "PARAM_INVALIDO",
                             "mensagem": (
                                 f"Parâmetros inválidos: inst_id={inst_id_alvo}, sid={sid_alvo}, serial={serial_alvo}. "
-                                "Devem ser inteiros estritamente positivos (> 0)."
+                                "inst_id, sid e serial são obrigatórios e devem ser inteiros estritamente positivos (> 0)."
                             ),
                         },
                         ensure_ascii=False,
@@ -247,6 +243,7 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
                     )
                     yield f"⚠️ **Parâmetros Inválidos (PARAM_INVALIDO):** `inst_id={inst_id_alvo}, sid={sid_alvo}, serial={serial_alvo}`. Intervenção cancelada sem conexão."
                     continue
+                inst_id_int, sid_int, serial_int = params_validados
 
                 # 2. Pré-consulta do alvo na GV$SESSION via conta DIAG
                 yield f"🔍 Consultando sessão `inst_id={inst_id_int}, sid={sid_int}, serial={serial_int}` via DIAG..."
@@ -381,7 +378,7 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
 
     sid = pendencia["sid"]
     serial = pendencia["serial"]
-    inst_id = pendencia.get("inst_id", 1)
+    inst_id = pendencia["inst_id"]  # sempre gravado na pendência; sem valor padrão
     tool_call_id = pendencia["tool_call_id"]
     nome_funcao = pendencia["nome_funcao"]
     dados_alvo = pendencia.get("dados_alvo", {})

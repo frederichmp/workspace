@@ -52,6 +52,7 @@ from tools.oracle_dba import (
     consultar_alvo_sessao_diag,
     gerar_payload_e_hash_aprovacao,
     registrar_decisao_kill,
+    validar_parametros_kill,
 )
 
 # 3. Importando a Ferramenta de Nuvem (Gemini), o Notificador SMTP e a Busca RAG Local
@@ -178,16 +179,11 @@ def executar_agente(prompt_usuario: str) -> None:
                 elif nome_funcao == "matar_sessao_oracle":
                     sid = argumentos.get("sid")
                     serial = argumentos.get("serial")
-                    inst_id = argumentos.get("inst_id", 1)
+                    inst_id = argumentos.get("inst_id")  # obrigatório, sem valor padrão
 
                     # 1. Validação local antes de qualquer consulta ou conexão: inteiros positivos
-                    try:
-                        inst_id_val = int(inst_id)
-                        sid_val = int(sid)
-                        serial_val = int(serial)
-                        if inst_id_val <= 0 or sid_val <= 0 or serial_val <= 0:
-                            raise ValueError()
-                    except (ValueError, TypeError):
+                    params_validados = validar_parametros_kill(inst_id, sid, serial)
+                    if params_validados is None:
                         resultado_tool = json.dumps(
                             {
                                 "status": "recusado",
@@ -195,7 +191,7 @@ def executar_agente(prompt_usuario: str) -> None:
                                 "status_banco": "PARAM_INVALIDO",
                                 "mensagem": (
                                     f"Parâmetros inválidos: inst_id={inst_id}, sid={sid}, serial={serial}. "
-                                    "Devem ser inteiros estritamente positivos (> 0)."
+                                    "inst_id, sid e serial são obrigatórios e devem ser inteiros estritamente positivos (> 0)."
                                 ),
                             },
                             ensure_ascii=False,
@@ -203,8 +199,8 @@ def executar_agente(prompt_usuario: str) -> None:
                         print(f"[Sistema]: Parâmetros inválidos recusados localmente (PARAM_INVALIDO).")
                         logging.warning(f"HITL RECUSADO LOCALMENTE: PARAM_INVALIDO | inst_id={inst_id}, sid={sid}, serial={serial}")
                         # Devolve o resultado diretamente sem prosseguir para aprovação
-                        st_p = None
                     else:
+                        inst_id_val, sid_val, serial_val = params_validados
                         # 2. Consulta prévia do alvo pela conta DIAG na GV$SESSION
                         print(f"[Sistema]: Consultando alvo inst_id={inst_id_val}, sid={sid_val}, serial={serial_val} via DIAG...")
                         check_alvo = consultar_alvo_sessao_diag(

@@ -459,6 +459,36 @@ def coletar_plano_execucao(sql_id: str) -> str:
                 pass
 
 
+def _inteiro_positivo(valor: Any) -> Optional[int]:
+    """
+    Converte valor em inteiro estritamente positivo, ou None se inválido.
+    Aceita apenas int (bool excluído) ou string só de dígitos; ausente (None), float,
+    texto e valores <= 0 são inválidos. Nunca assume valor padrão.
+    """
+    if isinstance(valor, bool):
+        return None
+    if isinstance(valor, int):
+        numero = valor
+    elif isinstance(valor, str) and re.fullmatch(r"\s*\d+\s*", valor):
+        numero = int(valor)
+    else:
+        return None
+    return numero if numero > 0 else None
+
+
+def validar_parametros_kill(
+    inst_id: Any, sid: Any, serial: Any
+) -> Optional[Tuple[int, int, int]]:
+    """
+    Valida inst_id, sid e serial (todos obrigatórios, inteiros positivos) antes de qualquer
+    consulta ou conexão. Retorna (inst_id, sid, serial) ou None -> PARAM_INVALIDO.
+    """
+    valores = (_inteiro_positivo(inst_id), _inteiro_positivo(sid), _inteiro_positivo(serial))
+    if any(v is None for v in valores):
+        return None
+    return valores  # type: ignore[return-value]
+
+
 def consultar_alvo_sessao_diag(
     inst_id: int, sid: int, serial: int
 ) -> Dict[str, Any]:
@@ -473,29 +503,19 @@ def consultar_alvo_sessao_diag(
       - caso contrário                -> encontrado=True, elegivel=True.
     Somente alvos elegíveis podem seguir para a solicitação de aprovação.
     """
-    # 1. Validação local antes de qualquer conexão: inteiros positivos
-    try:
-        inst_id_int = int(inst_id)
-        sid_int = int(sid)
-        serial_int = int(serial)
-        if inst_id_int <= 0 or sid_int <= 0 or serial_int <= 0:
-            return {
-                "encontrado": False,
-                "motivo": "PARAM_INVALIDO",
-                "mensagem": (
-                    f"Parâmetros inválidos: inst_id={inst_id}, sid={sid}, serial={serial}. "
-                    "Devem ser inteiros positivos."
-                ),
-            }
-    except (ValueError, TypeError):
+    # 1. Validação local antes de qualquer conexão: inteiros positivos, todos obrigatórios
+    validados = validar_parametros_kill(inst_id, sid, serial)
+    if validados is None:
         return {
             "encontrado": False,
+            "elegivel": False,
             "motivo": "PARAM_INVALIDO",
             "mensagem": (
                 f"Parâmetros inválidos: inst_id={inst_id}, sid={sid}, serial={serial}. "
-                "Devem ser números inteiros."
+                "Todos são obrigatórios e devem ser inteiros positivos."
             ),
         }
+    inst_id_int, sid_int, serial_int = validados
 
     # 2. Credenciais de diagnóstico
     user = os.getenv("ORACLE_USER_DIAG")
@@ -625,32 +645,17 @@ def consultar_alvo_sessao_diag(
                 pass
 
 
-def matar_sessao_oracle(sid: int, serial: int, inst_id: int = 1) -> str:
+def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int] = None) -> str:
     """
     Executa o procedimento homologado de encerramento de sessão via conta segregada ORACLE_USER_KILL.
     Chama OPS_OWNER.PKG_OPS_KILL.KILL_SESSION com binds nomeados (p_inst_id, p_sid, p_serial, p_status).
     NÃO executa comando de sessão direto no Python.
-    Aplica validação local de inteiros positivos antes de qualquer conexão.
+    inst_id é obrigatório: não há instância padrão. Ausente (None) ou não inteiro positivo
+    retorna PARAM_INVALIDO antes de qualquer consulta ou conexão.
     """
-    # 1. Validação local antes de qualquer conexão: inteiros positivos
-    try:
-        inst_id_int = int(inst_id)
-        sid_int = int(sid)
-        serial_int = int(serial)
-        if inst_id_int <= 0 or sid_int <= 0 or serial_int <= 0:
-            return json.dumps(
-                {
-                    "status": "recusado",
-                    "motivo": "PARAM_INVALIDO",
-                    "status_banco": "PARAM_INVALIDO",
-                    "mensagem": (
-                        f"Parâmetros inválidos para encerramento de sessão: inst_id={inst_id}, sid={sid}, serial={serial}. "
-                        "Devem ser números inteiros estritamente positivos (> 0)."
-                    ),
-                },
-                ensure_ascii=False,
-            )
-    except (ValueError, TypeError):
+    # 1. Validação local antes de qualquer conexão: inteiros positivos, todos obrigatórios
+    validados = validar_parametros_kill(inst_id, sid, serial)
+    if validados is None:
         return json.dumps(
             {
                 "status": "recusado",
@@ -658,11 +663,12 @@ def matar_sessao_oracle(sid: int, serial: int, inst_id: int = 1) -> str:
                 "status_banco": "PARAM_INVALIDO",
                 "mensagem": (
                     f"Parâmetros inválidos para encerramento de sessão: inst_id={inst_id}, sid={sid}, serial={serial}. "
-                    "Devem ser números inteiros."
+                    "inst_id, sid e serial são obrigatórios e devem ser inteiros estritamente positivos (> 0)."
                 ),
             },
             ensure_ascii=False,
         )
+    inst_id_int, sid_int, serial_int = validados
 
     # 2. Verificação de credenciais segregadas da conta KILL
     user = os.getenv("ORACLE_USER_KILL")
@@ -1215,11 +1221,13 @@ oracle_tools_schema: List[Dict[str, Any]] = [
                     },
                     "inst_id": {
                         "type": "integer",
-                        "description": "O ID da instância Oracle RAC (padrão: 1).",
-                        "default": 1,
+                        "description": (
+                            "O INST_ID da instância Oracle onde a sessão está (obrigatório, sem valor padrão). "
+                            "Use o inst_id retornado por coletar_sessoes_ativas."
+                        ),
                     },
                 },
-                "required": ["sid", "serial"],
+                "required": ["inst_id", "sid", "serial"],
             },
         },
     },
