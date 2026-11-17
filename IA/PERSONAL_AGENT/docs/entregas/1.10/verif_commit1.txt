@@ -1,0 +1,53 @@
+### 1. git status --short .
+ M src/tools/oracle_dba.py
+ M tests/conftest.py
+ M tests/test_oracle_kill.py
+?? docs/entregas/
+exit=0
+
+### 2. env -u ORACLE_SANDBOX python -m pytest -q
+..................................................sss..s..ss.ss......... [ 61%]
+......................................ssssssss                           [100%]
+============================== warnings summary ===============================
+..\..\..\..\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
+  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+102 passed, 16 skipped, 13 warnings in 1.07s
+exit=0
+
+### 3a. grep -rn 'inst_id", 1' src app.py
+exit=1
+
+### 3b. grep -n '"default"' src/tools/oracle_dba.py
+exit=1
+
+### 3c. grep -rn 'status_banco' src app.py
+src/tools/oracle_dba.py:666:                "status_banco": "PARAM_INVALIDO",
+src/tools/oracle_dba.py:742:        status_banco = str(status_var.getvalue() or "").strip()
+src/tools/oracle_dba.py:746:                "status": status_banco,
+src/tools/oracle_dba.py:747:                "motivo": status_banco,
+src/tools/oracle_dba.py:748:                "status_banco": status_banco,
+src/tools/oracle_dba.py:755:                    f"Status retornado pelo banco: {status_banco}."
+src/tools/oracle_dba.py:766:                "status_banco": "ERRO_ORACLE",
+src/tools/oracle_dba.py:879:                "status_banco": motivo,
+src/tools/oracle_dba.py:898:                "status_banco": "ALVO_ALTERADO",
+src/tools/oracle_dba.py:918:                "status_banco": motivo,
+src/tools/oracle_dba.py:1097:    resultado_banco = str(dados_exec.get("status_banco") or dados_exec.get("motivo") or "DESCONHECIDO")
+src/tools/oracle_dba.py:1175:                    "status_banco": "PARAM_INVALIDO",
+src/tools/oracle_dba.py:1202:                    "status_banco": motivo,
+Binary file src/tools/__pycache__/oracle_dba.cpython-315.pyc matches
+exit=0
+
+### 3d. grep -rn 'TOCTOU' src app.py tests
+exit=1
+
+### 3e. grep -rn --include='*.py' 'ALTER SYSTEM' . (excl. .venv/venv/site-packages)
+exit=1
+
+### 4. stat snapshot
+data/logs/kill_approval.log size=303 mtime=2026-11-17 12:39:39.063003600 -0300
+auditoria_oracle.log size=38366 mtime=2026-11-15 17:35:17.265046800 -0300
+data/logs/auditoria_oracle.log size=38366 mtime=2026-11-15 17:35:17.265046800 -0300
+exit=0

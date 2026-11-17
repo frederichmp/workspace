@@ -1,0 +1,57 @@
+=== 1. git status --short . ===
+ M app.py
+?? docs/entregas/
+?? tests/test_fluxo_web.py
+rc=0
+=== 2. pytest suite completa ===
+..................................................sss..s..ss.ss......... [ 52%]
+.........................................................ssssssss        [100%]
+============================== warnings summary ===============================
+..\..\..\..\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
+  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+121 passed, 16 skipped, 13 warnings in 20.34s
+EXIT=0 TEMPO=23s
+=== 3. pytest isolado tests/test_fluxo_cli.py ===
+......                                                                   [100%]
+============================== warnings summary ===============================
+..\..\..\..\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
+  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+6 passed, 13 warnings in 1.08s
+EXIT=0 TEMPO=2s
+=== 4a. inst_id, 1 ===
+rc=1
+=== 4b. "default" em oracle_dba.py ===
+rc=1
+=== 4c. status_banco ===
+src/tools/oracle_dba.py:670:                "status_banco": "PARAM_INVALIDO",
+src/tools/oracle_dba.py:746:        status_banco = str(status_var.getvalue() or "").strip()
+src/tools/oracle_dba.py:750:                "status": status_banco,
+src/tools/oracle_dba.py:751:                "motivo": status_banco,
+src/tools/oracle_dba.py:752:                "status_banco": status_banco,
+src/tools/oracle_dba.py:759:                    f"Status retornado pelo banco: {status_banco}."
+src/tools/oracle_dba.py:770:                "status_banco": "ERRO_ORACLE",
+src/tools/oracle_dba.py:883:                "status_banco": motivo,
+src/tools/oracle_dba.py:902:                "status_banco": "ALVO_ALTERADO",
+src/tools/oracle_dba.py:922:                "status_banco": motivo,
+src/tools/oracle_dba.py:1146:    resultado_banco = str(dados_exec.get("status_banco") or dados_exec.get("motivo") or "DESCONHECIDO")
+src/tools/oracle_dba.py:1224:                    "status_banco": "PARAM_INVALIDO",
+src/tools/oracle_dba.py:1251:                    "status_banco": motivo,
+rc=0
+=== 4d. TOCTOU ===
+rc=1
+=== 4e. ALTER SYSTEM ===
+rc=1
+=== 5. snapshot logs ===
+data/logs/kill_approval.log size=303 mtime=2026-11-17 12:39:39.063003600 -0300
+data/logs/auditoria_oracle.log size=38366 mtime=2026-11-15 17:35:17.265046800 -0300
+data/logs/auditoria_oracle.log size=38366 mtime=2026-11-15 17:35:17.265046800 -0300
+rc=0
+=== 5b. auditoria_oracle.log na raiz ===
+auditoria_oracle.log size=38366 mtime=2026-11-15 17:35:17.265046800 -0300
+rc=0

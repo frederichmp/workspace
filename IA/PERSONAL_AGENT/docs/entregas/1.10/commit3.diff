@@ -1,0 +1,57 @@
+diff --git a/IA/PERSONAL_AGENT/src/tools/oracle_dba.py b/IA/PERSONAL_AGENT/src/tools/oracle_dba.py
+index 93224b7..4b41297 100644
+--- a/IA/PERSONAL_AGENT/src/tools/oracle_dba.py
++++ b/IA/PERSONAL_AGENT/src/tools/oracle_dba.py
+@@ -648,7 +648,7 @@ def consultar_alvo_sessao_diag(
+                 pass
+ 
+ 
+-def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int] = None) -> str:
++def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int]) -> str:
+     """
+     Executa o procedimento homologado de encerramento de sessão via conta segregada ORACLE_USER_KILL.
+     Chama OPS_OWNER.PKG_OPS_KILL.KILL_SESSION com binds nomeados (p_inst_id, p_sid, p_serial, p_status).
+diff --git a/IA/PERSONAL_AGENT/tests/test_oracle_kill.py b/IA/PERSONAL_AGENT/tests/test_oracle_kill.py
+index bf16933..0372b78 100644
+--- a/IA/PERSONAL_AGENT/tests/test_oracle_kill.py
++++ b/IA/PERSONAL_AGENT/tests/test_oracle_kill.py
+@@ -24,6 +24,7 @@ b) Sandbox (sandbox_only, requer ORACLE_SANDBOX=1):
+    - STARTUP_KILL tentando comando direto -> ORA-01031.
+ """
+ from datetime import datetime, timezone
++import inspect
+ import json
+ import os
+ from pathlib import Path
+@@ -404,10 +405,8 @@ def test_inst_id_ausente_param_invalido_sem_conexao(monkeypatch, tmp_path):
+ 
+     monkeypatch.setattr(oracledb, "connect", fail_connect)
+ 
+-    res = json.loads(matar_sessao_oracle(sid=10, serial=20))
+-    assert res["status"] == "recusado"
+-    assert res["motivo"] == "PARAM_INVALIDO"
+-    assert res["status_banco"] == "PARAM_INVALIDO"
++    with pytest.raises(TypeError):
++        matar_sessao_oracle(sid=10, serial=20)
+ 
+     for inst_invalido in (None, True, 1.5, "1a", "", 0, -3):
+         res_inv = json.loads(matar_sessao_oracle(sid=10, serial=20, inst_id=inst_invalido))
+@@ -425,6 +424,18 @@ def test_inst_id_ausente_param_invalido_sem_conexao(monkeypatch, tmp_path):
+     assert "default" not in props["properties"]["inst_id"]
+ 
+ 
++def test_assinatura_sem_default_para_inst_id():
++    """Nenhuma função pública definida em oracle_dba tem parâmetro inst_id com default."""
++    com_default = []
++    for nome, obj in vars(oracle_dba).items():
++        if nome.startswith("_") or not inspect.isfunction(obj) or obj.__module__ != oracle_dba.__name__:
++            continue
++        param = inspect.signature(obj).parameters.get("inst_id")
++        if param is not None and param.default is not inspect.Parameter.empty:
++            com_default.append(nome)
++    assert not com_default, f"inst_id com default em: {com_default}"
++
++
+ def test_resultado_nao_usuario_com_aprovacao_nao_envia_email_de_aprovada(monkeypatch, tmp_path, ambiente_fake):
+     """APROVADO + PKG retornando NAO_USUARIO -> e-mail "NÃO executada", nunca assunto de aprovada."""
+     linha = _linha_alvo()

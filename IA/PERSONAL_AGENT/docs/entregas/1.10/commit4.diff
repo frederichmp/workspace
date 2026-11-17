@@ -1,0 +1,357 @@
+diff --git a/IA/PERSONAL_AGENT/app.py b/IA/PERSONAL_AGENT/app.py
+index ee1ca5c..cd23604 100644
+--- a/IA/PERSONAL_AGENT/app.py
++++ b/IA/PERSONAL_AGENT/app.py
+@@ -62,6 +62,7 @@ from tools.oracle_dba import (
+     coletar_plano_execucao,
+     preparar_intervencao_kill,
+     registrar_decisao_kill,
++    APROVACAO_TTL_SEGUNDOS,
+ )
+ from tools.gemini_router import (
+     gemini_tools_schema,
+@@ -354,10 +355,17 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
+         alvo=dados_alvo,
+         hash_aprovado=hash_payload,
+         canal="Web UI",
++        preparado_em=pendencia.get("timestamp"),  # validade medida no clique; ausente -> TIMEOUT
+     )
+     resultado_tool = desfecho["resultado_tool"]
+ 
+-    if desfecho["decisao"] != "APROVADO":
++    if desfecho["decisao"] == "TIMEOUT":
++        aviso_ui = (
++            f"⏱️ **Aprovação expirada (`{id_aprovador_limpo}`):** a pendência da sessão `{sid},{serial}` "
++            f"passou do prazo de {APROVACAO_TTL_SEGUNDOS} s. Nenhuma execução no banco. "
++            "Peça ao agente para reconsultar a sessão."
++        )
++    elif desfecho["decisao"] != "APROVADO":
+         aprovador_registro = id_aprovador_limpo or "NAO_INFORMADO"
+         aviso_ui = (
+             f"🛑 **Ação Abortada pelo Aprovador (`{aprovador_registro}`):** "
+diff --git a/IA/PERSONAL_AGENT/src/main.py b/IA/PERSONAL_AGENT/src/main.py
+index 7ac54cb..20a7ac8 100644
+--- a/IA/PERSONAL_AGENT/src/main.py
++++ b/IA/PERSONAL_AGENT/src/main.py
+@@ -49,6 +49,7 @@ from tools.oracle_dba import (
+     coletar_top_sql,
+     coletar_plano_execucao,
+     conduzir_kill_hitl,
++    APROVACAO_TTL_SEGUNDOS,
+ )
+ 
+ # 3. Importando a Ferramenta de Nuvem (Gemini), o Notificador SMTP e a Busca RAG Local
+@@ -143,6 +144,11 @@ def _exibir_desfecho_kill_cli(desfecho: dict) -> None:
+     """Mensagens de tela que diferenciam recusa, aprovado-e-executado e aprovado-sem-execução."""
+     if not desfecho.get("prompt_exibido"):
+         print(f"[Sistema]: Alvo recusado ({desfecho['motivo']}). Ação cancelada sem solicitação de aprovação.")
++    elif desfecho["decisao"] == "TIMEOUT":
++        print(
++            f"[Sistema]: Aprovação EXPIRADA (mais de {APROVACAO_TTL_SEGUNDOS} s desde a preparação). "
++            "Nenhuma execução no banco. Solicite novamente."
++        )
+     elif desfecho["decisao"] != "APROVADO":
+         print(f"[Sistema]: Intervenção NÃO aprovada ({desfecho['motivo']}). Nenhuma execução no banco.")
+     elif desfecho["executado"]:
+diff --git a/IA/PERSONAL_AGENT/src/tools/oracle_dba.py b/IA/PERSONAL_AGENT/src/tools/oracle_dba.py
+index 4b41297..fd56d6e 100644
+--- a/IA/PERSONAL_AGENT/src/tools/oracle_dba.py
++++ b/IA/PERSONAL_AGENT/src/tools/oracle_dba.py
+@@ -4,7 +4,7 @@ Aplica isolamento estrito de credenciais via variáveis de ambiente (.env),
+ papéis segregados (ORACLE_USER_DIAG para leitura/diagnóstico e ORACLE_USER_KILL para intervenção via PKG_OPS_KILL),
+ pré-validação rápida de rede/VPN (Socket TCP), Edge Filtering e trilha de auditoria HITL.
+ """
+-from datetime import datetime, timezone
++from datetime import datetime, timedelta, timezone
+ import hashlib
+ import json
+ import logging
+@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
+ # Decisões humanas possíveis sobre uma intervenção de kill
+ DECISOES_KILL: Tuple[str, ...] = ("APROVADO", "REJEITADO", "TIMEOUT")
+ 
++# Validade da aprovação humana, contada a partir da preparação (exibição dos dados do alvo).
++# Verificação passiva no momento da decisão: APROVADO fora de [0, TTL) vira TIMEOUT.
++APROVACAO_TTL_SEGUNDOS = 300
++
+ # Resultados de PKG_OPS_KILL que significam execução efetiva do encerramento
+ RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = ("ENCERRADA", "MARCADA_PARA_KILL")
+ 
+@@ -1009,6 +1013,26 @@ def montar_notificacao_kill(
+     return assunto, corpo
+ 
+ 
++def _agora_utc() -> datetime:
++    """Relógio padrão (UTC, com fuso) usado na verificação de expiração da aprovação."""
++    return datetime.now(timezone.utc)
++
++
++def _aprovacao_expirada(preparado_em: Optional[str], instante: datetime) -> bool:
++    """
++    True se a aprovação está fora da janela válida [0, APROVACAO_TTL_SEGUNDOS) desde a preparação.
++    Fail-closed: preparado_em ausente, inválido, sem fuso ou no futuro conta como expirado.
++    """
++    try:
++        inicio = datetime.fromisoformat(preparado_em)
++        if inicio.tzinfo is None or instante.tzinfo is None:
++            return True
++        decorrido = instante - inicio
++    except (TypeError, ValueError):
++        return True
++    return decorrido < timedelta(0) or decorrido >= timedelta(seconds=APROVACAO_TTL_SEGUNDOS)
++
++
+ def registrar_decisao_kill(
+     decisao: str,
+     aprovador: str,
+@@ -1018,8 +1042,10 @@ def registrar_decisao_kill(
+     alvo: Dict[str, Any],
+     hash_aprovado: str,
+     canal: str,
++    preparado_em: Optional[str],
+     motivo: Optional[str] = None,
+     caminho_log: Optional[Path] = None,
++    agora: Optional[Callable[[], datetime]] = None,
+ ) -> Dict[str, Any]:
+     """
+     Aplica a decisão humana sobre uma intervenção já preparada (alvo elegível e hash exibido).
+@@ -1027,14 +1053,20 @@ def registrar_decisao_kill(
+     - APROVADO com aprovador identificado: executa o encerramento, grava decisao e
+       resultado_banco separados e envia e-mail conforme o resultado efetivo.
+     - APROVADO sem aprovador: convertido em REJEITADO (motivo SEM_IDENTIFICACAO), sem execução.
++    - APROVADO fora da validade (preparado_em + APROVACAO_TTL_SEGUNDOS, fail-closed): convertido
++      em TIMEOUT (motivo APROVACAO_EXPIRADA), sem reconsulta, sem execução e sem e-mail.
+     - REJEITADO / TIMEOUT: grava a decisão sem execução e sem e-mail.
+ 
++    preparado_em: timestamp ISO-8601 com fuso devolvido por preparar_intervencao_kill.
++    agora: relógio injetável (padrão: UTC atual); lido uma única vez, antes de qualquer conexão.
++
+     Retorna dict com decisao, resultado_banco, executado, motivo, resultado_tool (JSON para o LLM),
+     registro gravado e dados da notificação.
+     """
+     if decisao not in DECISOES_KILL:
+         raise ValueError(f"Decisão inválida: {decisao!r}. Esperado um de {DECISOES_KILL}.")
+ 
++    instante_decisao = (agora or _agora_utc)()
+     parametros = {"inst_id": inst_id, "sid": sid, "serial": serial}
+     aprovador_limpo = (aprovador or "").strip()
+ 
+@@ -1042,6 +1074,14 @@ def registrar_decisao_kill(
+         decisao = "REJEITADO"
+         motivo = "SEM_IDENTIFICACAO"
+ 
++    if decisao == "APROVADO" and _aprovacao_expirada(preparado_em, instante_decisao):
++        logger.warning(
++            f"AUDITORIA HITL: aprovação expirada ({canal}) | preparado_em={preparado_em!r} | "
++            f"decidido_em={instante_decisao.isoformat()} | TTL={APROVACAO_TTL_SEGUNDOS}s"
++        )
++        decisao = "TIMEOUT"
++        motivo = "APROVACAO_EXPIRADA"
++
+     if decisao != "APROVADO":
+         if motivo is None:
+             motivo = "TIMEOUT_APROVACAO" if decisao == "TIMEOUT" else "REJEITADO_PELO_APROVADOR"
+@@ -1060,6 +1100,18 @@ def registrar_decisao_kill(
+             f"AUDITORIA HITL: {decisao} ({motivo}) por {aprovador_registro} ({canal}) | "
+             f"inst_id={inst_id}, sid={sid}, serial={serial} | Hash={hash_aprovado}"
+         )
++        if motivo == "APROVACAO_EXPIRADA":
++            mensagem = (
++                f"Aprovação expirada: decisão registrada após o prazo de {APROVACAO_TTL_SEGUNDOS} s "
++                "desde a preparação; os dados exibidos podem estar vencidos. "
++                "Nenhuma chamada à conta KILL foi feita. "
++                "Para prosseguir, reconsulte a sessão e solicite nova aprovação."
++            )
++        else:
++            mensagem = (
++                f"Intervenção não aprovada ({decisao}/{motivo}) por '{aprovador_registro}'. "
++                "Nenhuma chamada à conta KILL foi feita."
++            )
+         resultado_tool = json.dumps(
+             {
+                 "status": "abortado",
+@@ -1067,10 +1119,7 @@ def registrar_decisao_kill(
+                 "motivo": motivo,
+                 "resultado_banco": None,
+                 "executado": False,
+-                "mensagem": (
+-                    f"Intervenção não aprovada ({decisao}/{motivo}) por '{aprovador_registro}'. "
+-                    "Nenhuma chamada à conta KILL foi feita."
+-                ),
++                "mensagem": mensagem,
+             },
+             ensure_ascii=False,
+         )
+@@ -1233,9 +1282,12 @@ def conduzir_kill_hitl(
+     solicitar_aprovacao: Callable[[Dict[str, Any]], Tuple[str, str, Optional[str]]],
+     canal: str,
+     caminho_log: Optional[Path] = None,
++    agora: Optional[Callable[[], datetime]] = None,
+ ) -> Dict[str, Any]:
+     """
+     Fluxo síncrono completo (usado pela CLI): preparar -> solicitar aprovação -> registrar decisão.
++    A validade da aprovação é medida em registrar_decisao_kill, logo após o retorno de
++    solicitar_aprovacao (relógio injetável via agora).
+ 
+     solicitar_aprovacao recebe o resultado de preparar_intervencao_kill e devolve
+     (decisao, aprovador, motivo). Só é chamado quando o alvo é elegível; recusas da
+@@ -1266,8 +1318,10 @@ def conduzir_kill_hitl(
+         alvo=prep["alvo"],
+         hash_aprovado=prep["hash_identidade"],
+         canal=canal,
++        preparado_em=prep["timestamp"],
+         motivo=motivo,
+         caminho_log=caminho_log,
++        agora=agora,
+     )
+     desfecho["prompt_exibido"] = True
+     desfecho["aprovador"] = (aprovador or "").strip()
+diff --git a/IA/PERSONAL_AGENT/tests/test_oracle_kill.py b/IA/PERSONAL_AGENT/tests/test_oracle_kill.py
+index 0372b78..f667b4d 100644
+--- a/IA/PERSONAL_AGENT/tests/test_oracle_kill.py
++++ b/IA/PERSONAL_AGENT/tests/test_oracle_kill.py
+@@ -23,7 +23,7 @@ b) Sandbox (sandbox_only, requer ORACLE_SANDBOX=1):
+    - STARTUP_DIAG tentando comando direto -> ORA-01031;
+    - STARTUP_KILL tentando comando direto -> ORA-01031.
+ """
+-from datetime import datetime, timezone
++from datetime import datetime, timedelta, timezone
+ import inspect
+ import json
+ import os
+@@ -46,6 +46,7 @@ from src.tools.oracle_dba import (
+     matar_sessao_oracle,
+     gerar_payload_e_hash_aprovacao,
+     oracle_tools_schema,
++    registrar_decisao_kill,
+     registrar_log_aprovacao_kill,
+ )
+ 
+@@ -436,6 +437,127 @@ def test_assinatura_sem_default_para_inst_id():
+     assert not com_default, f"inst_id com default em: {com_default}"
+ 
+ 
++def _solicitar_capturando(captura, decisao="APROVADO", aprovador="dba_teste", motivo=None):
++    """Prompt falso que guarda timestamp e hash do preparo e devolve a decisão pedida."""
++    def _solicitar(prep):
++        captura["ts"] = prep["timestamp"]
++        captura["hash"] = prep["hash_identidade"]
++        return decisao, aprovador, motivo
++    return _solicitar
++
++
++def _relogio_relativo(captura, delta):
++    """Relógio injetado: instante da preparação (capturado no prompt) + delta."""
++    return lambda: datetime.fromisoformat(captura["ts"]) + delta
++
++
++@pytest.mark.parametrize(
++    "delta",
++    [timedelta(seconds=300), timedelta(seconds=301), timedelta(days=1), timedelta(seconds=-1)],
++    ids=["fronteira_300s", "301s", "1_dia", "futuro"],
++)
++def test_aprovacao_expirada_vira_timeout(monkeypatch, tmp_path, ambiente_fake, delta):
++    """APROVADO fora de [0, TTL) -> TIMEOUT/APROVACAO_EXPIRADA, sem reconsulta, 0 KILL, 0 e-mail."""
++    assert oracle_dba.APROVACAO_TTL_SEGUNDOS == 300
++    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo()], kill_permitido=False))
++    log = tmp_path / "kill.log"
++    cap = {}
++
++    desfecho = conduzir_kill_hitl(
++        dict(ARGS_ALVO),
++        solicitar_aprovacao=_solicitar_capturando(cap),
++        canal="TESTE",
++        caminho_log=log,
++        agora=_relogio_relativo(cap, delta),
++    )
++
++    assert desfecho["prompt_exibido"] is True
++    assert desfecho["decisao"] == "TIMEOUT"
++    assert desfecho["motivo"] == "APROVACAO_EXPIRADA"
++    assert desfecho["executado"] is False
++    assert desfecho["resultado_banco"] is None
++    assert desfecho["assunto_email"] is None
++    assert oracle_fake.conexoes_kill == []
++    assert oracle_fake.conexoes.count(USER_DIAG_FAKE) == 1, "não deve haver reconsulta DIAG após expirar"
++    assert ambiente_fake == []
++
++    tool = json.loads(desfecho["resultado_tool"])
++    assert tool["decisao"] == "TIMEOUT"
++    assert tool["executado"] is False
++    assert tool["motivo"] == "APROVACAO_EXPIRADA"
++
++    registros = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()]
++    assert len(registros) == 1
++    reg = registros[0]
++    assert reg["decisao"] == "TIMEOUT"
++    assert reg["motivo"] == "APROVACAO_EXPIRADA"
++    assert reg["resultado_banco"] is None
++    assert reg["aprovador"] == "dba_teste"
++    assert reg["hash_payload"] == cap["hash"]
++    assert "status_banco" not in reg
++
++    # Fail-closed: preparado_em ausente, vazio, inválido ou sem fuso -> TIMEOUT, 0 KILL
++    instante = datetime(2026, 11, 17, 12, 0, tzinfo=timezone.utc)
++    for preparado_em in (None, "", "lixo", "2026-11-17T12:00:00"):
++        res = registrar_decisao_kill(
++            decisao="APROVADO", aprovador="dba_teste", inst_id=1, sid=101, serial=202,
++            alvo={}, hash_aprovado="hash-fake", canal="TESTE", preparado_em=preparado_em,
++            caminho_log=log, agora=lambda: instante,
++        )
++        assert res["decisao"] == "TIMEOUT", f"preparado_em={preparado_em!r}"
++        assert res["motivo"] == "APROVACAO_EXPIRADA"
++        assert res["executado"] is False
++    assert oracle_fake.conexoes_kill == []
++    assert ambiente_fake == []
++
++    # Só APROVADO é convertido: REJEITADO após o TTL continua REJEITADO
++    oracle_fake.linhas_diag.append(_linha_alvo())
++    cap_rej = {}
++    desfecho_rej = conduzir_kill_hitl(
++        dict(ARGS_ALVO),
++        solicitar_aprovacao=_solicitar_capturando(cap_rej, decisao="REJEITADO", motivo="REJEITADO_PELO_APROVADOR"),
++        canal="TESTE",
++        caminho_log=log,
++        agora=_relogio_relativo(cap_rej, timedelta(seconds=301)),
++    )
++    assert desfecho_rej["decisao"] == "REJEITADO"
++    assert desfecho_rej["motivo"] == "REJEITADO_PELO_APROVADOR"
++    assert oracle_fake.conexoes_kill == []
++
++
++@pytest.mark.parametrize(
++    "delta",
++    [timedelta(0), timedelta(seconds=299, microseconds=999999)],
++    ids=["0s", "299_999999s"],
++)
++def test_aprovacao_dentro_do_ttl_executa(monkeypatch, tmp_path, ambiente_fake, delta):
++    """APROVADO dentro de [0, TTL) segue o fluxo normal: reconsulta, 1 KILL, e-mail de aprovada."""
++    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo(), _linha_alvo()], status_pkg="ENCERRADA"))
++    log = tmp_path / "kill.log"
++    cap = {}
++
++    desfecho = conduzir_kill_hitl(
++        dict(ARGS_ALVO),
++        solicitar_aprovacao=_solicitar_capturando(cap),
++        canal="TESTE",
++        caminho_log=log,
++        agora=_relogio_relativo(cap, delta),
++    )
++
++    assert desfecho["decisao"] == "APROVADO"
++    assert desfecho["executado"] is True
++    assert desfecho["resultado_banco"] == "ENCERRADA"
++    assert oracle_fake.conexoes_kill == [USER_KILL_FAKE]
++    assert oracle_fake.conexoes.count(USER_DIAG_FAKE) == 2
++    assert len(ambiente_fake) == 1
++    assert ambiente_fake[0]["assunto"].startswith("[AGENTE DBA] Intervenção Aprovada por dba_teste")
++
++    registros = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()]
++    assert len(registros) == 1
++    assert registros[0]["decisao"] == "APROVADO"
++    assert registros[0]["motivo"] is None
++
++
+ def test_resultado_nao_usuario_com_aprovacao_nao_envia_email_de_aprovada(monkeypatch, tmp_path, ambiente_fake):
+     """APROVADO + PKG retornando NAO_USUARIO -> e-mail "NÃO executada", nunca assunto de aprovada."""
+     linha = _linha_alvo()

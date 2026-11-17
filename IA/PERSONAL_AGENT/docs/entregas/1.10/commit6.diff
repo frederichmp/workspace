@@ -1,0 +1,359 @@
+diff --git a/IA/PERSONAL_AGENT/app.py b/IA/PERSONAL_AGENT/app.py
+index cd23604..20e54fb 100644
+--- a/IA/PERSONAL_AGENT/app.py
++++ b/IA/PERSONAL_AGENT/app.py
+@@ -427,6 +427,7 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
+     st.session_state.messages.append(
+         {"role": "assistant", "content": laudo_fechamento}
+     )
++    return True
+ 
+ 
+ # ==============================================================================
+diff --git a/tests/test_fluxo_web.py b/tests/test_fluxo_web.py
+new file mode 100644
+index 0000000..bb4d25d
+--- /dev/null
++++ b/tests/test_fluxo_web.py
+@@ -0,0 +1,341 @@
++"""
++Smoke tests do fluxo HITL na interface Web (app.py) com streamlit.testing.v1.AppTest.
++
++Sem conexão: LLM, Oracle, SMTP, rede e .env neutralizados via monkeypatch (desfeitos ao fim).
++Patches de oracle_dba miram `tools.oracle_dba` (cópia carregada por app.py), não `src.tools.oracle_dba`.
++"""
++import json
++import logging
++import socket
++import types
++from pathlib import Path
++
++import pytest
++
++from tests.fakes_oracle import USER_DIAG_FAKE, USER_KILL_FAKE, _linha_alvo, _OracleFake
++
++RAIZ = Path(__file__).resolve().parent.parent
++APP = RAIZ / "app.py"
++LOGS_REAIS = (
++    RAIZ / "data" / "logs" / "kill_approval.log",
++    RAIZ / "auditoria_oracle.log",
++    RAIZ / "data" / "logs" / "auditoria_oracle.log",
++)
++PEDIDO = "mate a sessão inst_id 1 sid 101 serial 202"
++ARGS_KILL = {"inst_id": 1, "sid": 101, "serial": 202}
++
++
++def _snapshot_logs_reais():
++    """(existe, tamanho, mtime_ns) por stat; o conteúdo nunca é lido."""
++    out = {}
++    for p in LOGS_REAIS:
++        try:
++            st = p.stat()
++            out[str(p)] = (True, st.st_size, st.st_mtime_ns)
++        except FileNotFoundError:
++            out[str(p)] = (False, None, None)
++    return out
++
++
++class _Fn:
++    def __init__(self, nome, argumentos):
++        self.name = nome
++        self.arguments = argumentos
++
++
++class _ToolCall:
++    id = "call_1"
++    type = "function"
++
++    def __init__(self):
++        self.function = _Fn("matar_sessao_oracle", json.dumps(ARGS_KILL))
++
++
++class _Msg:
++    def __init__(self, com_tool_call):
++        self.content = None if com_tool_call else "Laudo final fake."
++        self.tool_calls = [_ToolCall()] if com_tool_call else None
++
++
++class _Resp:
++    def __init__(self, com_tool_call):
++        self.choices = [types.SimpleNamespace(message=_Msg(com_tool_call))]
++
++
++class _Ambiente:
++    """Estado compartilhado do cenário: fake Oracle, e-mails, chamadas ao LLM falso e log de aprovação."""
++
++    def __init__(self, oracle_fake, log_aprovacao):
++        self.oracle = oracle_fake
++        self.log_aprovacao = log_aprovacao
++        self.emails = []
++        self.mensagens_llm = []  # snapshot (cópia) das mensagens recebidas em cada chamada
++        self.at = None
++
++    def registros(self):
++        if not self.log_aprovacao.exists():
++            return []
++        linhas = self.log_aprovacao.read_text(encoding="utf-8").strip().splitlines()
++        return [json.loads(x) for x in linhas]
++
++    def json_devolvido_ao_llm(self):
++        """Conteúdo (JSON) da mensagem `tool` vista pelo LLM na chamada de fechamento (a última)."""
++        tools = [m for m in self.mensagens_llm[-1] if m.get("role") == "tool"]
++        return json.loads(tools[-1]["content"])
++
++    def textos_tela(self):
++        return [m.value for m in self.at.markdown]
++
++    def avisos(self):
++        return [w.value for w in self.at.warning]
++
++
++@pytest.fixture
++def snapshot_logs_reais():
++    """Os logs reais não podem mudar (stat antes/depois) por causa do teste."""
++    antes = _snapshot_logs_reais()
++    yield
++    assert _snapshot_logs_reais() == antes, "Log real alterado pelo teste Web"
++
++
++def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=True):
++    monkeypatch.syspath_prepend(str(RAIZ / "src"))
++    monkeypatch.syspath_prepend(str(RAIZ))
++    monkeypatch.setenv("ORACLE_USER_DIAG", USER_DIAG_FAKE)
++    monkeypatch.setenv("ORACLE_PASSWORD_DIAG", "senha-fake")
++    monkeypatch.setenv("ORACLE_USER_KILL", USER_KILL_FAKE)
++    monkeypatch.setenv("ORACLE_PASSWORD_KILL", "senha-fake")
++    monkeypatch.setenv("ORACLE_DSN", "host-teste:1521/TESTE")
++    monkeypatch.setenv("EMAIL_DESTINATARIO", "")
++    monkeypatch.setenv("GEMINI_API_KEY", "")
++
++    # app.py chama load_dotenv(ROOT/".env"): proibido ler o .env
++    import dotenv
++
++    monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
++
++    # logging.basicConfig vira no-op (já existe handler na raiz) e não cria FileHandler real
++    raiz_log = logging.getLogger()
++    null = logging.NullHandler()
++    raiz_log.addHandler(null)
++
++    # Rede: Ollama (11434) offline; qualquer outro destino é erro
++    destinos_inesperados = []
++
++    def _create_connection(endereco, *a, **k):
++        if isinstance(endereco, tuple) and endereco[1] == 11434:
++            raise OSError("neutralizado no teste")
++        destinos_inesperados.append(endereco)
++        raise AssertionError(f"rede inesperada: {endereco}")
++
++    monkeypatch.setattr(socket, "create_connection", _create_connection)
++
++    import oracledb
++    import openai
++    import tools.oracle_dba as od  # cópia usada por app.py
++
++    log_aprovacao = tmp_path / "kill_approval_web.log"
++    monkeypatch.setattr(od, "CAMINHO_LOG_APROVACAO_PADRAO", log_aprovacao)  # app.py não passa caminho_log
++    monkeypatch.setattr(
++        od,
++        "verificar_acessibilidade_host",
++        lambda dsn, timeout=3.0: {"acessivel": True, "host": "host-teste", "porta": 1521, "latencia_ms": 1},
++    )
++    monkeypatch.setattr(od, "coletar_sessoes_ativas", lambda *a, **k: json.dumps({"sessoes_ativas": 0, "sessoes_identificadas": []}))
++    monkeypatch.setattr(od, "coletar_top_sql", lambda *a, **k: json.dumps({"top_sql": []}))
++
++    fake = _OracleFake(linhas_diag, status_pkg=status_pkg, kill_permitido=kill_permitido)
++    monkeypatch.setattr(oracledb, "connect", fake.connect)
++    amb = _Ambiente(fake, log_aprovacao)
++
++    def _email(assunto, corpo):
++        amb.emails.append({"assunto": assunto, "corpo": corpo})
++        return True, "capturado"
++
++    monkeypatch.setattr(od, "enviar_alerta_email", _email)
++
++    class _Completions:
++        def create(self, **kwargs):
++            amb.mensagens_llm.append([dict(m) for m in kwargs["messages"]])
++            return _Resp(len(amb.mensagens_llm) == 1)
++
++    class _OpenAIFalso:
++        def __init__(self, *a, **k):
++            self.chat = types.SimpleNamespace(completions=_Completions())
++
++    monkeypatch.setattr(openai, "OpenAI", _OpenAIFalso)
++
++    from streamlit.testing.v1 import AppTest
++
++    amb.at = AppTest.from_file(str(APP), default_timeout=30)
++    amb.destinos_inesperados = destinos_inesperados
++    amb._null = null
++    return amb
++
++
++@pytest.fixture
++def montar_web(monkeypatch, tmp_path, snapshot_logs_reais):
++    """Fábrica de cenários; remove o NullHandler da raiz ao fim."""
++    criados = []
++
++    def _fabrica(linhas_diag, status_pkg=None, kill_permitido=True):
++        amb = _montar(monkeypatch, tmp_path, linhas_diag, status_pkg, kill_permitido)
++        criados.append(amb)
++        return amb
++
++    yield _fabrica
++    for amb in criados:
++        logging.getLogger().removeHandler(amb._null)
++        assert amb.destinos_inesperados == []
++
++
++def _ate_painel_hitl(amb):
++    """at.run() -> pedido no chat -> painel HITL presente."""
++    at = amb.at
++    at.run()
++    assert not at.exception
++    at.chat_input[0].set_value(PEDIDO).run()
++    assert not at.exception
++    assert at.session_state.hitl_pendente is not None
++    assert [w.key for w in at.text_input] == ["input_hitl_aprovador"]
++    assert {b.key for b in at.button} >= {"btn_hitl_approve", "btn_hitl_abort"}
++    assert len(amb.mensagens_llm) == 1  # 1ª chamada (tool_call); ainda sem fechamento
++
++
++def _decidir(amb, botao, aprovador=None):
++    at = amb.at
++    if aprovador is not None:
++        at.text_input(key="input_hitl_aprovador").input(aprovador)
++    at.button(key=botao).click().run()
++    assert not at.exception
++
++
++def _painel_ausente(at):
++    chaves = {w.key for w in at.text_input} | {b.key for b in at.button}
++    return not ({"input_hitl_aprovador", "btn_hitl_approve", "btn_hitl_abort"} & chaves)
++
++
++def test_web_painel_fecha_apos_aprovar(montar_web):
++    """F1: processar_decisao_hitl devolve True -> st.rerun() dispara; painel some sem run() extra."""
++    linha = _linha_alvo()
++    amb = montar_web([linha, linha], status_pkg="ENCERRADA")
++    _ate_painel_hitl(amb)
++
++    _decidir(amb, "btn_hitl_approve", "dba_teste")
++
++    assert amb.at.session_state.hitl_pendente is None
++    assert _painel_ausente(amb.at)
++
++
++def test_web_aprovado_encerrada(montar_web):
++    linha = _linha_alvo()
++    amb = montar_web([linha, linha], status_pkg="ENCERRADA")
++    _ate_painel_hitl(amb)
++    _decidir(amb, "btn_hitl_approve", "dba_teste")
++
++    assert amb.oracle.conexoes.count(USER_DIAG_FAKE) == 2
++    assert amb.oracle.conexoes_kill == [USER_KILL_FAKE]
++    assert any("PKG_OPS_KILL.KILL_SESSION" in sql for conta, sql, _ in amb.oracle.sql_executado if conta == "KILL")
++
++    assert len(amb.emails) == 1
++    assert "Intervenção Aprovada" in amb.emails[0]["assunto"]
++
++    (reg,) = amb.registros()
++    assert reg["decisao"] == "APROVADO"
++    assert reg["resultado_banco"] == "ENCERRADA"
++    assert reg["aprovador"] == "dba_teste"
++
++    assert any("executada com sucesso" in t for t in amb.textos_tela())
++    assert any("executada com sucesso" in m["content"] for m in amb.at.session_state.messages)
++    assert len(amb.mensagens_llm) == 2
++    devolvido = amb.json_devolvido_ao_llm()
++    assert devolvido["decisao"] == "APROVADO"
++    assert devolvido["executado"] is True
++    assert devolvido["resultado_banco"] == "ENCERRADA"
++    assert amb.at.session_state.hitl_pendente is None
++
++
++def test_web_aprovado_nao_usuario(montar_web):
++    linha = _linha_alvo()
++    amb = montar_web([linha, linha], status_pkg="NAO_USUARIO")
++    _ate_painel_hitl(amb)
++    _decidir(amb, "btn_hitl_approve", "dba_teste")
++
++    assert amb.oracle.conexoes.count(USER_DIAG_FAKE) == 2
++    assert amb.oracle.conexoes_kill == [USER_KILL_FAKE]
++
++    assert len(amb.emails) == 1
++    assert "NÃO executada" in amb.emails[0]["assunto"]
++    assert "Aprovada" not in amb.emails[0]["assunto"]
++
++    (reg,) = amb.registros()
++    assert reg["decisao"] == "APROVADO"
++    assert reg["resultado_banco"] == "NAO_USUARIO"
++
++    assert any("mas NÃO executada" in t for t in amb.textos_tela())
++    devolvido = amb.json_devolvido_ao_llm()
++    assert devolvido["decisao"] == "APROVADO"
++    assert devolvido["executado"] is False
++    assert devolvido["resultado_banco"] == "NAO_USUARIO"
++
++
++def test_web_rejeitado(montar_web):
++    amb = montar_web([_linha_alvo()], kill_permitido=False)
++    _ate_painel_hitl(amb)
++    _decidir(amb, "btn_hitl_abort", "dba_teste")
++
++    assert amb.oracle.conexoes.count(USER_DIAG_FAKE) == 1
++    assert amb.oracle.conexoes_kill == []
++    assert amb.emails == []
++
++    (reg,) = amb.registros()
++    assert reg["decisao"] == "REJEITADO"
++    assert reg["resultado_banco"] is None
++    assert reg["motivo"] == "REJEITADO_PELO_APROVADOR"
++
++    assert any("Ação Abortada" in t and "negado" in t for t in amb.textos_tela())
++    devolvido = amb.json_devolvido_ao_llm()
++    assert devolvido["decisao"] == "REJEITADO"
++    assert devolvido["executado"] is False
++    assert amb.at.session_state.hitl_pendente is None
++
++
++def test_web_aprovador_vazio(montar_web):
++    """Aprovar sem identificação: st.warning, nada gravado, painel permanece, 0 KILL."""
++    amb = montar_web([_linha_alvo()], kill_permitido=False)
++    _ate_painel_hitl(amb)
++    _decidir(amb, "btn_hitl_approve")  # campo vazio
++
++    assert any("Informe a identificação do aprovador" in w for w in amb.avisos())
++    assert amb.registros() == []
++    assert not amb.log_aprovacao.exists()
++    assert amb.emails == []
++    assert amb.oracle.conexoes.count(USER_DIAG_FAKE) == 1
++    assert amb.oracle.conexoes_kill == []
++    assert amb.at.session_state.hitl_pendente is not None
++    assert not _painel_ausente(amb.at)
++    assert len(amb.mensagens_llm) == 1  # nenhuma devolução ao LLM
++
++
++def test_web_alvo_alterado(montar_web):
++    amb = montar_web(
++        [_linha_alvo(program="app.exe"), _linha_alvo(program="outro_programa.exe")], kill_permitido=False
++    )
++    _ate_painel_hitl(amb)
++    _decidir(amb, "btn_hitl_approve", "dba_teste")
++
++    assert amb.oracle.conexoes.count(USER_DIAG_FAKE) == 2
++    assert amb.oracle.conexoes_kill == []
++
++    assert len(amb.emails) == 1
++    assert "NÃO executada" in amb.emails[0]["assunto"]
++
++    (reg,) = amb.registros()
++    assert reg["decisao"] == "APROVADO"
++    assert reg["resultado_banco"] == "ALVO_ALTERADO"
++
++    assert any("mas NÃO executada" in t for t in amb.textos_tela())
++    devolvido = amb.json_devolvido_ao_llm()
++    assert devolvido["decisao"] == "APROVADO"
++    assert devolvido["executado"] is False
++    assert devolvido["resultado_banco"] == "ALVO_ALTERADO"
