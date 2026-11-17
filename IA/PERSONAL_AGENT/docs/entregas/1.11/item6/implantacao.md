@@ -226,5 +226,5 @@ O clone de arquivo **não substitui** nenhum desses passos. A checagem de `DBA_E
 3. `program` e `machine` podem ser NULL (comparação null-safe); `username` e `logon_time`, não.
 4. Confirmar no passo 0 que não há outros chamadores do pacote.
 5. Os testes sandbox de transição dependem da versão do PKG implantada. Proposta: variável `OPS_KILL_PKG_VERSAO=1|2` definida pelo operador, com skip quando não bate.
-7. Executar, em sessão autorizada, as consultas de pré-condição 0.2a (EXECUTE em `PKG_OPS_KILL`), 0.2b (`EXECUTE ANY PROCEDURE`) e 0.6 (`UTL_RAW`) da parte 1 e registrar a saída. Ela ainda **não existe**, porque essas consultas leem o dicionário do Oracle e nesta rodada não se executa nada no banco.
 6. Janela de implantação (seção 3.2): começa no `inicio_janela` da parte 2, antes da spec v2, e termina no primeiro kill sandbox v2 com ENCERRADA. Ou, em vez dela, a alternativa sem janela, que não é recomendada.
+7. Executar, em sessão autorizada, as consultas de pré-condição 0.2a (EXECUTE em `PKG_OPS_KILL`), 0.2b (`EXECUTE ANY PROCEDURE`) e 0.6 (`UTL_RAW`) da parte 1 e registrar a saída. Ela ainda **não existe**, porque essas consultas leem o dicionário do Oracle e nesta rodada não se executa nada no banco.
