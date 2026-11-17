@@ -32,6 +32,9 @@ DECISOES_KILL: Tuple[str, ...] = ("APROVADO", "REJEITADO", "TIMEOUT")
 # Resultados de PKG_OPS_KILL que significam execução efetiva do encerramento
 RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = ("ENCERRADA", "MARCADA_PARA_KILL")
 
+# Campos que identificam a sessão alvo; únicos campos cobertos pelo hash de aprovação
+CAMPOS_IDENTIDADE_ALVO: Tuple[str, ...] = ("inst_id", "sid", "serial#", "username", "program", "machine")
+
 # Usuários que nunca podem ser alvo de encerramento.
 # Fonte única no Python; deve permanecer idêntica a c_protegidos em
 # OPS_OWNER.PKG_OPS_KILL (db/ops_kill.sql): ',SYS,SYSTEM,DBSNMP,SYSMAN,OUTLN,STARTUPADMIN,OPS_OWNER,'
@@ -790,6 +793,38 @@ def matar_sessao_oracle(sid: int, serial: int, inst_id: int = 1) -> str:
 # TRILHA DE AUDITORIA HITL E GERAÇÃO DE HASH CANÔNICO
 # ------------------------------------------------------------------------------
 
+def _normalizar_valor_identidade(valor: Any) -> Any:
+    """Normaliza tipos numéricos vindos do driver para que o hash não dependa do tipo Python."""
+    if valor is None or isinstance(valor, (bool, str)):
+        return valor
+    if isinstance(valor, int):
+        return valor
+    try:
+        numero = float(valor)
+        if numero.is_integer():
+            return int(numero)
+    except (TypeError, ValueError):
+        pass
+    return str(valor)
+
+
+def extrair_identidade_alvo(alvo: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Retorna somente os campos de identidade da sessão (CAMPOS_IDENTIDADE_ALVO)."""
+    alvo = alvo or {}
+    return {campo: _normalizar_valor_identidade(alvo.get(campo)) for campo in CAMPOS_IDENTIDADE_ALVO}
+
+
+def calcular_hash_identidade(alvo: Optional[Dict[str, Any]]) -> str:
+    """
+    Hash SHA-256 canônico calculado apenas sobre os campos de identidade:
+    inst_id, sid, serial#, username, program, machine.
+    timestamp, status, event e sql_id ficam de fora, pois variam sem que o alvo mude.
+    """
+    identidade = extrair_identidade_alvo(alvo)
+    canonico = json.dumps(identidade, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(canonico.encode("utf-8")).hexdigest()
+
+
 def gerar_payload_e_hash_aprovacao(
     ferramenta: str,
     parametros: Dict[str, Any],
@@ -797,18 +832,87 @@ def gerar_payload_e_hash_aprovacao(
     timestamp: str,
 ) -> Tuple[Dict[str, Any], str]:
     """
-    Gera o payload canônico em JSON com chaves ordenadas e calcula o hash SHA-256
-    exibido ao aprovador antes da intervenção.
+    Gera o payload exibido ao aprovador e o hash SHA-256 de identidade do alvo.
+    O hash cobre apenas CAMPOS_IDENTIDADE_ALVO (ver calcular_hash_identidade);
+    ferramenta, parametros e timestamp acompanham o payload para registro, mas não entram no hash.
+    O mesmo hash é recalculado por executar_kill_verificado antes da chamada à conta KILL.
     """
     payload: Dict[str, Any] = {
         "ferramenta": ferramenta,
         "parametros": {k: parametros[k] for k in sorted(parametros.keys())},
-        "dados_alvo": {k: alvo[k] for k in sorted(alvo.keys())} if alvo else {},
+        "identidade_alvo": extrair_identidade_alvo(alvo),
         "timestamp": timestamp,
     }
-    payload_canonico = json.dumps(payload, sort_keys=True, ensure_ascii=False)
-    hash_sha256 = hashlib.sha256(payload_canonico.encode("utf-8")).hexdigest()
-    return payload, hash_sha256
+    return payload, calcular_hash_identidade(alvo)
+
+
+def executar_kill_verificado(inst_id: Any, sid: Any, serial: Any, hash_aprovado: str) -> str:
+    """
+    Verificação de integridade imediatamente antes do encerramento:
+      1. reconsulta o alvo pela conta DIAG (consultar_alvo_sessao_diag);
+      2. recalcula o hash de identidade e compara com o hash aprovado;
+      3. só então chama matar_sessao_oracle (conta KILL).
+    Hash divergente -> ALVO_ALTERADO, sem chamada à conta KILL, com registro no log.
+    Falha na reconsulta (alvo sumiu, erro de rede/config) -> o motivo da reconsulta, sem chamada à conta KILL.
+    """
+    reconsulta = consultar_alvo_sessao_diag(inst_id=inst_id, sid=sid, serial=serial)
+
+    if not reconsulta.get("encontrado"):
+        motivo = reconsulta.get("motivo", "ALVO_NAO_ENCONTRADO")
+        logger.warning(
+            f"KILL BLOQUEADO NA RECONSULTA: {motivo} | inst_id={inst_id}, sid={sid}, serial={serial} | "
+            f"hash_aprovado={hash_aprovado}"
+        )
+        return json.dumps(
+            {
+                "status": "recusado",
+                "motivo": motivo,
+                "status_banco": motivo,
+                "mensagem": (
+                    "Reconsulta do alvo antes da execução falhou; nenhuma chamada à conta KILL. "
+                    f"{reconsulta.get('mensagem', '')}"
+                ).strip(),
+            },
+            ensure_ascii=False,
+        )
+
+    hash_atual = calcular_hash_identidade(reconsulta.get("alvo"))
+    if hash_atual != hash_aprovado:
+        logger.warning(
+            f"KILL BLOQUEADO: ALVO_ALTERADO | inst_id={inst_id}, sid={sid}, serial={serial} | "
+            f"hash_aprovado={hash_aprovado} | hash_atual={hash_atual}"
+        )
+        return json.dumps(
+            {
+                "status": "recusado",
+                "motivo": "ALVO_ALTERADO",
+                "status_banco": "ALVO_ALTERADO",
+                "hash_aprovado": hash_aprovado,
+                "hash_atual": hash_atual,
+                "mensagem": (
+                    "A identidade da sessão mudou entre a aprovação e a execução. "
+                    "Encerramento cancelado sem chamada à conta KILL."
+                ),
+            },
+            ensure_ascii=False,
+        )
+
+    if not reconsulta.get("elegivel"):
+        motivo = reconsulta.get("motivo", "NAO_ELEGIVEL")
+        logger.warning(
+            f"KILL BLOQUEADO NA RECONSULTA: {motivo} | inst_id={inst_id}, sid={sid}, serial={serial}"
+        )
+        return json.dumps(
+            {
+                "status": "recusado",
+                "motivo": motivo,
+                "status_banco": motivo,
+                "mensagem": reconsulta.get("mensagem", "Alvo não elegível na reconsulta."),
+            },
+            ensure_ascii=False,
+        )
+
+    return matar_sessao_oracle(sid=sid, serial=serial, inst_id=inst_id)
 
 
 def registrar_log_aprovacao_kill(
@@ -880,7 +984,7 @@ def montar_notificacao_kill(
             f"O encerramento da sessão SID={sid}, SERIAL={serial}, INST_ID={inst_id} "
             f"foi aprovado por {aprovador} ({canal}) e executado.\n"
             f"Resultado do banco: {resultado_banco}\n"
-            f"Hash SHA-256 do payload: {hash_payload}"
+            f"Hash SHA-256 de identidade do alvo: {hash_payload}"
         )
     else:
         assunto = (
@@ -891,7 +995,7 @@ def montar_notificacao_kill(
             f"O encerramento da sessão SID={sid}, SERIAL={serial}, INST_ID={inst_id} "
             f"foi aprovado por {aprovador} ({canal}), mas NÃO foi executado.\n"
             f"Status retornado: {resultado_banco}\n"
-            f"Hash SHA-256 do payload: {hash_payload}"
+            f"Hash SHA-256 de identidade do alvo: {hash_payload}"
         )
     return assunto, corpo
 
@@ -973,8 +1077,10 @@ def registrar_decisao_kill(
             "email_detalhe": None,
         }
 
-    # Decisão APROVADO com aprovador identificado
-    resultado_exec = matar_sessao_oracle(sid=sid, serial=serial, inst_id=inst_id)
+    # Decisão APROVADO com aprovador identificado: reconsulta + verificação de hash antes da conta KILL
+    resultado_exec = executar_kill_verificado(
+        inst_id=inst_id, sid=sid, serial=serial, hash_aprovado=hash_aprovado
+    )
     try:
         dados_exec = json.loads(resultado_exec)
     except (TypeError, ValueError):

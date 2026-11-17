@@ -689,7 +689,8 @@ with col_chat:
                 f"- **Status Atual:** `{alvo.get('status')}`\n"
                 f"- **SQL ID:** `{alvo.get('sql_id')}`\n"
                 f"- **Evento de Espera:** `{alvo.get('event')}`\n\n"
-                f"🔒 **Hash Canônico SHA-256 do Payload:** `{pend.get('hash_payload')}`\n\n"
+                f"🔒 **Hash SHA-256 de identidade do alvo** (inst_id, sid, serial#, username, program, machine; "
+                f"reconferido antes da execução): `{pend.get('hash_payload')}`\n\n"
                 f"Ao aprovar, um alerta de governança será disparado por e-mail para `{email_dest}`."
             )
             id_aprovador_input = st.text_input(

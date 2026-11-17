@@ -252,7 +252,7 @@ def executar_agente(prompt_usuario: str) -> None:
                             print(f"Status Atual    : {alvo_dados.get('status')}")
                             print(f"SQL ID          : {alvo_dados.get('sql_id')}")
                             print(f"Evento Espera   : {alvo_dados.get('event')}")
-                            print(f"Hash SHA-256    : {hash_sha256}")
+                            print(f"Hash identidade : {hash_sha256}  (reconferido antes da execução)")
                             print("=" * 70)
 
                             # Exige identificação do aprovador
