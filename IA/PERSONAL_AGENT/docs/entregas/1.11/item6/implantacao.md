@@ -417,4 +417,4 @@ Informada pelo responsável:
 **Impacto nos registros anteriores (observação da sessão principal; nada reescrito):**
 - A decisão 4 (seção 6), a 7.1 e a 7.3 classificam `STARTUPADMIN` como **conta de administração** e concluem que **nenhuma conta de aplicação** tem EXECUTE efetivo no pacote.
 - Com `STARTUPADMIN` também como conta MUT do executor, essa conclusão deixa de valer. Pela conta MUT, a aplicação tem `EXECUTE ANY PROCEDURE`, que permite chamar `KILL_SESSION` fora do fluxo HITL, e pelo papel `DBA` pode emitir `ALTER SYSTEM KILL SESSION` diretamente.
-- O risco aceito na decisão 4 ("idêntico ao atual") foi avaliado sem esse fato. Revisá-lo faz parte da decisão pendente de mínimo privilégio.
+- **Decisão 4 reaberta:** a conta MUT do executor é DBA, e isso dá EXECUTE efetivo a conta de aplicação.
