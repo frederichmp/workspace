@@ -8,10 +8,25 @@
 WHENEVER SQLERROR EXIT FAILURE ROLLBACK
 SET ECHO ON
 
+-- >>> INÍCIO DA JANELA DE INDISPONIBILIDADE (registrar este horário no GOVERNANCA_LOG)
+SELECT SYSTIMESTAMP AS inicio_janela FROM dual;
+
 ALTER SESSION SET CURRENT_SCHEMA = OPS_OWNER;
 
 CREATE OR REPLACE PACKAGE pkg_ops_kill AS
   -- Única procedure pública. Todos os parâmetros IN são obrigatórios (sem DEFAULT).
+  --
+  -- p_ref_aprovacao: identificador da intervenção, SÓ PARA REGISTRO.
+  --   Quem gera: a aplicação (registrar_decisao_kill, uuid4().hex, 32 caracteres hex
+  --   minúsculos), no momento em que grava a linha INTENCAO em kill_approval.log; o
+  --   mesmo valor vai na linha RESULTADO.
+  --   Quem valida: a aplicação (formato, antes de conectar) e este pacote (NOT NULL e
+  --   formato ^[0-9a-f]{32}$; fora disso -> PARAM_INVALIDO, sem kill).
+  --   O que o banco faz: apenas grava em OPS_KILL_AUDIT.ref_aprovacao, para ligar a
+  --   linha de auditoria do banco às linhas do log da aplicação.
+  --   O que o banco NÃO faz: não verifica que a aprovação existe, quem aprovou nem se
+  --   ela ainda é válida (o banco não lê o log da aplicação). A autorização continua
+  --   sendo o fluxo HITL da aplicação mais o grant EXECUTE restrito a STARTUP_KILL.
   PROCEDURE kill_session (
     p_inst_id             IN  NUMBER,
     p_sid                 IN  NUMBER,
@@ -74,6 +89,7 @@ CREATE OR REPLACE PACKAGE BODY pkg_ops_kill AS
     --    Tamanhos limitados aos das colunas da GV$SESSION (bytes), para que nenhum
     --    valor estoure variáveis/colunas e a chamada sempre termine com auditoria.
     --    REGEXP_LIKE com 'c': sensível a maiúsculas independentemente do NLS_SORT.
+    --    p_ref_aprovacao: só formato é validado; o valor é apenas registrado (ver spec).
     IF p_inst_id IS NULL OR p_sid IS NULL OR p_serial IS NULL
        OR p_inst_id <= 0 OR p_sid <= 0 OR p_serial <= 0
        OR p_username_esperado IS NULL
@@ -188,4 +204,6 @@ SELECT position, argument_name, data_type, in_out, overload, defaulted
 SELECT grantee, privilege FROM dba_tab_privs
  WHERE owner = 'OPS_OWNER' AND table_name = 'PKG_OPS_KILL';
 
--- PASSO 5 (implantar o Python do item 6) e PASSO 6 (testes sandbox): ver implantacao.md.
+-- Fim desta parte. A janela continua aberta até o primeiro kill sandbox v2 com ENCERRADA
+-- depois de implantar o Python do item 6 (implantacao.md, seção 3.2, passos 6 e 7).
+SELECT SYSTIMESTAMP AS fim_parte2 FROM dual;
