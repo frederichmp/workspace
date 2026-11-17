@@ -362,6 +362,9 @@ Critérios:
 - **`HS_ADMIN_SELECT_ROLE` em `STARTUP_DIAG`:** é herança de `SELECT_CATALOG_ROLE`, que foi concedido diretamente. Pela regra do responsável, **não revogar**.
   - **Consequência registrada pelo responsável:** `STARTUP_DIAG` tem leitura via Heterogeneous Services, sem escrita nem kill.
   - **Precisão:** o papel dá `SELECT` nas visões de dicionário `HS_*` (configuração do Heterogeneous Services). Sozinho, ele não dá acesso a dados remotos, que exigiria database link.
-- **Consulta de referência da leitura 2:** `DBA_ROLE_PRIVS` (`WHERE granted_role IN ('HS_ADMIN_SELECT_ROLE', 'SELECT_CATALOG_ROLE')`). `USER_ROLE_PRIVS` não serve para isso: mostra só os papéis do usuário conectado e não tem coluna `GRANTEE`.
+- **Consultas efetivamente usadas** (informadas pelo responsável, 2026-11-17):
+  - Leitura 1, conectado como `STARTUP_KILL`: `SELECT granted_role FROM user_role_privs ORDER BY granted_role;`, sem filtro de grantee, porque a visão já mostra os papéis da conta conectada. Resultado: `no rows selected`. **Válida.**
+  - Leitura 2, como STARTUPADMIN: `DBA_ROLE_PRIVS`, a visão correta para concessões a outras contas. **Válida.**
+  - Critério registrado pelo responsável: uma leitura 1 feita com `WHERE grantee` seria **inválida** e teria de ser repetida. `USER_ROLE_PRIVS` não tem coluna `GRANTEE`.
 - **Contas READ/MUT do executor:** não constam desta leitura (pendência 7.1).
 
