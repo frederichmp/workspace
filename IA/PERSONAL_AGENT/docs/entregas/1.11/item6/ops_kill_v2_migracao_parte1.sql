@@ -20,6 +20,19 @@ SELECT grantee, privilege FROM dba_tab_privs
  WHERE owner = 'OPS_OWNER' AND table_name = 'PKG_OPS_KILL';
 -- 0.2b Quem pode executar qualquer procedure (documentar; esperado: só contas DBA conhecidas)
 SELECT grantee FROM dba_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE' ORDER BY grantee;
+-- 0.2c Quem recebe EXECUTE ANY PROCEDURE INDIRETAMENTE, por papéis (inclusive aninhados).
+--      Esperado: nenhuma conta de aplicação do projeto (STARTUP_DIAG, STARTUP_KILL e as
+--      contas READ/MUT do executor). Contas DBA (ex.: STARTUPADMIN via DBA) são esperadas.
+SELECT DISTINCT grantee, granted_role FROM dba_role_privs
+ START WITH granted_role IN (SELECT grantee FROM dba_sys_privs WHERE privilege = 'EXECUTE ANY PROCEDURE')
+ CONNECT BY PRIOR grantee = granted_role
+ ORDER BY grantee;
+-- 0.2d Privilégios de sistema e papéis das contas do fluxo de kill (esperado: STARTUP_KILL sem
+--      privilégio de sistema além de CREATE SESSION e sem papéis; STARTUP_DIAG com SELECT_CATALOG_ROLE)
+SELECT grantee, privilege FROM dba_sys_privs
+ WHERE grantee IN ('STARTUP_DIAG', 'STARTUP_KILL', 'OPS_OWNER') ORDER BY grantee, privilege;
+SELECT grantee, granted_role FROM dba_role_privs
+ WHERE grantee IN ('STARTUP_DIAG', 'STARTUP_KILL', 'OPS_OWNER') ORDER BY grantee, granted_role;
 -- 0.3 Nenhum job ou programa chama o pacote (esperado: 0 linhas em cada)
 SELECT owner, job_name FROM dba_scheduler_jobs
  WHERE UPPER(job_action) LIKE '%PKG_OPS_KILL%';

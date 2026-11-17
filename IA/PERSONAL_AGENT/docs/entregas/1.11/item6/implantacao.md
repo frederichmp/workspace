@@ -227,4 +227,21 @@ O clone de arquivo **não substitui** nenhum desses passos. A checagem de `DBA_E
 4. Confirmar no passo 0 que não há outros chamadores do pacote.
 5. Os testes sandbox de transição dependem da versão do PKG implantada. Proposta: variável `OPS_KILL_PKG_VERSAO=1|2` definida pelo operador, com skip quando não bate.
 6. Janela de implantação (seção 3.2): começa no `inicio_janela` da parte 2, antes da spec v2, e termina no primeiro kill sandbox v2 com ENCERRADA. Ou, em vez dela, a alternativa sem janela, que não é recomendada.
-7. Executar, em sessão autorizada, as consultas de pré-condição 0.2a (EXECUTE em `PKG_OPS_KILL`), 0.2b (`EXECUTE ANY PROCEDURE`) e 0.6 (`UTL_RAW`) da parte 1 e registrar a saída. Ela ainda **não existe**, porque essas consultas leem o dicionário do Oracle e nesta rodada não se executa nada no banco.
+7. Leituras de pré-condição: 0.2a, 0.2b e 0.6 **feitas** pelo responsável (seção 7). **Pendente:** executar 0.2c e 0.2d (papéis, inclusive aninhados) e confirmar que nenhuma conta de aplicação do projeto recebe `EXECUTE ANY PROCEDURE`.
+
+## 7. Resultados das leituras autorizadas (MODELO, STARTUPADMIN, somente leitura)
+
+Informados pelo responsável em 2026-11-17. **Não executado:** partes 1 e 2, rollback, nenhum ALTER, GRANT ou KILL.
+
+| Checagem | Resultado | Avaliação |
+|---|---|---|
+| Estado | `PACKAGE` e `PACKAGE BODY` `PKG_OPS_KILL` VALID; `DBA_ARGUMENTS` de `KILL_SESSION` = 4 | Linha de base v1 confirmada. É a mesma assinatura de `rollback_ops_kill_v1.sql` |
+| 0.2a | EXECUTE em `OPS_OWNER.PKG_OPS_KILL` concedido **só** a `STARTUP_KILL` | Conforme o esperado |
+| 0.2b | `EXECUTE ANY PROCEDURE` concedido a `DBA`, `DV_REALM_OWNER`, `EXP_FULL_DATABASE`, `IMP_FULL_DATABASE`, `OUTLN`, `SYS`, `WMSYS` | São papéis e contas fornecidos pelo Oracle. **Mas** `DBA`, `DV_REALM_OWNER`, `EXP_FULL_DATABASE` e `IMP_FULL_DATABASE` são **papéis**: todo usuário que os tenha, inclusive por papel aninhado, pode chamar `KILL_SESSION` sem passar pelo grant restrito. A lista de 0.2b não mostra esses usuários. **Pendente: 0.2c e 0.2d** |
+| 0.6 | EXECUTE em `SYS.UTL_RAW` concedido a `PUBLIC` | A compilação da v2 não é bloqueada por esta checagem (definer-rights aceita grant a PUBLIC) |
+
+**Leitura do risco de 0.2b:**
+- Quem tem `EXECUTE ANY PROCEDURE` por um papel DBA normalmente também tem `ALTER SYSTEM` e pode encerrar sessões diretamente. Para essas contas, o pacote não é a barreira, e isso vale para a v1 e para a v2.
+- A v2 não piora esse quadro: quem a chama por esse caminho ainda precisa passar a identidade correta, senão recebe ALVO_DIVERGENTE.
+- O risco que importa é uma **conta de aplicação** do projeto ter um desses papéis: `STARTUP_DIAG`, `STARTUP_KILL` ou as contas READ/MUT do executor, cujos nomes estão no `.env`, que esta sessão não lê.
+- As consultas 0.2c e 0.2d, acrescentadas à parte 1, respondem a isso. O responsável deve incluir na conferência os nomes das contas READ/MUT.
