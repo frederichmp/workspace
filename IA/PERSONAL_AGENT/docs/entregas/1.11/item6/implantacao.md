@@ -236,7 +236,7 @@ O clone de arquivo **não substitui** nenhum desses passos. A checagem de `DBA_E
 |---|---|---|
 | 1 | Aprovar o texto do SQL v2, da migração e do rollback | Ensaio de banco em sandbox (seção 4.1), que é pré-requisito |
 | 4 | Quem pode chamar o pacote (redação do responsável, 2026-11-17). **EXECUTE explícito**: só `STARTUP_KILL`. **EXECUTE efetivo**: também as contas administrativas `STARTUPADMIN`, `SYS` e `SYSTEM`, por herança de `DBA`/`DV_REALM_OWNER`/`EXP_FULL_DATABASE`/`IMP_FULL_DATABASE`, mais `OUTLN` e `WMSYS`, por concessão direta (EXPIRED & LOCKED). Nenhuma conta de aplicação. **Risco aceito, idêntico ao atual** | Parte de privilégios **fechada** (7.3 encerrada). Ainda faltam 0.1 (`DBA_DEPENDENCIES`), 0.3 (jobs) e 0.4 (`GV$SQL`), lidos na parte 1 |
-| 7.1 | Contas READ/MUT do executor na conferência de papéis | Nomes a informar pelo responsável |
+| 7.1 | Contas READ/MUT do executor: nomes **informados** em 2026-11-17 (seção 7.6). **Pendentes:** verificar os privilégios de `STARTUP_READ` (teste de privilégio em sandbox); decidir o mínimo privilégio do executor, porque a conta MUT é a conta DBA (achado da 7.6) | Teste em sandbox; decisão do responsável |
 | 7.2 | Database Vault: **encerrada** (DV inativo). Residual **encerrado**: `DV_REALM_OWNER` só chega a contas administrativas (7.3) | — |
 | 7.3 | Leituras 1 e 2: **ENCERRADA** em 2026-11-17 (seção 7.3). Não altera a janela nem a decisão 1 | — |
 
@@ -404,3 +404,17 @@ Informada pelo responsável:
 | **7.4** (grants e herança por papel) | Lida | É **outra consulta** e **não substitui** a 0.1 do arquivo |
 | **0.3** (jobs: `dba_scheduler_jobs`, `dba_scheduler_programs`, `dba_jobs`) | **LIDA** (2026-11-17, STARTUPADMIN, só leitura) | **Saída:** nenhuma linha para `'%PKG_OPS_KILL%'` em `dba_scheduler_jobs.job_action`, `dba_scheduler_programs.program_action` e `dba_jobs.what`. **Conclusão:** nenhum job agendado ou programa do Scheduler chama o pacote por nome literal. **Limite:** é busca textual. Não pega chamada por sinônimo, por pacote intermediário ou por ação que monte o nome em tempo de execução. A cobertura dinâmica depende também da 0.4. **Observações:** (a) uma chamada **estática** por pacote intermediário apareceria na 0.1, que não mostrou dependentes; fica descoberta só a montagem em tempo de execução. (b) Para sinônimos, leitura opcional, que não é condição: `SELECT owner, synonym_name FROM dba_synonyms WHERE table_owner = 'OPS_OWNER' AND table_name = 'PKG_OPS_KILL';` |
 | **0.4** (`GV$SQL`) | **LIDA, com ressalva de origem** (2026-11-17) | Cursores com `PARSING_SCHEMA_NAME = SYS` contendo `'%PKG_OPS_KILL%'`: **5**, todos de leitura de dicionário ou dynamic sampling (`DS_SVC`). **Nenhum cursor contém chamada ao pacote.** **Leitura de `gv$session`** (2026-11-17, STARTUPADMIN, só leitura): 52 linhas, todas processos de background do Oracle (username vazio, program `oracle@gsc-dbora01`); nenhuma sessão SYS ou de usuário ativa. **Conclusão:** os cursores com `PARSING_SCHEMA_NAME` SYS não vêm de sessão ativa; a origem é uma sessão já encerrada, não identificada. **Origem das leituras de dicionário desta sessão: NÃO CONFIRMADA.** Não atribuir a STARTUPADMIN sem confirmação do responsável. **Conclusão sobre chamadas ao pacote: inalterada** (nenhum cursor chama o pacote). **Observação da sessão principal:** uma consulta a `gv$session` sem filtro inclui a própria sessão que a executa (STARTUPADMIN, com username preenchido). Para "nenhuma sessão de usuário ativa" ser verificável, registrar o texto exato da consulta e o filtro usado. **Exclusões da consulta:** `STARTUP_KILL` e `STARTUPADMIN`; a conclusão vale para as demais contas. **Limite:** só o shared pool |
+
+### 7.6 Origem das leituras da 0.4 e contas do executor (registro do responsável, 2026-11-17)
+
+- **Origem das leituras de dicionário** (cursores com `PARSING_SCHEMA_NAME` SYS, 0.4): eram consultas da sessão do responsável. Não são atribuídas a STARTUPADMIN. Confirmada pelo responsável em 2026-11-17.
+- **Contas do executor** (nomes informados pelo responsável a partir do `.env`; esta sessão não lê o `.env`):
+  - `ORACLE_USER_READ` = `startup_read`
+  - `ORACLE_USER_MUT` = `startupadmin`
+- **Achado:** a conta MUT do executor é a conta DBA (`STARTUPADMIN` tem o papel `DBA`). Fica como **decisão pendente do responsável** sobre mínimo privilégio do executor. **Não corrigir neste item.**
+- **Pendente:** verificar os privilégios de `STARTUP_READ` (teste de privilégio em sandbox).
+
+**Impacto nos registros anteriores (observação da sessão principal; nada reescrito):**
+- A decisão 4 (seção 6), a 7.1 e a 7.3 classificam `STARTUPADMIN` como **conta de administração** e concluem que **nenhuma conta de aplicação** tem EXECUTE efetivo no pacote.
+- Com `STARTUPADMIN` também como conta MUT do executor, essa conclusão deixa de valer. Pela conta MUT, a aplicação tem `EXECUTE ANY PROCEDURE`, que permite chamar `KILL_SESSION` fora do fluxo HITL, e pelo papel `DBA` pode emitir `ALTER SYSTEM KILL SESSION` diretamente.
+- O risco aceito na decisão 4 ("idêntico ao atual") foi avaliado sem esse fato. Revisá-lo faz parte da decisão pendente de mínimo privilégio.
