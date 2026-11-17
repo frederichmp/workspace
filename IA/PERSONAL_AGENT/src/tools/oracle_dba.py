@@ -7,6 +7,7 @@ pré-validação rápida de rede/VPN (Socket TCP), Edge Filtering e trilha de au
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -17,9 +18,19 @@ from typing import Any, Dict, List, Optional, Tuple
 import oracledb
 from dotenv import load_dotenv
 
+from .notificador import enviar_alerta_email
+
 # Carrega as variáveis de ambiente do arquivo .env na raiz de IA/PERSONAL_AGENT
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT_DIR / ".env")
+
+logger = logging.getLogger(__name__)
+
+# Decisões humanas possíveis sobre uma intervenção de kill
+DECISOES_KILL: Tuple[str, ...] = ("APROVADO", "REJEITADO", "TIMEOUT")
+
+# Resultados de PKG_OPS_KILL que significam execução efetiva do encerramento
+RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = ("ENCERRADA", "MARCADA_PARA_KILL")
 
 # Usuários que nunca podem ser alvo de encerramento.
 # Fonte única no Python; deve permanecer idêntica a c_protegidos em
@@ -802,17 +813,27 @@ def gerar_payload_e_hash_aprovacao(
 
 def registrar_log_aprovacao_kill(
     aprovador: str,
-    decisao: str,  # APROVADO | REJEITADO | TIMEOUT
+    decisao: str,
     hash_payload: str,
     parametros: Dict[str, Any],
     alvo: Optional[Dict[str, Any]] = None,
-    status_banco: Optional[str] = None,
+    resultado_banco: Optional[str] = None,
+    motivo: Optional[str] = None,
     caminho_log: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Registra formalmente a decisão de aprovação no arquivo de log da aplicação.
+
+    Campos separados:
+      - decisao: decisão humana (APROVADO | REJEITADO | TIMEOUT);
+      - resultado_banco: status devolvido pela execução (p_status de PKG_OPS_KILL ou
+        recusa local anterior à chamada); None quando nada foi executado;
+      - motivo: justificativa de decisões não aprovadas (ex.: SEM_IDENTIFICACAO).
     NUNCA armazena senhas, tokens ou dados sensíveis.
     """
+    if decisao not in DECISOES_KILL:
+        raise ValueError(f"Decisão inválida: {decisao!r}. Esperado um de {DECISOES_KILL}.")
+
     if caminho_log is None:
         caminho_log = ROOT_DIR / "data" / "logs" / "kill_approval.log"
 
@@ -822,16 +843,191 @@ def registrar_log_aprovacao_kill(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "aprovador": aprovador,
         "decisao": decisao,
+        "resultado_banco": resultado_banco,
+        "motivo": motivo,
         "hash_payload": hash_payload,
         "parametros": parametros,
         "alvo": alvo or {},
-        "status_banco": status_banco,
     }
 
     with open(caminho_log, "a", encoding="utf-8") as f:
-        f.write(json.dumps(registro, ensure_ascii=False) + "\n")
+        f.write(json.dumps(registro, ensure_ascii=False, default=str) + "\n")
 
     return registro
+
+
+def montar_notificacao_kill(
+    aprovador: str,
+    inst_id: int,
+    sid: int,
+    serial: int,
+    resultado_banco: str,
+    hash_payload: str,
+    canal: str,
+) -> Tuple[str, str]:
+    """
+    Monta assunto e corpo do e-mail de uma intervenção aprovada.
+    O assunto "Intervenção Aprovada" só é usado quando resultado_banco indica execução
+    efetiva (ENCERRADA ou MARCADA_PARA_KILL); qualquer outro resultado gera
+    "Intervenção NÃO executada", informando o status.
+    """
+    if resultado_banco in RESULTADOS_KILL_EXECUTADO:
+        assunto = (
+            f"[AGENTE DBA] Intervenção Aprovada por {aprovador}: "
+            f"Kill Session {sid},{serial}"
+        )
+        corpo = (
+            f"O encerramento da sessão SID={sid}, SERIAL={serial}, INST_ID={inst_id} "
+            f"foi aprovado por {aprovador} ({canal}) e executado.\n"
+            f"Resultado do banco: {resultado_banco}\n"
+            f"Hash SHA-256 do payload: {hash_payload}"
+        )
+    else:
+        assunto = (
+            f"[AGENTE DBA] Intervenção NÃO executada: Kill Session {sid},{serial} "
+            f"(status {resultado_banco})"
+        )
+        corpo = (
+            f"O encerramento da sessão SID={sid}, SERIAL={serial}, INST_ID={inst_id} "
+            f"foi aprovado por {aprovador} ({canal}), mas NÃO foi executado.\n"
+            f"Status retornado: {resultado_banco}\n"
+            f"Hash SHA-256 do payload: {hash_payload}"
+        )
+    return assunto, corpo
+
+
+def registrar_decisao_kill(
+    decisao: str,
+    aprovador: str,
+    inst_id: int,
+    sid: int,
+    serial: int,
+    alvo: Dict[str, Any],
+    hash_aprovado: str,
+    canal: str,
+    motivo: Optional[str] = None,
+    caminho_log: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Aplica a decisão humana sobre uma intervenção já preparada (alvo elegível e hash exibido).
+
+    - APROVADO com aprovador identificado: executa o encerramento, grava decisao e
+      resultado_banco separados e envia e-mail conforme o resultado efetivo.
+    - APROVADO sem aprovador: convertido em REJEITADO (motivo SEM_IDENTIFICACAO), sem execução.
+    - REJEITADO / TIMEOUT: grava a decisão sem execução e sem e-mail.
+
+    Retorna dict com decisao, resultado_banco, executado, motivo, resultado_tool (JSON para o LLM),
+    registro gravado e dados da notificação.
+    """
+    if decisao not in DECISOES_KILL:
+        raise ValueError(f"Decisão inválida: {decisao!r}. Esperado um de {DECISOES_KILL}.")
+
+    parametros = {"inst_id": inst_id, "sid": sid, "serial": serial}
+    aprovador_limpo = (aprovador or "").strip()
+
+    if decisao == "APROVADO" and not aprovador_limpo:
+        decisao = "REJEITADO"
+        motivo = "SEM_IDENTIFICACAO"
+
+    if decisao != "APROVADO":
+        if motivo is None:
+            motivo = "TIMEOUT_APROVACAO" if decisao == "TIMEOUT" else "REJEITADO_PELO_APROVADOR"
+        aprovador_registro = aprovador_limpo or "NAO_INFORMADO"
+        registro = registrar_log_aprovacao_kill(
+            aprovador=aprovador_registro,
+            decisao=decisao,
+            hash_payload=hash_aprovado,
+            parametros=parametros,
+            alvo=alvo,
+            resultado_banco=None,
+            motivo=motivo,
+            caminho_log=caminho_log,
+        )
+        logger.warning(
+            f"AUDITORIA HITL: {decisao} ({motivo}) por {aprovador_registro} ({canal}) | "
+            f"inst_id={inst_id}, sid={sid}, serial={serial} | Hash={hash_aprovado}"
+        )
+        resultado_tool = json.dumps(
+            {
+                "status": "abortado",
+                "decisao": decisao,
+                "motivo": motivo,
+                "resultado_banco": None,
+                "executado": False,
+                "mensagem": (
+                    f"Intervenção não aprovada ({decisao}/{motivo}) por '{aprovador_registro}'. "
+                    "Nenhuma chamada à conta KILL foi feita."
+                ),
+            },
+            ensure_ascii=False,
+        )
+        return {
+            "decisao": decisao,
+            "resultado_banco": None,
+            "executado": False,
+            "motivo": motivo,
+            "resultado_tool": resultado_tool,
+            "registro": registro,
+            "assunto_email": None,
+            "email_enviado": None,
+            "email_detalhe": None,
+        }
+
+    # Decisão APROVADO com aprovador identificado
+    resultado_exec = matar_sessao_oracle(sid=sid, serial=serial, inst_id=inst_id)
+    try:
+        dados_exec = json.loads(resultado_exec)
+    except (TypeError, ValueError):
+        dados_exec = {"status": "erro", "mensagem": str(resultado_exec)}
+    resultado_banco = str(dados_exec.get("status_banco") or dados_exec.get("motivo") or "DESCONHECIDO")
+    executado = resultado_banco in RESULTADOS_KILL_EXECUTADO
+
+    registro = registrar_log_aprovacao_kill(
+        aprovador=aprovador_limpo,
+        decisao="APROVADO",
+        hash_payload=hash_aprovado,
+        parametros=parametros,
+        alvo=alvo,
+        resultado_banco=resultado_banco,
+        motivo=None,
+        caminho_log=caminho_log,
+    )
+    nivel_log = logging.INFO if executado else logging.WARNING
+    logger.log(
+        nivel_log,
+        f"AUDITORIA HITL: APROVADO por {aprovador_limpo} ({canal}) | "
+        f"inst_id={inst_id}, sid={sid}, serial={serial} | Hash={hash_aprovado} | "
+        f"resultado_banco={resultado_banco} | executado={executado}",
+    )
+
+    assunto, corpo = montar_notificacao_kill(
+        aprovador=aprovador_limpo,
+        inst_id=inst_id,
+        sid=sid,
+        serial=serial,
+        resultado_banco=resultado_banco,
+        hash_payload=hash_aprovado,
+        canal=canal,
+    )
+    email_enviado, email_detalhe = enviar_alerta_email(assunto, corpo)
+    logger.info(f"NOTIFICAÇÃO SMTP: Sucesso={email_enviado} | Assunto={assunto} | Detalhe: {email_detalhe}")
+
+    dados_exec["decisao"] = "APROVADO"
+    dados_exec["resultado_banco"] = resultado_banco
+    dados_exec["executado"] = executado
+    resultado_tool = json.dumps(dados_exec, ensure_ascii=False, default=str)
+
+    return {
+        "decisao": "APROVADO",
+        "resultado_banco": resultado_banco,
+        "executado": executado,
+        "motivo": None,
+        "resultado_tool": resultado_tool,
+        "registro": registro,
+        "assunto_email": assunto,
+        "email_enviado": email_enviado,
+        "email_detalhe": email_detalhe,
+    }
 
 
 # Schema no padrão OpenAI Tool Calling para exportação ao Orquestrador

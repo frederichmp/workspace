@@ -62,15 +62,13 @@ from tools.oracle_dba import (
     coletar_top_sql,
     coletar_plano_execucao,
     consultar_alvo_sessao_diag,
-    matar_sessao_oracle,
     gerar_payload_e_hash_aprovacao,
-    registrar_log_aprovacao_kill,
+    registrar_decisao_kill,
 )
 from tools.gemini_router import (
     gemini_tools_schema,
     analisar_log_complexo,
 )
-from tools.notificador import enviar_alerta_email
 from tools.rag_search import (
     rag_tools_schema,
     buscar_script_interno,
@@ -391,67 +389,41 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
 
     id_aprovador_limpo = id_aprovador.strip()
 
-    if aprovado:
-        if not id_aprovador_limpo:
-            st.error("Identificação do aprovador é obrigatória (não pode ser vazia).")
-            return False
+    if aprovado and not id_aprovador_limpo:
+        st.error("Identificação do aprovador é obrigatória (não pode ser vazia).")
+        return False
 
-        # Executa matar_sessao_oracle via conta KILL homologada
-        resultado_tool = matar_sessao_oracle(sid=sid, serial=serial, inst_id=inst_id)
-        status_banco = json.loads(resultado_tool).get("status_banco", "DESCONHECIDO")
+    # Decisão (humana) e resultado_banco (execução) são registrados separadamente
+    desfecho = registrar_decisao_kill(
+        decisao="APROVADO" if aprovado else "REJEITADO",
+        aprovador=id_aprovador_limpo,
+        inst_id=inst_id,
+        sid=sid,
+        serial=serial,
+        alvo=dados_alvo,
+        hash_aprovado=hash_payload,
+        canal="Web UI",
+    )
+    resultado_tool = desfecho["resultado_tool"]
 
-        # Registra formalmente na trilha de aprovação da aplicação
-        registrar_log_aprovacao_kill(
-            aprovador=id_aprovador_limpo,
-            decisao="APROVADO",
-            hash_payload=hash_payload,
-            parametros={"inst_id": inst_id, "sid": sid, "serial": serial},
-            alvo=dados_alvo,
-            status_banco=status_banco,
-        )
-
-        logging.info(
-            f"AUDITORIA HITL: APROVADO por {id_aprovador_limpo} (Web UI) | "
-            f"AÇÃO: {nome_funcao} | SID={sid}, SERIAL={serial}, INST_ID={inst_id} | "
-            f"Hash={hash_payload} | Status Banco={status_banco}"
-        )
-
-        assunto = f"[AGENTE DBA] Intervenção Crítica Aprovada por {id_aprovador_limpo}: Kill Session {sid},{serial}"
-        corpo = (
-            f"O encerramento da sessão SID={sid}, SERIAL={serial}, INST_ID={inst_id} "
-            f"foi aprovado formalmente por {id_aprovador_limpo} via Dashboard Web.\n"
-            f"Status retornado pelo banco: {status_banco}\n"
-            f"Hash SHA-256 do payload: {hash_payload}"
-        )
-        sucesso_email, msg_email = enviar_alerta_email(assunto, corpo)
-        logging.info(f"NOTIFICAÇÃO SMTP: Sucesso={sucesso_email} | Detalhe: {msg_email}")
-
+    if desfecho["decisao"] != "APROVADO":
+        aprovador_registro = id_aprovador_limpo or "NAO_INFORMADO"
         aviso_ui = (
-            f"✅ **Intervenção Aprovada por `{id_aprovador_limpo}`:** Encerramento executado via PKG_OPS_KILL "
-            f"(Status retornado: `{status_banco}`). *(Notificação SMTP: {msg_email})*"
+            f"🛑 **Ação Abortada pelo Aprovador (`{aprovador_registro}`):** "
+            f"O encerramento da sessão `{sid},{serial}` foi negado. Nenhuma execução no banco."
+        )
+    elif desfecho["executado"]:
+        aviso_ui = (
+            f"✅ **Intervenção aprovada por `{id_aprovador_limpo}` e executada com sucesso** via PKG_OPS_KILL "
+            f"(resultado do banco: `{desfecho['resultado_banco']}`). "
+            f"*(Notificação SMTP: {desfecho['email_detalhe']})*"
         )
     else:
-        aprovador_registro = id_aprovador_limpo or "NAO_INFORMADO"
-        registrar_log_aprovacao_kill(
-            aprovador=aprovador_registro,
-            decisao="REJEITADO",
-            hash_payload=hash_payload,
-            parametros={"inst_id": inst_id, "sid": sid, "serial": serial},
-            alvo=dados_alvo,
-            status_banco="REJEITADO_PELO_APROVADOR",
+        aviso_ui = (
+            f"⚠️ **Intervenção aprovada por `{id_aprovador_limpo}`, mas NÃO executada** "
+            f"(resultado: `{desfecho['resultado_banco']}`). "
+            f"*(Notificação SMTP: {desfecho['email_detalhe']})*"
         )
-        logging.warning(
-            f"AUDITORIA HITL: REJEITADO por {aprovador_registro} (Web UI) | "
-            f"AÇÃO: {nome_funcao} | SID={sid}, SERIAL={serial} | Hash={hash_payload}"
-        )
-        resultado_tool = json.dumps(
-            {
-                "status": "abortado",
-                "mensagem": f"O aprovador '{aprovador_registro}' negou a execução da ação via Dashboard.",
-            },
-            ensure_ascii=False,
-        )
-        aviso_ui = f"🛑 **Ação Abortada pelo Aprovador (`{aprovador_registro}`):** O encerramento da sessão `{sid},{serial}` foi negado."
 
     logging.info(f"RESULTADO ORACLE: {resultado_tool}")
 

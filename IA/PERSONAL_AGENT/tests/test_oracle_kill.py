@@ -168,11 +168,13 @@ def test_aprovacao_negada_ou_sem_identificacao_sem_chamada_kill(monkeypatch, tmp
         hash_payload="hash_teste_123",
         parametros={"inst_id": 1, "sid": 100, "serial": 200},
         alvo={"username": "APP_USER", "status": "ACTIVE"},
-        status_banco="SEM_IDENTIFICACAO",
+        resultado_banco=None,
+        motivo="SEM_IDENTIFICACAO",
         caminho_log=log_teste,
     )
     assert reg_recusa["decisao"] == "REJEITADO"
-    assert reg_recusa["status_banco"] == "SEM_IDENTIFICACAO"
+    assert reg_recusa["motivo"] == "SEM_IDENTIFICACAO"
+    assert reg_recusa["resultado_banco"] is None
     assert len(chamadas_kill) == 0
 
     # Caso 2: Rejeitado pelo DBA humano
@@ -182,7 +184,8 @@ def test_aprovacao_negada_ou_sem_identificacao_sem_chamada_kill(monkeypatch, tmp
         hash_payload="hash_teste_456",
         parametros={"inst_id": 1, "sid": 100, "serial": 200},
         alvo={"username": "APP_USER", "status": "ACTIVE"},
-        status_banco="REJEITADO_PELO_APROVADOR",
+        resultado_banco=None,
+        motivo="REJEITADO_PELO_APROVADOR",
         caminho_log=log_teste,
     )
     assert reg_negado["decisao"] == "REJEITADO"
@@ -210,10 +213,10 @@ def test_hash_canonico_determinismo_e_formato_log(tmp_path):
         hash_payload=hash_a,
         parametros={"inst_id": 1, "sid": 289, "serial": 7021},
         alvo=alvo_a,
-        status_banco="ENCERRADA",
+        resultado_banco="ENCERRADA",
         caminho_log=log_teste,
     )
-    assert reg["status_banco"] == "ENCERRADA"
+    assert reg["resultado_banco"] == "ENCERRADA"
 
     conteudo_log = log_teste.read_text(encoding="utf-8")
     assert "password" not in conteudo_log.lower()
