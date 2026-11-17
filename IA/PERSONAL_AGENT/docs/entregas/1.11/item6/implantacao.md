@@ -235,10 +235,10 @@ O clone de arquivo **não substitui** nenhum desses passos. A checagem de `DBA_E
 | # | Pendência | Depende de |
 |---|---|---|
 | 1 | Aprovar o texto do SQL v2, da migração e do rollback | Ensaio de banco em sandbox (seção 4.1), que é pré-requisito |
-| 4 | Confirmar quem pode chamar o pacote. **EXECUTE explícito** no pacote: só `STARTUP_KILL` (0.2a, confirmado). **EXECUTE efetivo**: `STARTUP_KILL` **e** toda conta que herda `EXECUTE ANY PROCEDURE`, direto ou por papel, inclusive aninhado; a lista é a da leitura 2 (7.3), **ainda não relatada** | Leitura 2 (7.3). Faltam também 0.1 (`DBA_DEPENDENCIES`), 0.3 (jobs) e 0.4 (`GV$SQL`), lidos na parte 1 |
+| 4 | Quem pode chamar o pacote (redação do responsável, 2026-11-17). **EXECUTE explícito**: só `STARTUP_KILL`. **EXECUTE efetivo**: também as contas administrativas `STARTUPADMIN`, `SYS` e `SYSTEM`, por herança de `DBA`/`DV_REALM_OWNER`/`EXP_FULL_DATABASE`/`IMP_FULL_DATABASE`, mais `OUTLN` e `WMSYS`, por concessão direta (EXPIRED & LOCKED). Nenhuma conta de aplicação. **Risco aceito, idêntico ao atual** | Parte de privilégios **fechada** (7.3). Ainda faltam 0.1 (`DBA_DEPENDENCIES`), 0.3 (jobs) e 0.4 (`GV$SQL`), lidos na parte 1 |
 | 7.1 | Contas READ/MUT do executor na conferência de papéis | Nomes a informar pelo responsável |
-| 7.2 | Database Vault: **encerrada** (DV inativo). Residual: detentores de `DV_REALM_OWNER` (não bloqueia a janela); coberto pela leitura 2 | Leitura 2 (7.3) |
-| 7.3 | **Leituras 1 e 2**: privilégios e papéis efetivos de `STARTUP_KILL`, e contas com `EXECUTE ANY PROCEDURE` efetivo | Autorização do responsável; nada alterado, só leitura (seção 7.3) |
+| 7.2 | Database Vault: **encerrada** (DV inativo). Residual **encerrado**: `DV_REALM_OWNER` só chega a contas administrativas (7.3) | — |
+| 7.3 | Leituras 1 e 2: **encerrada** (seção 7.3). A avaliar, sem bloquear: `HS_ADMIN_SELECT_ROLE` em `STARTUP_DIAG`; `user_role_privs` de `STARTUP_KILL` não relatado | Leituras complementares (7.3) |
 
 ## 7. Resultados das leituras autorizadas (MODELO, STARTUPADMIN, somente leitura)
 
@@ -267,7 +267,7 @@ Informado pelo responsável:
 O que isso fecha e o que não fecha:
 - **Fecha:** o caminho por `EXP_FULL_DATABASE`/`IMP_FULL_DATABASE` não alcança contas de aplicação; `WMSYS` e `OUTLN` estão inativas.
 - **Não muda:** o papel `DBA` dá `EXECUTE ANY PROCEDURE` a quem o tem. Essas contas também podem encerrar sessões diretamente com `ALTER SYSTEM`, e o pacote não é a barreira para elas, nem na v1 nem na v2. É risco aceito e documentado; não é uma regressão da v2.
-- **Contas que herdam esse risco:** a listar pela **leitura 2** (seção 7.3). Ainda não foram relatadas, então este registro **não** afirma que se limitam a contas DBA conhecidas.
+- **Contas que herdam esse risco** (leitura 2, 7.3): `STARTUPADMIN`, `SYS` e `SYSTEM` (contas de administração), por herança de `DBA`/`DV_REALM_OWNER`/`EXP_FULL_DATABASE`/`IMP_FULL_DATABASE`. Também `OUTLN` e `WMSYS`, por concessão direta, mas EXPIRED & LOCKED. Nenhuma conta de aplicação; `PUBLIC` sem papéis concedidos.
 - **Correção do registro de 7.1 (2026-11-17):** o 0.2b usou `DBA_SYS_PRIVS`, só concessões diretas. O fechamento acima vale para o caminho `EXP_FULL_DATABASE`/`IMP_FULL_DATABASE` relatado. Ele **não** encerra a questão do `EXECUTE ANY PROCEDURE` herdado por papel, que é a leitura 2.
 - **Fora do relato:** as contas READ/MUT do executor (nomes no `.env`, que esta sessão não lê) não foram citadas na leitura. Se fizerem parte da conferência do responsável, registrar aqui.
 
@@ -346,4 +346,23 @@ Critérios:
 - `PUBLIC` não aparece.
 - A lista resultante passa a ser, por escrito, o conjunto de contas com **EXECUTE efetivo** no pacote (decisão 4) e o conjunto do risco aceito do DBA (7.1).
 
-**Resultado:** pendente (não executado).
+**Resultado (2026-11-17, MODELO, só leitura, informado pelo responsável): ENCERRADA.**
+
+| Conta / item | `session_privs` | `session_roles` | Avaliação |
+|---|---|---|---|
+| `STARTUP_KILL` | CREATE SESSION | nenhum | Conforme o esperado. A afirmação "só CREATE SESSION" agora vale para o conjunto **efetivo** da sessão |
+| `STARTUP_DIAG` | CREATE SESSION | `HS_ADMIN_SELECT_ROLE`, `SELECT_CATALOG_ROLE` | `SELECT_CATALOG_ROLE` é esperado. `HS_ADMIN_SELECT_ROLE` foi registrado pelo responsável como **não necessário à conta de diagnóstico (a avaliar)** |
+| Herança de `EXECUTE ANY PROCEDURE` (leitura 2) | — | — | Por `DBA`/`DV_REALM_OWNER`/`EXP_FULL_DATABASE`/`IMP_FULL_DATABASE`: `STARTUPADMIN`, `SYS`, `SYSTEM` (administração). **Nenhuma conta de aplicação** |
+| `PUBLIC` | — | — | Sem papéis concedidos |
+
+**Pontos a avaliar (não bloqueiam a janela):**
+- **`HS_ADMIN_SELECT_ROLE`:** numa instalação padrão do Oracle, esse papel é concedido **ao** `SELECT_CATALOG_ROLE`. Se for o caso aqui, ele chega a `STARTUP_DIAG` **por herança** (`session_roles` lista papéis aninhados) e não é removível sem alterar `SELECT_CATALOG_ROLE`. Não verificado neste banco. Leitura para confirmar:
+  ```sql
+  -- Concessão direta à conta, ou só via SELECT_CATALOG_ROLE?
+  SELECT grantee, granted_role FROM dba_role_privs
+   WHERE granted_role = 'HS_ADMIN_SELECT_ROLE' ORDER BY grantee;
+  ```
+  Se `STARTUP_DIAG` aparecer como grantee **direto**, a concessão é removível isoladamente (decisão do responsável, com REVOKE fora desta tarefa). Se só `SELECT_CATALOG_ROLE` aparecer, é herança do papel de catálogo e fica registrada como aceita ou a revisar junto com o próprio `SELECT_CATALOG_ROLE`.
+- **`STARTUP_KILL` e papéis não-default:** `session_roles` mostra só os papéis **habilitados**. A terceira consulta da leitura 1 (`user_role_privs`, conectado como `STARTUP_KILL`) não foi relatada. Esperado: nenhuma linha.
+- **Contas READ/MUT do executor:** não constam desta leitura (pendência 7.1).
+
