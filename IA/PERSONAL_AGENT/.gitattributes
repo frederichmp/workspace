@@ -1,0 +1,2 @@
+# Scripts SQL sempre em LF no disco e no repositório: o hash de registry/ é calculado sobre esses bytes.
+*.sql text eol=lf
