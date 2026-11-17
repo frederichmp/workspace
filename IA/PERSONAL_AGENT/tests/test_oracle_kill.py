@@ -24,6 +24,7 @@ b) Sandbox (sandbox_only, requer ORACLE_SANDBOX=1):
    - STARTUP_KILL tentando comando direto -> ORA-01031.
 """
 from datetime import datetime, timezone
+import inspect
 import json
 import os
 from pathlib import Path
@@ -404,10 +405,8 @@ def test_inst_id_ausente_param_invalido_sem_conexao(monkeypatch, tmp_path):
 
     monkeypatch.setattr(oracledb, "connect", fail_connect)
 
-    res = json.loads(matar_sessao_oracle(sid=10, serial=20))
-    assert res["status"] == "recusado"
-    assert res["motivo"] == "PARAM_INVALIDO"
-    assert res["status_banco"] == "PARAM_INVALIDO"
+    with pytest.raises(TypeError):
+        matar_sessao_oracle(sid=10, serial=20)
 
     for inst_invalido in (None, True, 1.5, "1a", "", 0, -3):
         res_inv = json.loads(matar_sessao_oracle(sid=10, serial=20, inst_id=inst_invalido))
@@ -423,6 +422,18 @@ def test_inst_id_ausente_param_invalido_sem_conexao(monkeypatch, tmp_path):
     props = schema_kill["function"]["parameters"]
     assert "inst_id" in props["required"]
     assert "default" not in props["properties"]["inst_id"]
+
+
+def test_assinatura_sem_default_para_inst_id():
+    """Nenhuma função pública definida em oracle_dba tem parâmetro inst_id com default."""
+    com_default = []
+    for nome, obj in vars(oracle_dba).items():
+        if nome.startswith("_") or not inspect.isfunction(obj) or obj.__module__ != oracle_dba.__name__:
+            continue
+        param = inspect.signature(obj).parameters.get("inst_id")
+        if param is not None and param.default is not inspect.Parameter.empty:
+            com_default.append(nome)
+    assert not com_default, f"inst_id com default em: {com_default}"
 
 
 def test_resultado_nao_usuario_com_aprovacao_nao_envia_email_de_aprovada(monkeypatch, tmp_path, ambiente_fake):

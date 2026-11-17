@@ -648,7 +648,7 @@ def consultar_alvo_sessao_diag(
                 pass
 
 
-def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int] = None) -> str:
+def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int]) -> str:
     """
     Executa o procedimento homologado de encerramento de sessão via conta segregada ORACLE_USER_KILL.
     Chama OPS_OWNER.PKG_OPS_KILL.KILL_SESSION com binds nomeados (p_inst_id, p_sid, p_serial, p_status).
