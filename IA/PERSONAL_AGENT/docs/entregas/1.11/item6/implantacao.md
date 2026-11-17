@@ -454,11 +454,12 @@ SELECT o.object_name, o.created, o.last_ddl_time, t.last_analyzed, t.num_rows
 | 4 | **Autorização:** texto literal do responsável, a confirmar pela frase combinada | **Atendida** em 2026-11-17, 19:56. Texto literal: *"Autorizo a execução da parte 1 e da parte 2 de ops_kill_v2_migracao, nesta ordem, em MODELO, com rollback disponível."* **Condição do responsável:** a parte 1 e a parte 2 **só** são executadas depois que `backup_instalado_v1.sql` existir e for conferido (condição 2, **atendida**) |
 | 5 | **Escopo do poder de mutação:** só objetos de teste deste ensaio. **Sessões-alvo:** somente sessões descartáveis criadas pelo ensaio. **Não encerrar** sessões de SYS, de background ou de terceiros | Regra registrada |
 
-**Execução da parte 1 (registro do responsável, 2026-11-17, ~20:01). A parte 2 NÃO foi executada.**
+**Execução da parte 1: CONCLUÍDA (registro do responsável, 2026-11-17, ~20:01). A parte 2 NÃO foi executada.**
 - **Quem executou:** STARTUPADMIN, no MODELO, `ops_kill_v2_migracao_parte1.sql`.
 - **Estado final confirmado:**
   - `ALTER TABLE` aplicado em `OPS_OWNER.OPS_KILL_AUDIT`: `ALVO_LOGON_TIME` DATE, `REF_APROVACAO` VARCHAR2, `CAMPOS_DIVERGENTES` VARCHAR2, todas NULLABLE Y.
   - `PACKAGE` e `PACKAGE BODY` `PKG_OPS_KILL` VALID.
   - O kill v1 continua disponível.
-- **Pendente de confirmação do responsável:** a origem do `GRANT EXECUTE ON OPS_OWNER.PKG_OPS_KILL TO STARTUP_KILL` que aparece na saída. Pode ter sido executado manualmente ou apenas gerado pelo `GET_DEPENDENT_DDL`. Nota da sessão principal: `DBMS_METADATA.GET_DEPENDENT_DDL('OBJECT_GRANT', ...)` (passo 1) devolve o **texto** do GRANT existente, sem executá-lo. Se ele tiver sido executado, o efeito é nulo, porque o grant já existia (0.2a).
-- **Limite do registro:** a saída da parte 1 não tem log sequencial, porque a transcrição saiu misturada. Fica registrado **apenas o estado final**. As saídas das pré-condições do passo 0 nesta execução não foram registradas por esse arquivo; as leituras equivalentes estão nas seções 7, 7.1 a 7.5.
+  - `dba_tab_privs` de `OPS_OWNER.PKG_OPS_KILL` após a execução: `STARTUP_KILL` / `EXECUTE`.
+- **Origem do grant de `STARTUP_KILL`: NÃO CONFIRMADA.** Pode ter sido executado nesta rodada ou ser o grant pré-existente. Será registrada conforme a resposta do responsável, que ainda não veio. Nota da sessão principal: `DBMS_METADATA.GET_DEPENDENT_DDL('OBJECT_GRANT', ...)` (passo 1) devolve o **texto** do GRANT existente, sem executá-lo. Se ele tiver sido executado, o efeito é nulo, porque o grant já existia (0.2a).
+- **Log sequencial da parte 1: não gerado** (a transcrição saiu misturada). Fica registrado **apenas o estado final**. As saídas das pré-condições do passo 0 nesta execução não foram registradas por esse arquivo; as leituras equivalentes estão nas seções 7, 7.1 a 7.5.
