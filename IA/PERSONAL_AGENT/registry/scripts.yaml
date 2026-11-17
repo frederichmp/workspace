@@ -11,15 +11,3 @@ scripts:
     risco: baixo
     status: homologado
     binds: []
-
-  - script_id: dml_simples
-    arquivo: dml_simples.sql
-    sha256: a075b190f59f656cd4193a900beab25a30b8efced510c6ffcef0c1c1c39f72b8
-    tipo: DML
-    risco: medio
-    status: homologado
-    binds:
-      - nome: id
-        tipo: int
-      - nome: nome
-        tipo: string

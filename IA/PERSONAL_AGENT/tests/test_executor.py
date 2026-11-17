@@ -581,6 +581,9 @@ def test_fixtures_hashes_entradas_comuns_sao_iguais():
 
     chaves_comuns = set(prod_map.keys()).intersection(set(test_map.keys()))
     assert len(chaves_comuns) > 0, "Deve haver ao menos uma entrada comum entre os registros"
+    assert "verificar_dual" in chaves_comuns, "verificar_dual deve ser a entrada comum homologada"
+    assert "dml_simples" not in prod_map, "dml_simples deve estar ausente do registro de produção scripts.yaml"
+    assert "dml_simples" in test_map, "dml_simples deve estar presente no registro de teste test_scripts.yaml"
 
     for sid in chaves_comuns:
         assert prod_map[sid] == test_map[sid], (
