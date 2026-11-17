@@ -364,13 +364,18 @@ Critérios:
   - **Escopo do papel — EXPECTATIVA, não verificação:** pela documentação do Oracle, o papel dá `SELECT` nas visões de dicionário `HS_*` (configuração do Heterogeneous Services) e, sozinho, não dá acesso a dados remotos, que exigiria database link. **Isso não foi verificado neste banco.**
   - **Verificação opcional** (leitura de dicionário, como STARTUPADMIN). Não é condição para a janela nem para a decisão 1; só se o responsável quiser o registro como fato:
     ```sql
+    -- Principais: o que o papel contém (privilégios concedidos AO papel)
+    SELECT privilege FROM dba_sys_privs WHERE grantee = 'HS_ADMIN_SELECT_ROLE' ORDER BY privilege;
+    SELECT owner, table_name, privilege FROM dba_tab_privs WHERE grantee = 'HS_ADMIN_SELECT_ROLE' ORDER BY owner, table_name;
+    -- Complemento: papéis aninhados dentro do papel (esperado: nenhum)
+    SELECT granted_role FROM dba_role_privs WHERE grantee = 'HS_ADMIN_SELECT_ROLE' ORDER BY granted_role;
+    -- Alternativas (mostram só papéis a que a conta conectada tem acesso)
     SELECT privilege FROM role_sys_privs WHERE role = 'HS_ADMIN_SELECT_ROLE';
     SELECT table_name, privilege FROM role_tab_privs WHERE role = 'HS_ADMIN_SELECT_ROLE';
-    -- Equivalentes que não dependem de a conta conectada ter acesso ao papel:
-    -- SELECT privilege FROM dba_sys_privs WHERE grantee = 'HS_ADMIN_SELECT_ROLE';
-    -- SELECT owner, table_name, privilege FROM dba_tab_privs WHERE grantee = 'HS_ADMIN_SELECT_ROLE';
     ```
-    Resultado esperado, se a expectativa se confirmar: nenhum privilégio de sistema e só `SELECT` em visões `HS_*`.
+    Por que as `DBA_*` filtram por `grantee`: a coluna `GRANTEE` de `DBA_SYS_PRIVS` e `DBA_TAB_PRIVS` registra concessões a **usuários e a papéis**. Neste banco, a leitura 0.2b em `DBA_SYS_PRIVS` devolveu os papéis `DBA`, `DV_REALM_OWNER`, `EXP_FULL_DATABASE` e `IMP_FULL_DATABASE` como grantees. `DBA_ROLE_PRIVS` com `grantee = <papel>` lista os **papéis** contidos no papel, não os seus privilégios; `DBA_ROLE_PRIVS` com `granted_role = <papel>` lista **quem recebe** o papel (leitura 2).
+
+    Resultado esperado, se a expectativa se confirmar: nenhum privilégio de sistema, só `SELECT` em visões `HS_*` e nenhum papel aninhado.
 - **Consultas efetivamente usadas** (informadas pelo responsável, 2026-11-17):
   - Leitura 1, conectado como `STARTUP_KILL`: `SELECT granted_role FROM user_role_privs ORDER BY granted_role;`, sem filtro de grantee, porque a visão já mostra os papéis da conta conectada. Resultado: `no rows selected`. **Válida.**
   - Leitura 2, como STARTUPADMIN: `DBA_ROLE_PRIVS`, a visão correta para concessões a outras contas. **Válida.**
