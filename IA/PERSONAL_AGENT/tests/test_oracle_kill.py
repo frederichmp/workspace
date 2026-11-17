@@ -8,7 +8,13 @@ a) Sem conexão (rodam sempre):
    - sql_id inválido -> SQL_ID_INVALIDO, sem conexão;
    - ausência de ORACLE_USER_* -> ERRO_CONFIG, sem conexão;
    - aprovação negada, sem identificação do aprovador -> nenhuma chamada à conta KILL;
-   - integridade do hash canônico e do log de aprovação.
+   - integridade do hash canônico e do log de aprovação;
+   - (1.9) alvo de background -> NAO_USUARIO, sem prompt de aprovação (cursor mockado);
+   - (1.9) usuário protegido -> USUARIO_PROTEGIDO, sem prompt; lista alinhada a PKG_OPS_KILL;
+   - (1.9) hash divergente na reconsulta -> ALVO_ALTERADO, sem connect da conta KILL;
+   - (1.9) inst_id ausente -> PARAM_INVALIDO, sem conexão;
+   - (1.9) resultado NAO_USUARIO com decisão APROVADO -> e-mail sem assunto de aprovada;
+   - (1.9) registro de log com decisao e resultado_banco separados.
 b) Sandbox (sandbox_only, requer ORACLE_SANDBOX=1):
    - SID 289 / serial 7021 (alvo de STARTUP_DIAG) -> ENCERRADA;
    - SID 999999 / serial 1 -> ALVO_NAO_ENCONTRADO;
@@ -24,15 +30,25 @@ from pathlib import Path
 import pytest
 import oracledb
 
+import logging
+import re
+
+from src.tools import oracle_dba
 from src.tools.oracle_dba import (
+    USUARIOS_PROTEGIDOS,
+    calcular_hash_identidade,
     coletar_sessoes_ativas,
     coletar_top_sql,
     coletar_plano_execucao,
+    conduzir_kill_hitl,
     consultar_alvo_sessao_diag,
     matar_sessao_oracle,
     gerar_payload_e_hash_aprovacao,
+    oracle_tools_schema,
     registrar_log_aprovacao_kill,
 )
+
+ROOT_DIR_TESTE = Path(__file__).resolve().parent.parent
 
 
 # =============================================================================
@@ -223,6 +239,330 @@ def test_hash_canonico_determinismo_e_formato_log(tmp_path):
     assert "senha" not in conteudo_log.lower()
     assert "dba_chefe" in conteudo_log
     assert hash_a in conteudo_log
+
+
+# =============================================================================
+# A2. TAREFA 1.9 — PRÉ-CONSULTA, INTEGRIDADE E DECISÃO (SEM CONEXÃO, MOCKS)
+# =============================================================================
+# Credenciais fictícias definidas só no processo de teste (nenhum valor do .env é usado
+# nem impresso). oracledb.connect é substituído por um falso que separa DIAG e KILL.
+
+USER_DIAG_FAKE = "diag_teste_fake"
+USER_KILL_FAKE = "kill_teste_fake"
+
+COLUNAS_ALVO = ["INST_ID", "SID", "serial#", "USERNAME", "PROGRAM", "MACHINE", "STATUS", "SQL_ID", "EVENT", "TYPE"]
+
+
+def _linha_alvo(
+    username="APP_USER",
+    program="app.exe",
+    machine="srv-app01",
+    status="ACTIVE",
+    sql_id="2z0udr4rc402m",
+    event="SQL*Net message from client",
+    tipo="USER",
+    inst_id=1,
+    sid=101,
+    serial=202,
+):
+    return (inst_id, sid, serial, username, program, machine, status, sql_id, event, tipo)
+
+
+class _VarFake:
+    def __init__(self, valor):
+        self._valor = valor
+
+    def getvalue(self):
+        return self._valor
+
+
+class _CursorFake:
+    def __init__(self, oracle_fake, conta):
+        self.oracle = oracle_fake
+        self.conta = conta
+        self.description = [(c,) for c in COLUNAS_ALVO]
+        self._linha = None
+
+    def execute(self, sql, **binds):
+        self.oracle.sql_executado.append((self.conta, sql, binds))
+        if self.conta == "DIAG":
+            self._linha = self.oracle.linhas_diag.pop(0) if self.oracle.linhas_diag else None
+
+    def fetchone(self):
+        return self._linha
+
+    def var(self, *args, **kwargs):
+        return _VarFake(self.oracle.status_pkg)
+
+    def close(self):
+        pass
+
+
+class _ConexaoFake:
+    def __init__(self, oracle_fake, conta):
+        self.oracle = oracle_fake
+        self.conta = conta
+
+    def cursor(self):
+        return _CursorFake(self.oracle, self.conta)
+
+    def close(self):
+        pass
+
+
+class _OracleFake:
+    """Simula oracledb.connect: fila de linhas para a conta DIAG e p_status para a conta KILL."""
+
+    def __init__(self, linhas_diag, status_pkg=None, kill_permitido=True):
+        self.linhas_diag = list(linhas_diag)
+        self.status_pkg = status_pkg
+        self.kill_permitido = kill_permitido
+        self.conexoes = []
+        self.sql_executado = []
+
+    def connect(self, user=None, password=None, dsn=None, **kwargs):
+        self.conexoes.append(user)
+        if user == USER_KILL_FAKE:
+            if not self.kill_permitido:
+                pytest.fail("oracledb.connect não deve ser chamado para a conta KILL neste cenário")
+            return _ConexaoFake(self, "KILL")
+        if user == USER_DIAG_FAKE:
+            return _ConexaoFake(self, "DIAG")
+        pytest.fail(f"Conexão com conta inesperada: {user!r}")
+
+    @property
+    def conexoes_kill(self):
+        return [u for u in self.conexoes if u == USER_KILL_FAKE]
+
+
+@pytest.fixture
+def ambiente_fake(monkeypatch):
+    """Credenciais fictícias, rede sempre acessível e e-mail capturado (enviar_alerta_email mockado)."""
+    monkeypatch.setenv("ORACLE_USER_DIAG", USER_DIAG_FAKE)
+    monkeypatch.setenv("ORACLE_PASSWORD_DIAG", "senha-fake")
+    monkeypatch.setenv("ORACLE_USER_KILL", USER_KILL_FAKE)
+    monkeypatch.setenv("ORACLE_PASSWORD_KILL", "senha-fake")
+    monkeypatch.setenv("ORACLE_DSN", "host-teste:1521/TESTE")
+    monkeypatch.setattr(
+        oracle_dba,
+        "verificar_acessibilidade_host",
+        lambda dsn, timeout=3.0: {"acessivel": True, "host": "host-teste", "porta": 1521, "latencia_ms": 0.1},
+    )
+    emails = []
+
+    def enviar_alerta_email_mock(assunto, corpo):
+        emails.append({"assunto": assunto, "corpo": corpo})
+        return True, "mock"
+
+    monkeypatch.setattr(oracle_dba, "enviar_alerta_email", enviar_alerta_email_mock)
+    return emails
+
+
+def _instalar_oracle(monkeypatch, oracle_fake):
+    monkeypatch.setattr(oracledb, "connect", oracle_fake.connect)
+    return oracle_fake
+
+
+def _prompt_proibido(prep):
+    pytest.fail("Prompt de aprovação não deve ser exibido para alvo recusado na pré-consulta")
+
+
+def _aprovar(aprovador="dba_teste"):
+    def _solicitar(prep):
+        return "APROVADO", aprovador, None
+    return _solicitar
+
+
+ARGS_ALVO = {"inst_id": 1, "sid": 101, "serial": 202}
+
+
+def test_alvo_background_retorna_nao_usuario_sem_prompt(monkeypatch, tmp_path, ambiente_fake):
+    """Sessão com TYPE='BACKGROUND' -> NAO_USUARIO, sem prompt, sem conta KILL, sem e-mail."""
+    oracle_fake = _instalar_oracle(
+        monkeypatch,
+        _OracleFake([_linha_alvo(username=None, program="oracle@db (PMON)", tipo="BACKGROUND")], kill_permitido=False),
+    )
+
+    res_alvo = consultar_alvo_sessao_diag(inst_id=1, sid=101, serial=202)
+    assert res_alvo["encontrado"] is True
+    assert res_alvo["elegivel"] is False
+    assert res_alvo["motivo"] == "NAO_USUARIO"
+    sql_diag = oracle_fake.sql_executado[0][1].lower()
+    assert re.search(r"\btype\b", sql_diag), "Pré-consulta deve selecionar TYPE da GV$SESSION"
+
+    oracle_fake.linhas_diag.append(_linha_alvo(username=None, program="oracle@db (PMON)", tipo="BACKGROUND"))
+    desfecho = conduzir_kill_hitl(
+        dict(ARGS_ALVO), solicitar_aprovacao=_prompt_proibido, canal="TESTE", caminho_log=tmp_path / "kill.log"
+    )
+    assert desfecho["prompt_exibido"] is False
+    assert desfecho["motivo"] == "NAO_USUARIO"
+    assert json.loads(desfecho["resultado_tool"])["status_banco"] == "NAO_USUARIO"
+    assert oracle_fake.conexoes_kill == []
+    assert ambiente_fake == []
+
+
+@pytest.mark.parametrize("usuario", list(USUARIOS_PROTEGIDOS) + ["sys", "Startupadmin"])
+def test_usuario_protegido_retorna_usuario_protegido_sem_prompt(monkeypatch, tmp_path, ambiente_fake, usuario):
+    """Usuário da lista protegida (qualquer caixa) -> USUARIO_PROTEGIDO, sem prompt e sem conta KILL."""
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo(username=usuario)], kill_permitido=False))
+
+    desfecho = conduzir_kill_hitl(
+        dict(ARGS_ALVO), solicitar_aprovacao=_prompt_proibido, canal="TESTE", caminho_log=tmp_path / "kill.log"
+    )
+    assert desfecho["prompt_exibido"] is False
+    assert desfecho["motivo"] == "USUARIO_PROTEGIDO"
+    assert oracle_fake.conexoes_kill == []
+    assert ambiente_fake == []
+
+
+def test_usuario_nulo_tipo_user_retorna_usuario_protegido(monkeypatch, ambiente_fake):
+    """Mesma regra do pacote: TYPE='USER' com username nulo é tratado como USUARIO_PROTEGIDO."""
+    _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo(username=None)], kill_permitido=False))
+    res = consultar_alvo_sessao_diag(inst_id=1, sid=101, serial=202)
+    assert res["elegivel"] is False
+    assert res["motivo"] == "USUARIO_PROTEGIDO"
+
+
+def test_lista_protegida_alinhada_ao_pacote():
+    """USUARIOS_PROTEGIDOS é idêntica à constante c_protegidos de PKG_OPS_KILL (db/ops_kill.sql, só leitura)."""
+    assert set(USUARIOS_PROTEGIDOS) == {"SYS", "SYSTEM", "DBSNMP", "SYSMAN", "OUTLN", "STARTUPADMIN", "OPS_OWNER"}
+    sql = (ROOT_DIR_TESTE / "db" / "ops_kill.sql").read_text(encoding="utf-8")
+    m = re.search(r"c_protegidos\s+CONSTANT\s+VARCHAR2\(\d+\)\s*:=\s*'([^']*)'", sql, re.IGNORECASE)
+    assert m, "Constante c_protegidos não encontrada em db/ops_kill.sql"
+    lista_pacote = {u for u in m.group(1).split(",") if u}
+    assert set(USUARIOS_PROTEGIDOS) == lista_pacote
+
+
+def test_hash_divergente_na_reconsulta_retorna_alvo_alterado_sem_conta_kill(
+    monkeypatch, tmp_path, ambiente_fake, caplog
+):
+    """Identidade muda entre aprovação e execução -> ALVO_ALTERADO, sem connect KILL, ocorrência no log."""
+    linha_aprovada = _linha_alvo(program="app.exe")
+    linha_reconsulta = _linha_alvo(program="outro_programa.exe")  # mesmo inst_id/sid/serial, outro programa
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([linha_aprovada, linha_reconsulta], kill_permitido=False))
+    log_aprovacao = tmp_path / "kill.log"
+
+    with caplog.at_level(logging.WARNING, logger=oracle_dba.logger.name):
+        desfecho = conduzir_kill_hitl(
+            dict(ARGS_ALVO), solicitar_aprovacao=_aprovar(), canal="TESTE", caminho_log=log_aprovacao
+        )
+
+    assert desfecho["prompt_exibido"] is True
+    assert desfecho["decisao"] == "APROVADO"
+    assert desfecho["resultado_banco"] == "ALVO_ALTERADO"
+    assert desfecho["executado"] is False
+    assert oracle_fake.conexoes_kill == [], "Conta KILL não pode ser conectada com hash divergente"
+    assert oracle_fake.conexoes.count(USER_DIAG_FAKE) == 2, "Esperadas pré-consulta e reconsulta pela DIAG"
+    assert any("ALVO_ALTERADO" in r.getMessage() for r in caplog.records)
+
+    registro = json.loads(log_aprovacao.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert registro["decisao"] == "APROVADO"
+    assert registro["resultado_banco"] == "ALVO_ALTERADO"
+
+    assert len(ambiente_fake) == 1
+    assert "Aprovada" not in ambiente_fake[0]["assunto"]
+    assert "NÃO executada" in ambiente_fake[0]["assunto"]
+
+
+def test_hash_identidade_ignora_campos_volateis():
+    """status, event, sql_id e timestamp não entram no hash; program sim."""
+    base = dict(zip([c.lower() for c in COLUNAS_ALVO], _linha_alvo()))
+    volatil = dict(base, status="INACTIVE", event="db file sequential read", sql_id="aaaaaaaaaaaaa")
+    assert calcular_hash_identidade(base) == calcular_hash_identidade(volatil)
+    assert calcular_hash_identidade(base) != calcular_hash_identidade(dict(base, program="outro.exe"))
+
+    _, h1 = gerar_payload_e_hash_aprovacao("matar_sessao_oracle", ARGS_ALVO, base, "2026-11-17T12:00:00Z")
+    _, h2 = gerar_payload_e_hash_aprovacao("matar_sessao_oracle", ARGS_ALVO, volatil, "2026-11-17T13:00:00Z")
+    assert h1 == h2
+
+
+def test_inst_id_ausente_param_invalido_sem_conexao(monkeypatch, tmp_path):
+    """inst_id ausente -> PARAM_INVALIDO sem consulta nem conexão; schema sem default e com inst_id obrigatório."""
+    def fail_connect(*args, **kwargs):
+        pytest.fail("oracledb.connect não deve ser chamado sem inst_id")
+
+    monkeypatch.setattr(oracledb, "connect", fail_connect)
+
+    res = json.loads(matar_sessao_oracle(sid=10, serial=20))
+    assert res["status"] == "recusado"
+    assert res["motivo"] == "PARAM_INVALIDO"
+    assert res["status_banco"] == "PARAM_INVALIDO"
+
+    for inst_invalido in (None, True, 1.5, "1a", "", 0, -3):
+        res_inv = json.loads(matar_sessao_oracle(sid=10, serial=20, inst_id=inst_invalido))
+        assert res_inv["motivo"] == "PARAM_INVALIDO", f"inst_id={inst_invalido!r} deveria ser recusado"
+
+    desfecho = conduzir_kill_hitl(
+        {"sid": 10, "serial": 20}, solicitar_aprovacao=_prompt_proibido, canal="TESTE", caminho_log=tmp_path / "k.log"
+    )
+    assert desfecho["prompt_exibido"] is False
+    assert desfecho["motivo"] == "PARAM_INVALIDO"
+
+    schema_kill = next(t for t in oracle_tools_schema if t["function"]["name"] == "matar_sessao_oracle")
+    props = schema_kill["function"]["parameters"]
+    assert "inst_id" in props["required"]
+    assert "default" not in props["properties"]["inst_id"]
+
+
+def test_resultado_nao_usuario_com_aprovacao_nao_envia_email_de_aprovada(monkeypatch, tmp_path, ambiente_fake):
+    """APROVADO + PKG retornando NAO_USUARIO -> e-mail "NÃO executada", nunca assunto de aprovada."""
+    linha = _linha_alvo()
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([linha, linha], status_pkg="NAO_USUARIO"))
+
+    desfecho = conduzir_kill_hitl(
+        dict(ARGS_ALVO), solicitar_aprovacao=_aprovar(), canal="TESTE", caminho_log=tmp_path / "kill.log"
+    )
+
+    assert oracle_fake.conexoes_kill == [USER_KILL_FAKE]
+    assert any("PKG_OPS_KILL.KILL_SESSION" in sql for conta, sql, _ in oracle_fake.sql_executado if conta == "KILL")
+    assert desfecho["decisao"] == "APROVADO"
+    assert desfecho["resultado_banco"] == "NAO_USUARIO"
+    assert desfecho["executado"] is False
+    assert len(ambiente_fake) == 1
+    assunto = ambiente_fake[0]["assunto"]
+    assert "Aprovada" not in assunto
+    assert "NÃO executada" in assunto
+    assert "NAO_USUARIO" in assunto
+    assert "NAO_USUARIO" in ambiente_fake[0]["corpo"]
+
+
+def test_registro_log_contem_decisao_e_resultado_banco_separados(monkeypatch, tmp_path, ambiente_fake):
+    """Registro JSONL grava decisao e resultado_banco em campos distintos (aprovado-executado e rejeitado)."""
+    linha = _linha_alvo()
+    _instalar_oracle(monkeypatch, _OracleFake([linha, linha], status_pkg="ENCERRADA"))
+    log_aprovacao = tmp_path / "kill.log"
+
+    desfecho = conduzir_kill_hitl(
+        dict(ARGS_ALVO), solicitar_aprovacao=_aprovar("dba_chefe"), canal="TESTE", caminho_log=log_aprovacao
+    )
+    assert desfecho["executado"] is True
+
+    _instalar_oracle(monkeypatch, _OracleFake([linha], kill_permitido=False))
+    conduzir_kill_hitl(
+        dict(ARGS_ALVO),
+        solicitar_aprovacao=lambda prep: ("REJEITADO", "dba_chefe", "REJEITADO_PELO_APROVADOR"),
+        canal="TESTE",
+        caminho_log=log_aprovacao,
+    )
+
+    registros = [json.loads(l) for l in log_aprovacao.read_text(encoding="utf-8").splitlines()]
+    assert len(registros) == 2
+    aprovado, rejeitado = registros
+    for reg in registros:
+        assert "decisao" in reg and "resultado_banco" in reg
+        assert "status_banco" not in reg
+
+    assert aprovado["decisao"] == "APROVADO"
+    assert aprovado["resultado_banco"] == "ENCERRADA"
+    assert rejeitado["decisao"] == "REJEITADO"
+    assert rejeitado["resultado_banco"] is None
+    assert rejeitado["motivo"] == "REJEITADO_PELO_APROVADOR"
+
+    assert len(ambiente_fake) == 1
+    assert ambiente_fake[0]["assunto"].startswith("[AGENTE DBA] Intervenção Aprovada por dba_chefe")
+
+    conteudo = log_aprovacao.read_text(encoding="utf-8")
+    assert "senha-fake" not in conteudo
 
 
 # =============================================================================

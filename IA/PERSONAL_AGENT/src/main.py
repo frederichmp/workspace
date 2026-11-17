@@ -43,16 +43,12 @@ from tools.os_tools import (
 )
 
 # 2. Importando as Ferramentas do Oracle (Incluindo matar_sessao_oracle - Fase 4 HITL)
-from datetime import datetime, timezone
 from tools.oracle_dba import (
     oracle_tools_schema,
     coletar_sessoes_ativas,
     coletar_top_sql,
     coletar_plano_execucao,
-    consultar_alvo_sessao_diag,
-    gerar_payload_e_hash_aprovacao,
-    registrar_decisao_kill,
-    validar_parametros_kill,
+    conduzir_kill_hitl,
 )
 
 # 3. Importando a Ferramenta de Nuvem (Gemini), o Notificador SMTP e a Busca RAG Local
@@ -108,6 +104,59 @@ DIRETRIZES DE COMPORTAMENTO E DELEGAÇÃO:
 - REGRA DE OURO: Se você extrair um plano de execução (DBMS_XPLAN) ou quando o usuário pedir uma análise profunda do plano de execução, acione IMEDIATAMENTE a ferramenta 'analisar_log_complexo' passando o plano extraído para terceirizar a análise. Não tente adivinhar.
 - SEGURANÇA (HITL): Apenas acione 'matar_sessao_oracle' quando o usuário solicitar explicitamente para matar ou encerrar uma sessão informando SID e SERIAL.
 """
+
+
+def _solicitar_aprovacao_cli(prep: dict) -> tuple[str, str, str | None]:
+    """
+    Prompt HITL da CLI. Chamado por conduzir_kill_hitl apenas para alvo elegível.
+    Retorna (decisao, aprovador, motivo).
+    """
+    alvo_dados = prep["alvo"]
+    print("\n" + "=" * 70)
+    print("\033[91m[ALERTA CRÍTICO DE SEGURANÇA - INTERVENÇÃO HITL]\033[0m")
+    print("A SESSÃO SERÁ ENCERRADA IMEDIATAMENTE (KILL SESSION IMMEDIATE).")
+    print("=" * 70)
+    print("Ação Solicitada : matar_sessao_oracle")
+    print(f"Alvo Identificado: inst_id={alvo_dados.get('inst_id')}, sid={alvo_dados.get('sid')}, serial#={alvo_dados.get('serial#')}")
+    print(f"Usuário Oracle  : {alvo_dados.get('username')}")
+    print(f"Programa/Máquina: {alvo_dados.get('program')} / {alvo_dados.get('machine')}")
+    print(f"Status Atual    : {alvo_dados.get('status')}")
+    print(f"SQL ID          : {alvo_dados.get('sql_id')}")
+    print(f"Evento Espera   : {alvo_dados.get('event')}")
+    print(f"Hash identidade : {prep['hash_identidade']}  (reconferido antes da execução)")
+    print("=" * 70)
+
+    id_aprovador = input("Informe sua identificação de aprovador (obrigatório, ex: dba_nome): ").strip()
+    if not id_aprovador:
+        print("\033[93m[Recusa]: Identificação do aprovador é obrigatória. Intervenção cancelada.\033[0m")
+        return "REJEITADO", "", "SEM_IDENTIFICACAO"
+
+    confirmacao = input(
+        f"Confirma o encerramento imediato da sessão pelo aprovador '{id_aprovador}'? [S/N]: "
+    ).strip().upper()
+    if confirmacao == "S":
+        return "APROVADO", id_aprovador, None
+    return "REJEITADO", id_aprovador, "REJEITADO_PELO_APROVADOR"
+
+
+def _exibir_desfecho_kill_cli(desfecho: dict) -> None:
+    """Mensagens de tela que diferenciam recusa, aprovado-e-executado e aprovado-sem-execução."""
+    if not desfecho.get("prompt_exibido"):
+        print(f"[Sistema]: Alvo recusado ({desfecho['motivo']}). Ação cancelada sem solicitação de aprovação.")
+    elif desfecho["decisao"] != "APROVADO":
+        print(f"[Sistema]: Intervenção NÃO aprovada ({desfecho['motivo']}). Nenhuma execução no banco.")
+    elif desfecho["executado"]:
+        print(
+            f"[Sistema]: Intervenção APROVADA por '{desfecho['aprovador']}' e EXECUTADA COM SUCESSO "
+            f"(resultado do banco: {desfecho['resultado_banco']})."
+        )
+    else:
+        print(
+            f"\033[93m[Sistema]: Intervenção APROVADA por '{desfecho['aprovador']}', mas NÃO EXECUTADA "
+            f"(resultado: {desfecho['resultado_banco']}).\033[0m"
+        )
+    if desfecho.get("assunto_email"):
+        print(f"[Sistema]: Notificação por e-mail ({desfecho['assunto_email']}): {desfecho['email_detalhe']}")
 
 
 def executar_agente(prompt_usuario: str) -> None:
@@ -177,123 +226,15 @@ def executar_agente(prompt_usuario: str) -> None:
                     resultado_tool = coletar_plano_execucao(argumentos.get("sql_id"))
 
                 elif nome_funcao == "matar_sessao_oracle":
-                    sid = argumentos.get("sid")
-                    serial = argumentos.get("serial")
-                    inst_id = argumentos.get("inst_id")  # obrigatório, sem valor padrão
-
-                    # 1. Validação local antes de qualquer consulta ou conexão: inteiros positivos
-                    params_validados = validar_parametros_kill(inst_id, sid, serial)
-                    if params_validados is None:
-                        resultado_tool = json.dumps(
-                            {
-                                "status": "recusado",
-                                "motivo": "PARAM_INVALIDO",
-                                "status_banco": "PARAM_INVALIDO",
-                                "mensagem": (
-                                    f"Parâmetros inválidos: inst_id={inst_id}, sid={sid}, serial={serial}. "
-                                    "inst_id, sid e serial são obrigatórios e devem ser inteiros estritamente positivos (> 0)."
-                                ),
-                            },
-                            ensure_ascii=False,
-                        )
-                        print(f"[Sistema]: Parâmetros inválidos recusados localmente (PARAM_INVALIDO).")
-                        logging.warning(f"HITL RECUSADO LOCALMENTE: PARAM_INVALIDO | inst_id={inst_id}, sid={sid}, serial={serial}")
-                        # Devolve o resultado diretamente sem prosseguir para aprovação
-                    else:
-                        inst_id_val, sid_val, serial_val = params_validados
-                        # 2. Consulta prévia do alvo pela conta DIAG na GV$SESSION
-                        print(f"[Sistema]: Consultando alvo inst_id={inst_id_val}, sid={sid_val}, serial={serial_val} via DIAG...")
-                        check_alvo = consultar_alvo_sessao_diag(
-                            inst_id=inst_id_val, sid=sid_val, serial=serial_val
-                        )
-
-                        if not check_alvo.get("elegivel"):
-                            motivo_falha = check_alvo.get("motivo", "ALVO_NAO_ENCONTRADO")
-                            resultado_tool = json.dumps(
-                                {
-                                    "status": "recusado",
-                                    "motivo": motivo_falha,
-                                    "status_banco": motivo_falha,
-                                    "mensagem": check_alvo.get(
-                                        "mensagem",
-                                        "Sessão alvo não encontrada na GV$SESSION.",
-                                    ),
-                                },
-                                ensure_ascii=False,
-                            )
-                            print(f"[Sistema]: Alvo recusado ({motivo_falha}). Ação cancelada sem solicitação de aprovação.")
-                            logging.warning(
-                                f"HITL CANCELADO: Alvo recusado na pré-consulta GV$SESSION | "
-                                f"inst_id={inst_id_val}, sid={sid_val}, serial={serial_val} | Motivo={motivo_falha}"
-                            )
-                        else:
-                            alvo_dados = check_alvo["alvo"]
-                            timestamp_str = datetime.now(timezone.utc).isoformat()
-                            payload_dict, hash_sha256 = gerar_payload_e_hash_aprovacao(
-                                ferramenta=nome_funcao,
-                                parametros={"inst_id": inst_id_val, "sid": sid_val, "serial": serial_val},
-                                alvo=alvo_dados,
-                                timestamp=timestamp_str,
-                            )
-
-                            # Exibe detalhes do alvo e aviso explícito de encerramento imediato
-                            print("\n" + "=" * 70)
-                            print("\033[91m[ALERTA CRÍTICO DE SEGURANÇA - INTERVENÇÃO HITL]\033[0m")
-                            print("A SESSÃO SERÁ ENCERRADA IMEDIATAMENTE (KILL SESSION IMMEDIATE).")
-                            print("=" * 70)
-                            print(f"Ação Solicitada : {nome_funcao}")
-                            print(f"Alvo Identificado: inst_id={alvo_dados.get('inst_id')}, sid={alvo_dados.get('sid')}, serial#={alvo_dados.get('serial#')}")
-                            print(f"Usuário Oracle  : {alvo_dados.get('username')}")
-                            print(f"Programa/Máquina: {alvo_dados.get('program')} / {alvo_dados.get('machine')}")
-                            print(f"Status Atual    : {alvo_dados.get('status')}")
-                            print(f"SQL ID          : {alvo_dados.get('sql_id')}")
-                            print(f"Evento Espera   : {alvo_dados.get('event')}")
-                            print(f"Hash identidade : {hash_sha256}  (reconferido antes da execução)")
-                            print("=" * 70)
-
-                            # Exige identificação do aprovador
-                            id_aprovador = input("Informe sua identificação de aprovador (obrigatório, ex: dba_nome): ").strip()
-
-                            if not id_aprovador:
-                                decisao_humana, motivo_decisao = "REJEITADO", "SEM_IDENTIFICACAO"
-                                print("\033[93m[Recusa]: Identificação do aprovador é obrigatória. Intervenção cancelada.\033[0m")
-                            else:
-                                confirmacao = input(
-                                    f"Confirma o encerramento imediato da sessão pelo aprovador '{id_aprovador}'? [S/N]: "
-                                ).strip().upper()
-                                if confirmacao == "S":
-                                    decisao_humana, motivo_decisao = "APROVADO", None
-                                else:
-                                    decisao_humana, motivo_decisao = "REJEITADO", "REJEITADO_PELO_APROVADOR"
-
-                            # Decisão (humana) e resultado_banco (execução) são registrados separadamente
-                            desfecho = registrar_decisao_kill(
-                                decisao=decisao_humana,
-                                aprovador=id_aprovador,
-                                inst_id=inst_id_val,
-                                sid=sid_val,
-                                serial=serial_val,
-                                alvo=alvo_dados,
-                                hash_aprovado=hash_sha256,
-                                canal="CLI",
-                                motivo=motivo_decisao,
-                            )
-                            resultado_tool = desfecho["resultado_tool"]
-
-                            if desfecho["decisao"] != "APROVADO":
-                                print(f"[Sistema]: Intervenção NÃO aprovada ({desfecho['motivo']}). Nenhuma execução no banco.")
-                            elif desfecho["executado"]:
-                                print(
-                                    f"[Sistema]: Intervenção APROVADA por '{id_aprovador}' e EXECUTADA COM SUCESSO "
-                                    f"(resultado do banco: {desfecho['resultado_banco']})."
-                                )
-                            else:
-                                print(
-                                    f"\033[93m[Sistema]: Intervenção APROVADA por '{id_aprovador}', mas NÃO EXECUTADA "
-                                    f"(resultado: {desfecho['resultado_banco']}).\033[0m"
-                                )
-                            if desfecho["assunto_email"]:
-                                print(f"[Sistema]: Notificação por e-mail ({desfecho['assunto_email']}): {desfecho['email_detalhe']}")
+                    # Validação, pré-consulta DIAG, prompt (só para alvo elegível), reconsulta + hash
+                    # antes da conta KILL e registro de decisao/resultado_banco: tools.oracle_dba
+                    desfecho = conduzir_kill_hitl(
+                        argumentos,
+                        solicitar_aprovacao=_solicitar_aprovacao_cli,
+                        canal="CLI",
+                    )
+                    resultado_tool = desfecho["resultado_tool"]
+                    _exibir_desfecho_kill_cli(desfecho)
 
                 # Rota: Nuvem / Gemini
                 elif nome_funcao == "analisar_log_complexo":

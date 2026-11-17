@@ -54,17 +54,14 @@ from tools.os_tools import (
     coletar_metricas_hardware,
     verificar_espaco_disco,
 )
-from datetime import datetime, timezone
 from tools.oracle_dba import (
     oracle_tools_schema,
     verificar_acessibilidade_host,
     coletar_sessoes_ativas,
     coletar_top_sql,
     coletar_plano_execucao,
-    consultar_alvo_sessao_diag,
-    gerar_payload_e_hash_aprovacao,
+    preparar_intervencao_kill,
     registrar_decisao_kill,
-    validar_parametros_kill,
 )
 from tools.gemini_router import (
     gemini_tools_schema,
@@ -214,77 +211,34 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
             # BARREIRA HITL BASEADA EM ESTADO COM PRÉ-CONSULTA DIAG E TRILHA
             # ------------------------------------------------------------------
             if nome_funcao == "matar_sessao_oracle":
-                sid_alvo = argumentos.get("sid")
-                serial_alvo = argumentos.get("serial")
-                inst_id_alvo = argumentos.get("inst_id")  # obrigatório, sem valor padrão
+                # Validação (sem conexão), pré-consulta DIAG (existência, TYPE, usuário
+                # protegido) e hash de identidade: tools.oracle_dba.preparar_intervencao_kill
+                yield (
+                    f"🔍 Validando parâmetros e consultando sessão `inst_id={argumentos.get('inst_id')}, "
+                    f"sid={argumentos.get('sid')}, serial={argumentos.get('serial')}` via DIAG..."
+                )
+                prep = preparar_intervencao_kill(argumentos, ferramenta=nome_funcao)
 
-                # 1. Validação local antes de qualquer conexão: inteiros positivos
-                params_validados = validar_parametros_kill(inst_id_alvo, sid_alvo, serial_alvo)
-                if params_validados is None:
-                    resultado_tool = json.dumps(
-                        {
-                            "status": "recusado",
-                            "motivo": "PARAM_INVALIDO",
-                            "status_banco": "PARAM_INVALIDO",
-                            "mensagem": (
-                                f"Parâmetros inválidos: inst_id={inst_id_alvo}, sid={sid_alvo}, serial={serial_alvo}. "
-                                "inst_id, sid e serial são obrigatórios e devem ser inteiros estritamente positivos (> 0)."
-                            ),
-                        },
-                        ensure_ascii=False,
-                    )
+                if not prep["requer_aprovacao"]:
                     st.session_state.llm_messages.append(
                         {
                             "role": "tool",
                             "tool_call_id": tool_call.id,
                             "name": nome_funcao,
-                            "content": resultado_tool,
+                            "content": prep["resultado_tool"],
                         }
                     )
-                    yield f"⚠️ **Parâmetros Inválidos (PARAM_INVALIDO):** `inst_id={inst_id_alvo}, sid={sid_alvo}, serial={serial_alvo}`. Intervenção cancelada sem conexão."
-                    continue
-                inst_id_int, sid_int, serial_int = params_validados
-
-                # 2. Pré-consulta do alvo na GV$SESSION via conta DIAG
-                yield f"🔍 Consultando sessão `inst_id={inst_id_int}, sid={sid_int}, serial={serial_int}` via DIAG..."
-                check_alvo = consultar_alvo_sessao_diag(
-                    inst_id=inst_id_int, sid=sid_int, serial=serial_int
-                )
-
-                if not check_alvo.get("elegivel"):
-                    motivo_falha = check_alvo.get("motivo", "ALVO_NAO_ENCONTRADO")
-                    resultado_tool = json.dumps(
-                        {
-                            "status": "recusado",
-                            "motivo": motivo_falha,
-                            "status_banco": motivo_falha,
-                            "mensagem": check_alvo.get(
-                                "mensagem",
-                                "Sessão não encontrada na GV$SESSION.",
-                            ),
-                        },
-                        ensure_ascii=False,
+                    detalhe = json.loads(prep["resultado_tool"]).get("mensagem", "")
+                    yield (
+                        f"⚠️ **Alvo Recusado ({prep['motivo']}):** {detalhe} "
+                        "Ação cancelada sem solicitação de aprovação."
                     )
-                    st.session_state.llm_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": nome_funcao,
-                            "content": resultado_tool,
-                        }
-                    )
-                    yield f"⚠️ **Alvo Recusado ({motivo_falha}):** {check_alvo.get('mensagem', 'Alvo não elegível na GV$SESSION.')} Ação cancelada sem solicitação de aprovação."
                     continue
 
-                # 3. Alvo localizado: gera hash SHA-256 e ativa barreira HITL
-                dados_alvo = check_alvo["alvo"]
-                ts_aprovacao = datetime.now(timezone.utc).isoformat()
-                payload_dict, hash_sha256 = gerar_payload_e_hash_aprovacao(
-                    ferramenta=nome_funcao,
-                    parametros={"inst_id": inst_id_int, "sid": sid_int, "serial": serial_int},
-                    alvo=dados_alvo,
-                    timestamp=ts_aprovacao,
-                )
+                inst_id_int, sid_int, serial_int = prep["inst_id"], prep["sid"], prep["serial"]
+                dados_alvo = prep["alvo"]
+                hash_sha256 = prep["hash_identidade"]
+                ts_aprovacao = prep["timestamp"]
 
                 calls_restantes = mensagem_resposta.tool_calls[idx + 1 :]
                 st.session_state.hitl_pendente = {

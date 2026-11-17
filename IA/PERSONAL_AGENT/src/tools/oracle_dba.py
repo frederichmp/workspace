@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 import socket
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import oracledb
 from dotenv import load_dotenv
@@ -1140,6 +1140,135 @@ def registrar_decisao_kill(
         "email_enviado": email_enviado,
         "email_detalhe": email_detalhe,
     }
+
+
+def preparar_intervencao_kill(
+    argumentos: Dict[str, Any], ferramenta: str = "matar_sessao_oracle"
+) -> Dict[str, Any]:
+    """
+    Etapa anterior à aprovação humana, comum à CLI (main.py) e à Web UI (app.py):
+      1. valida inst_id, sid e serial (obrigatórios) sem consulta nem conexão;
+      2. pré-consulta o alvo pela conta DIAG (existência, TYPE e usuário protegido);
+      3. para alvo elegível, gera o payload e o hash de identidade a exibir ao aprovador.
+
+    Retorna requer_aprovacao=False com motivo e resultado_tool (JSON para o LLM) quando o alvo
+    deve ser recusado sem prompt; ou requer_aprovacao=True com inst_id, sid, serial, alvo,
+    hash_identidade, payload e timestamp.
+    """
+    inst_id = argumentos.get("inst_id")
+    sid = argumentos.get("sid")
+    serial = argumentos.get("serial")
+
+    validados = validar_parametros_kill(inst_id, sid, serial)
+    if validados is None:
+        logger.warning(f"HITL RECUSADO LOCALMENTE: PARAM_INVALIDO | inst_id={inst_id}, sid={sid}, serial={serial}")
+        return {
+            "requer_aprovacao": False,
+            "motivo": "PARAM_INVALIDO",
+            "resultado_tool": json.dumps(
+                {
+                    "status": "recusado",
+                    "motivo": "PARAM_INVALIDO",
+                    "status_banco": "PARAM_INVALIDO",
+                    "mensagem": (
+                        f"Parâmetros inválidos: inst_id={inst_id}, sid={sid}, serial={serial}. "
+                        "inst_id, sid e serial são obrigatórios e devem ser inteiros estritamente positivos (> 0)."
+                    ),
+                },
+                ensure_ascii=False,
+            ),
+        }
+    inst_id_int, sid_int, serial_int = validados
+
+    check_alvo = consultar_alvo_sessao_diag(inst_id=inst_id_int, sid=sid_int, serial=serial_int)
+    if not check_alvo.get("elegivel"):
+        motivo = check_alvo.get("motivo", "ALVO_NAO_ENCONTRADO")
+        logger.warning(
+            f"HITL CANCELADO: alvo recusado na pré-consulta GV$SESSION | "
+            f"inst_id={inst_id_int}, sid={sid_int}, serial={serial_int} | Motivo={motivo}"
+        )
+        return {
+            "requer_aprovacao": False,
+            "motivo": motivo,
+            "alvo": check_alvo.get("alvo"),
+            "mensagem": check_alvo.get("mensagem", "Alvo não elegível na GV$SESSION."),
+            "resultado_tool": json.dumps(
+                {
+                    "status": "recusado",
+                    "motivo": motivo,
+                    "status_banco": motivo,
+                    "mensagem": check_alvo.get("mensagem", "Alvo não elegível na GV$SESSION."),
+                },
+                ensure_ascii=False,
+                default=str,
+            ),
+        }
+
+    alvo = check_alvo["alvo"]
+    timestamp = datetime.now(timezone.utc).isoformat()
+    payload, hash_identidade = gerar_payload_e_hash_aprovacao(
+        ferramenta=ferramenta,
+        parametros={"inst_id": inst_id_int, "sid": sid_int, "serial": serial_int},
+        alvo=alvo,
+        timestamp=timestamp,
+    )
+    return {
+        "requer_aprovacao": True,
+        "motivo": None,
+        "inst_id": inst_id_int,
+        "sid": sid_int,
+        "serial": serial_int,
+        "alvo": alvo,
+        "hash_identidade": hash_identidade,
+        "payload": payload,
+        "timestamp": timestamp,
+    }
+
+
+def conduzir_kill_hitl(
+    argumentos: Dict[str, Any],
+    solicitar_aprovacao: Callable[[Dict[str, Any]], Tuple[str, str, Optional[str]]],
+    canal: str,
+    caminho_log: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Fluxo síncrono completo (usado pela CLI): preparar -> solicitar aprovação -> registrar decisão.
+
+    solicitar_aprovacao recebe o resultado de preparar_intervencao_kill e devolve
+    (decisao, aprovador, motivo). Só é chamado quando o alvo é elegível; recusas da
+    pré-consulta (PARAM_INVALIDO, ALVO_NAO_ENCONTRADO, NAO_USUARIO, USUARIO_PROTEGIDO, ...)
+    retornam sem prompt e sem chamada à conta KILL.
+    """
+    prep = preparar_intervencao_kill(argumentos)
+    if not prep["requer_aprovacao"]:
+        return {
+            "prompt_exibido": False,
+            "decisao": None,
+            "resultado_banco": None,
+            "executado": False,
+            "motivo": prep["motivo"],
+            "resultado_tool": prep["resultado_tool"],
+            "assunto_email": None,
+            "email_enviado": None,
+            "email_detalhe": None,
+        }
+
+    decisao, aprovador, motivo = solicitar_aprovacao(prep)
+    desfecho = registrar_decisao_kill(
+        decisao=decisao,
+        aprovador=aprovador,
+        inst_id=prep["inst_id"],
+        sid=prep["sid"],
+        serial=prep["serial"],
+        alvo=prep["alvo"],
+        hash_aprovado=prep["hash_identidade"],
+        canal=canal,
+        motivo=motivo,
+        caminho_log=caminho_log,
+    )
+    desfecho["prompt_exibido"] = True
+    desfecho["aprovador"] = (aprovador or "").strip()
+    return desfecho
 
 
 # Schema no padrão OpenAI Tool Calling para exportação ao Orquestrador
