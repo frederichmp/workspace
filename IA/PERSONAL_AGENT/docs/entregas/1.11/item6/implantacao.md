@@ -237,7 +237,7 @@ O clone de arquivo **não substitui** nenhum desses passos. A checagem de `DBA_E
 | 1 | Aprovar o texto do SQL v2, da migração e do rollback | Ensaio de banco em sandbox (seção 4.1), que é pré-requisito |
 | 4 | Confirmar que não há outros chamadores do pacote | Parcial: 0.2a (EXECUTE só para STARTUP_KILL) e 0.2b (seção 7.1) feitos. Faltam 0.1 (`DBA_DEPENDENCIES`), 0.3 (jobs) e 0.4 (`GV$SQL`), lidos na parte 1 |
 | 7.1 | Contas READ/MUT do executor na conferência de papéis | Nomes a informar pelo responsável |
-| 7.2 | Identificação do Database Vault (não bloqueia a janela) | Leituras de `DBA_ROLES` e `V$OPTION` (seção 7.2) |
+| 7.2 | Database Vault: **encerrada** (DV inativo). Residual: detentores de `DV_REALM_OWNER` (não bloqueia a janela) | Uma leitura de `DBA_ROLE_PRIVS` (seção 7.2) |
 
 ## 7. Resultados das leituras autorizadas (MODELO, STARTUPADMIN, somente leitura)
 
@@ -289,4 +289,12 @@ SELECT username, account_status FROM dba_users
  ORDER BY username;
 ```
 
-Critério: nenhuma conta de aplicação do projeto tem `DV_REALM_OWNER`. Se o DV não estiver habilitado, o papel existe só no catálogo e a pendência se encerra com esse registro.
+Critério: nenhuma conta de aplicação do projeto tem `DV_REALM_OWNER`. **Correção:** uma versão anterior deste critério dizia que, com o DV desabilitado, o papel "existe só no catálogo" e a pendência se encerraria. Isso está impreciso. Um papel concedido vale com o DV ativo ou não, e `DV_REALM_OWNER` tem `EXECUTE ANY PROCEDURE` (0.2b). Desabilitar o DV elimina as regras de DV, mas não esse privilégio.
+
+**Resultado (leitura autorizada, MODELO, 2026-11-17), ENCERRADA pelo responsável:**
+- `V$OPTION` 'Oracle Database Vault' = FALSE.
+- `DBA_DV_STATUS` `DV_CONFIGURE_STATUS` = FALSE.
+- 15 papéis `DV_*` presentes no catálogo, sem ativação.
+- Conclusão: Database Vault inativo; nenhuma regra de DV bloqueia `ALTER SYSTEM` ou KILL neste banco.
+
+**Checagem residual (não bloqueante, leitura):** quem detém `DV_REALM_OWNER`, direta ou indiretamente. Ela ainda não foi relatada; a leitura de 7.1 cobriu só `EXP_FULL_DATABASE` e `IMP_FULL_DATABASE`. A segunda consulta acima (`START WITH granted_role = 'DV_REALM_OWNER'`) responde a isso. Esperado: nenhuma conta de aplicação.
