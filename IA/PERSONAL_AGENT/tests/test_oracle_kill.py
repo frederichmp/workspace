@@ -565,6 +565,31 @@ def test_registro_log_contem_decisao_e_resultado_banco_separados(monkeypatch, tm
     assert "senha-fake" not in conteudo
 
 
+def test_log_real_de_aprovacao_intacto(snapshot_log_real_inicio):
+    """O log real de aprovação (stat apenas) não mudou desde o início da sessão."""
+    real = Path(__file__).resolve().parent.parent / "data" / "logs" / "kill_approval.log"
+    try:
+        st = real.stat()
+        atual = (True, st.st_size, st.st_mtime_ns)
+    except FileNotFoundError:
+        atual = (False, None, None)
+    assert atual == snapshot_log_real_inicio
+
+
+def test_caminho_padrao_redirecionado(isolar_log_aprovacao):
+    """registrar_log_aprovacao_kill sem caminho_log grava no tmp redirecionado, não no real."""
+    real = Path(__file__).resolve().parent.parent / "data" / "logs" / "kill_approval.log"
+    assert oracle_dba.CAMINHO_LOG_APROVACAO_PADRAO == isolar_log_aprovacao
+    assert isolar_log_aprovacao != real
+    assert not isolar_log_aprovacao.exists()
+
+    registrar_log_aprovacao_kill("dba_teste", "REJEITADO", "hash-fake", {"sid": 1}, motivo="TESTE")
+
+    assert isolar_log_aprovacao.exists()
+    registro = json.loads(isolar_log_aprovacao.read_text(encoding="utf-8").splitlines()[0])
+    assert registro["aprovador"] == "dba_teste"
+
+
 # =============================================================================
 # B. TESTES EM AMBIENTE DE SANDBOX (REQUER ORACLE_SANDBOX=1)
 # =============================================================================

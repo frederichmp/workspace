@@ -24,6 +24,9 @@ from .notificador import enviar_alerta_email
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
+# Log padrão de aprovações de kill (lido em tempo de chamada; testes o redirecionam)
+CAMINHO_LOG_APROVACAO_PADRAO = ROOT_DIR / "data" / "logs" / "kill_approval.log"
+
 logger = logging.getLogger(__name__)
 
 # Decisões humanas possíveis sobre uma intervenção de kill
@@ -945,7 +948,7 @@ def registrar_log_aprovacao_kill(
         raise ValueError(f"Decisão inválida: {decisao!r}. Esperado um de {DECISOES_KILL}.")
 
     if caminho_log is None:
-        caminho_log = ROOT_DIR / "data" / "logs" / "kill_approval.log"
+        caminho_log = CAMINHO_LOG_APROVACAO_PADRAO
 
     caminho_log.parent.mkdir(parents=True, exist_ok=True)
 
