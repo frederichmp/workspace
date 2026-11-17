@@ -463,3 +463,9 @@ SELECT o.object_name, o.created, o.last_ddl_time, t.last_analyzed, t.num_rows
   - `dba_tab_privs` de `OPS_OWNER.PKG_OPS_KILL` após a execução: `STARTUP_KILL` / `EXECUTE`.
 - **Origem do grant de `STARTUP_KILL`: NÃO CONFIRMADA.** Pode ter sido executado nesta rodada ou ser o grant pré-existente. Será registrada conforme a resposta do responsável, que ainda não veio. Nota da sessão principal: `DBMS_METADATA.GET_DEPENDENT_DDL('OBJECT_GRANT', ...)` (passo 1) devolve o **texto** do GRANT existente, sem executá-lo. Se ele tiver sido executado, o efeito é nulo, porque o grant já existia (0.2a).
 - **Log sequencial da parte 1: não gerado** (a transcrição saiu misturada). Fica registrado **apenas o estado final**. As saídas das pré-condições do passo 0 nesta execução não foram registradas por esse arquivo; as leituras equivalentes estão nas seções 7, 7.1 a 7.5.
+
+**Bloqueio da parte 2 (registro do responsável, 2026-11-17)**
+- **Python atual (v1), conferido no código sem alteração** (`src/tools/oracle_dba.py:730-745`, último commit do arquivo `ed75f0f`): um único `cursor.execute` com o bloco `BEGIN OPS_OWNER.PKG_OPS_KILL.KILL_SESSION(...); END;` e **4 associações `=>`**: `p_inst_id => :p_inst_id`, `p_sid => :p_sid`, `p_serial => :p_serial`, `p_status => :p_status`. Os binds são `p_inst_id=inst_id_int`, `p_sid=sid_int`, `p_serial=serial_int`, `p_status=status_var`.
+- **Python v2 não está implementado.** A chamada com 9 associações (seção 2a) existe só como proposta.
+- **A parte 2 está BLOQUEADA** até o item 6 do plano 1.11 ser **implementado, testado e revisado**. Antes disso, executá-la deixaria o kill indisponível: o Python v1, com 4 argumentos, contra a spec v2 dá PLS-00306.
+- **Estado atual em MODELO:** parte 1 aplicada (colunas aditivas), spec e body v1 VALID, Python v1 compatível. O kill v1 continua disponível.
