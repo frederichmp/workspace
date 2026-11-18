@@ -50,6 +50,8 @@ class _CursorFake:
 
     def execute(self, sql, **binds):
         self.oracle.sql_executado.append((self.conta, sql, binds))
+        if self.conta == "KILL" and self.oracle.erro_kill is not None:
+            raise self.oracle.erro_kill  # exceção levantada A PARTIR do execute da conta KILL
         if self.conta == "DIAG" and _eh_consulta_alvo(sql):
             self._linha = self.oracle.linhas_diag.pop(0) if self.oracle.linhas_diag else None
 
@@ -78,10 +80,12 @@ class _ConexaoFake:
 class _OracleFake:
     """Simula oracledb.connect: fila de linhas para a conta DIAG e p_status para a conta KILL."""
 
-    def __init__(self, linhas_diag, status_pkg=None, kill_permitido=True):
+    def __init__(self, linhas_diag, status_pkg=None, kill_permitido=True, erro_kill=None, erro_connect_kill=None):
         self.linhas_diag = list(linhas_diag)
         self.status_pkg = status_pkg
         self.kill_permitido = kill_permitido
+        self.erro_kill = erro_kill  # exceção levantada pelo execute da conta KILL
+        self.erro_connect_kill = erro_connect_kill  # exceção levantada pelo connect da conta KILL
         self.conexoes = []
         self.sql_executado = []
 
@@ -90,6 +94,8 @@ class _OracleFake:
         if user == USER_KILL_FAKE:
             if not self.kill_permitido:
                 pytest.fail("oracledb.connect não deve ser chamado para a conta KILL neste cenário")
+            if self.erro_connect_kill is not None:
+                raise self.erro_connect_kill
             return _ConexaoFake(self, "KILL")
         if user == USER_DIAG_FAKE:
             return _ConexaoFake(self, "DIAG")

@@ -49,7 +49,9 @@ from tools.oracle_dba import (
     coletar_top_sql,
     coletar_plano_execucao,
     conduzir_kill_hitl,
+    reconciliar_intencoes_orfas,
     APROVACAO_TTL_SEGUNDOS,
+    MENSAGEM_RESULTADO_DESCONHECIDO,
 )
 
 # 3. Importando a Ferramenta de Nuvem (Gemini), o Notificador SMTP e a Busca RAG Local
@@ -151,6 +153,19 @@ def _exibir_desfecho_kill_cli(desfecho: dict) -> None:
         )
     elif desfecho["decisao"] != "APROVADO":
         print(f"[Sistema]: Intervenção NÃO aprovada ({desfecho['motivo']}). Nenhuma execução no banco.")
+    elif desfecho.get("motivo") == "FALHA_LOG_APROVACAO":
+        print(
+            f"\033[91m[Sistema]: Intervenção APROVADA por '{desfecho['aprovador']}', mas NÃO EXECUTADA: "
+            "falha ao gravar o registro de aprovação (FALHA_LOG_APROVACAO). "
+            "Nenhuma chamada à conta KILL foi feita. Incidente registrado no log da aplicação "
+            f"(id_intervencao={desfecho.get('id_intervencao')}).\033[0m"
+        )
+    elif desfecho.get("resultado_desconhecido"):
+        print(
+            f"\033[91m[Sistema]: Intervenção APROVADA por '{desfecho['aprovador']}': "
+            f"{MENSAGEM_RESULTADO_DESCONHECIDO} (erro do Oracle a partir da chamada ao PKG; "
+            f"resultado: {desfecho['resultado_banco']}).\033[0m"
+        )
     elif desfecho["executado"]:
         print(
             f"[Sistema]: Intervenção APROVADA por '{desfecho['aprovador']}' e EXECUTADA COM SUCESSO "
@@ -161,8 +176,35 @@ def _exibir_desfecho_kill_cli(desfecho: dict) -> None:
             f"\033[93m[Sistema]: Intervenção APROVADA por '{desfecho['aprovador']}', mas NÃO EXECUTADA "
             f"(resultado: {desfecho['resultado_banco']}).\033[0m"
         )
+    if desfecho.get("falha_registro") == "RESULTADO":
+        print(
+            "\033[91m[Sistema]: ATENÇÃO: a linha RESULTADO não foi gravada em kill_approval.log; "
+            "registro completo no log da aplicação (CRITICAL), "
+            f"id_intervencao={desfecho.get('id_intervencao')}.\033[0m"
+        )
     if desfecho.get("assunto_email"):
         print(f"[Sistema]: Notificação por e-mail ({desfecho['assunto_email']}): {desfecho['email_detalhe']}")
+
+
+MENSAGEM_ERRO_INTERNO_KILL = "ERRO interno no fluxo de kill; estado desconhecido"
+
+
+def _reconciliar_na_subida_cli() -> None:
+    """Reconciliador na subida: INTENCAO sem RESULTADO antiga vira NAO_CONCLUIDA. Nunca levanta exceção."""
+    try:
+        resumo = reconciliar_intencoes_orfas()
+    except Exception as exc:
+        logging.error(f"Reconciliação do log de aprovações não executada: {type(exc).__name__}")
+        print(
+            "\033[93m[Sistema]: Reconciliação do log de aprovações NÃO executada "
+            f"({type(exc).__name__}).\033[0m"
+        )
+        return
+    for id_reg in resumo["reconciliadas"]:
+        print(
+            f"\033[93m[Sistema]: Intervenção não concluída (INTENCAO sem RESULTADO), id_intervencao={id_reg}. "
+            "Conferir OPS_KILL_AUDIT.\033[0m"
+        )
 
 
 def executar_agente(prompt_usuario: str) -> None:
@@ -265,9 +307,22 @@ def executar_agente(prompt_usuario: str) -> None:
                     )
 
             except Exception as e:
-                resultado_tool = json.dumps(
-                    {"erro_execucao": str(e)}, ensure_ascii=False
-                )
+                if nome_funcao == "matar_sessao_oracle":
+                    # Achado 9.3: erro no fluxo de kill não pode ser silencioso
+                    logging.error(f"{MENSAGEM_ERRO_INTERNO_KILL}: {type(e).__name__}")
+                    print(f"[Sistema]: {MENSAGEM_ERRO_INTERNO_KILL}")
+                    resultado_tool = json.dumps(
+                        {
+                            "status": "erro",
+                            "executado": None,
+                            "mensagem": f"{MENSAGEM_ERRO_INTERNO_KILL}; consulte OPS_KILL_AUDIT.",
+                        },
+                        ensure_ascii=False,
+                    )
+                else:
+                    resultado_tool = json.dumps(
+                        {"erro_execucao": str(e)}, ensure_ascii=False
+                    )
 
             # 4. Auditoria: Registra a evidência/resultado retornado pelo banco ou pelo bloqueio HITL
             if (
@@ -298,6 +353,7 @@ def executar_agente(prompt_usuario: str) -> None:
 
 if __name__ == "__main__":
     print("Iniciando Agente Híbrido (Windows + Oracle + Gemini Cloud + HITL + RAG Local)...")
+    _reconciliar_na_subida_cli()
 
     # Teste 5: Busca RAG Local na Base de Scripts Homologados do DBA
     executar_agente(

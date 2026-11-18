@@ -5,8 +5,17 @@ e carrega o registro de testes (registry/test_scripts.yaml).
 """
 
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
+
+# ATENÇÃO: definido ANTES de qualquer import de código de produção. O diretório do log de aprovações
+# (AGENTDBA_LOG_DIR) aponta para um diretório temporário em %TEMP% (fora do OneDrive), de modo que
+# nenhum teste grave em C:\AgentDBA nem em data/logs/ do repositório.
+_DIR_LOG_TESTE = tempfile.mkdtemp(prefix="agentdba_test_")
+os.environ["AGENTDBA_LOG_DIR"] = _DIR_LOG_TESTE
+
 import pytest
 
 # Configura SCRIPTS_REGISTRY_PATH para apontar para test_scripts.yaml durante os testes (L8)
@@ -36,6 +45,23 @@ def _snapshot_log_real():
 
 SNAPSHOT_LOG_REAL_INICIO = _snapshot_log_real()
 
+# Padrão de produção (DIRETORIO_LOG_PADRAO): a suíte não pode criar a pasta nem alterar o log.
+PASTA_PADRAO_PRODUCAO = Path(r"C:\AgentDBA")
+LOG_PADRAO_PRODUCAO = Path(r"C:\AgentDBA\logs\kill_approval.log")
+
+
+def _snapshot_arquivo(caminho):
+    """Retorna (existe, tamanho, mtime_ns) usando apenas stat (sem ler conteúdo)."""
+    try:
+        st = caminho.stat()
+    except OSError:
+        return (False, None, None)
+    return (True, st.st_size, st.st_mtime_ns)
+
+
+SNAPSHOT_LOG_PADRAO_INICIO = _snapshot_arquivo(LOG_PADRAO_PRODUCAO)
+PASTA_PADRAO_EXISTIA_NO_INICIO = PASTA_PADRAO_PRODUCAO.exists()
+
 
 @pytest.fixture(scope="session")
 def snapshot_log_real_inicio():
@@ -63,6 +89,19 @@ def pytest_sessionfinish(session, exitstatus):
             f"de testes (início={SNAPSHOT_LOG_REAL_INICIO}, fim={final})."
         )
         session.exitstatus = 1
+
+    final_padrao = _snapshot_arquivo(LOG_PADRAO_PRODUCAO)
+    if final_padrao != SNAPSHOT_LOG_PADRAO_INICIO:
+        print(
+            "\nFALHA DE GOVERNANCA: C:\\AgentDBA\\logs\\kill_approval.log foi alterado durante a sessão "
+            f"de testes (início={SNAPSHOT_LOG_PADRAO_INICIO}, fim={final_padrao})."
+        )
+        session.exitstatus = 1
+    if not PASTA_PADRAO_EXISTIA_NO_INICIO and PASTA_PADRAO_PRODUCAO.exists():
+        print("\nFALHA DE GOVERNANCA: a suíte de testes criou C:\\AgentDBA.")
+        session.exitstatus = 1
+
+    shutil.rmtree(_DIR_LOG_TESTE, ignore_errors=True)
 
 
 def pytest_runtest_setup(item):

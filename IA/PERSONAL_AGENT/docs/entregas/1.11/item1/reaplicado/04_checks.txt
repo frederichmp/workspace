@@ -1,0 +1,162 @@
+== ls C:/AgentDBA
+ls: cannot access 'C:/AgentDBA': No such file or directory
+== status data/
+== 4a
+== 4b
+== 4c
+== 4d
+== 4e
+Binary file src/tools/__pycache__/executor.cpython-315.pyc matches
+Binary file src/tools/__pycache__/gemini_router.cpython-315.pyc matches
+Binary file src/tools/__pycache__/notificador.cpython-315.pyc matches
+Binary file src/tools/__pycache__/oracle_dba.cpython-315.pyc matches
+Binary file src/tools/__pycache__/os_tools.cpython-315.pyc matches
+Binary file src/tools/__pycache__/payloads.cpython-315.pyc matches
+Binary file src/tools/__pycache__/rag_search.cpython-315.pyc matches
+Binary file src/tools/__pycache__/registry.cpython-315.pyc matches
+Binary file src/tools/__pycache__/__init__.cpython-315.pyc matches
+Binary file src/__pycache__/main.cpython-315.pyc matches
+Binary file src/__pycache__/__init__.cpython-315.pyc matches
+tests/conftest.py:14:# (AGENTDBA_LOG_DIR) aponta para um diretório temporário em %TEMP% (fora do OneDrive), de modo que
+tests/test_item1_intencao.py:969:# Pasta do log: criação só na gravação, padrão fora do OneDrive, .env.example
+tests/test_item1_intencao.py:1024:    """AGENTDBA_LOG_DIR (tmp, fora do OneDrive) já valia quando o módulo de produção foi importado."""
+tests/test_item1_intencao.py:1028:    assert "onedrive" not in str(destino).lower()
+tests/test_item1_intencao.py:1031:def test_padrao_fora_do_onedrive():
+tests/test_item1_intencao.py:1033:    assert "onedrive" not in oracle_dba.DIRETORIO_LOG_PADRAO.lower()
+tests/test_item1_intencao.py:1037:def test_env_example_log_dir_sem_onedrive():
+tests/test_item1_intencao.py:1043:    assert "onedrive" not in "\n".join(linhas).lower()
+Binary file tests/__pycache__/conftest.cpython-315-pytest-9.2.0.pyc matches
+Binary file tests/__pycache__/fakes_oracle.cpython-315.pyc matches
+Binary file tests/__pycache__/test_corpus_adversarial.cpython-315-pytest-9.2.0.pyc matches
+Binary file tests/__pycache__/test_executor.cpython-315-pytest-9.2.0.pyc matches
+Binary file tests/__pycache__/test_fluxo_cli.cpython-315-pytest-9.2.0.pyc matches
+Binary file tests/__pycache__/test_fluxo_web.cpython-315-pytest-9.2.0.pyc matches
+Binary file tests/__pycache__/test_item1_intencao.cpython-315-pytest-9.2.0.pyc matches
+Binary file tests/__pycache__/test_oracle_kill.cpython-315-pytest-9.2.0.pyc matches
+Binary file tests/__pycache__/test_privilegio_read.cpython-315-pytest-9.2.0.pyc matches
+Binary file tests/__pycache__/test_privilegio_write_sandbox.cpython-315-pytest-9.2.0.pyc matches
+Binary file tests/__pycache__/__init__.cpython-315.pyc matches
+== 4f
+== 4g
+1043:    fd = os.open(str(caminho_lock), os.O_RDWR | os.O_CREAT, 0o600)
+1066:    fd = os.open(str(diretorio), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+1079:    with open(caminho_log, "a+b") as f:
+1209:            with open(destino, "rb") as f:
+== 4h
+== 4i
+778:                    p_inst_id => :p_inst_id,
+779:                    p_sid     => :p_sid,
+780:                    p_serial  => :p_serial,
+781:                    p_status  => :p_status
+== 4j
+src/main.py:30:        logging.FileHandler(LOG_FILE_ROOT, encoding="utf-8"),
+src/main.py:31:        logging.FileHandler(LOG_FILE_DATA, encoding="utf-8"),
+app.py:44:        logging.FileHandler(LOG_FILE_ROOT, encoding="utf-8"),
+app.py:45:        logging.FileHandler(LOG_FILE_DATA, encoding="utf-8"),
+== 4k
+[4k vazio acima se nada]
+== 5 tests diff
+133:+    assert len(r.linhas) == 2
+135:+    assert intencao["fase"] == "INTENCAO" and intencao["decisao"] == "APROVADO"
+136:+    assert intencao["resultado_banco"] is None
+137:+    assert resultado["fase"] == "RESULTADO"
+138:+    assert intencao["id_intervencao"] == resultado["id_intervencao"]
+139:+    assert re.fullmatch(r"[0-9a-f]{32}", resultado["id_intervencao"])
+183:+def test_cli_falha_log_aprovacao(cenario, monkeypatch):
+191:+    assert r.consultas_diag == 1, "sem reconsulta DIAG depois da decisão"
+192:+    assert len(r.oracle.conexoes_kill) == 0
+193:+    assert r.emails == []
+194:+    assert "NÃO EXECUTADA" in r.tela
+195:+    assert "nenhuma chamada à conta kill" in r.tela.lower()
+196:+    assert "FALHA_LOG_APROVACAO" in r.tela
+197:+    assert r.json_tool["motivo"] == "FALHA_LOG_APROVACAO" and r.json_tool["executado"] is False
+198:+    assert "FALHA_LOG_APROVACAO" in r.log
+202:+def test_cli_excecao_rota_kill(cenario, monkeypatch):
+212:+    assert "[Sistema]: ERRO interno no fluxo de kill; estado desconhecido" in r.tela
+213:+    assert r.json_tool["executado"] is None
+214:+    assert "estado desconhecido" in r.json_tool["mensagem"]
+215:+    assert "detalhe-interno-xyz" not in json.dumps(r.json_tool)
+216:+    assert len(r.oracle.conexoes_kill) == 0
+220:+def test_cli_resultado_desconhecido(cenario):
+229:+    assert "resultado desconhecido: conferir sessão" in r.tela
+230:+    assert "resultado desconhecido: conferir sessão" in r.emails[0][0]
+231:+    assert "NÃO executada" not in r.emails[0][0]
+232:+    assert r.json_tool["resultado_desconhecido"] is True
+233:+    assert "resultado desconhecido: conferir sessão" in r.json_tool["mensagem"]
+234:+    assert r.json_tool["executado"] is False
+235:+    assert od.MENSAGEM_RESULTADO_DESCONHECIDO == "resultado desconhecido: conferir sessão"
+238:+def test_cli_reconciliador_na_subida(main_cli, isolar_log_aprovacao, capsys):
+252:+    assert "d" * 32 in tela and "OPS_KILL_AUDIT" in tela
+254:+    assert [l["fase"] for l in linhas] == ["INTENCAO", "RESULTADO"]
+255:+    assert linhas[1]["resultado_banco"] == "NAO_CONCLUIDA" and linhas[1]["motivo"] == "RECONCILIADO_NA_SUBIDA"
+258:+    assert len(isolar_log_aprovacao.read_text(encoding="utf-8").splitlines()) == 2
+259:+    assert "d" * 32 not in capsys.readouterr().out
+262:+def test_cli_reconciliador_falha_nao_derruba(main_cli, monkeypatch, capsys):
+271:+    assert "Reconciliação do log de aprovações NÃO executada" in capsys.readouterr().out
+292:+        assert len(regs) == 2
+294:+        assert intencao["fase"] == "INTENCAO" and intencao["decisao"] == "APROVADO"
+295:+        assert intencao["resultado_banco"] is None
+296:+        assert resultado["fase"] == "RESULTADO"
+297:+        assert intencao["id_intervencao"] == resultado["id_intervencao"]
+298:+        assert re.fullmatch(r"[0-9a-f]{32}", resultado["id_intervencao"])
+341:+def test_web_falha_log_aprovacao(montar_web, monkeypatch):
+352:+    assert amb.oracle.conexoes.count(USER_DIAG_FAKE) == 1, "sem reconsulta DIAG depois da decisão"
+353:+    assert amb.oracle.conexoes_kill == []
+354:+    assert amb.emails == []
+357:+    assert any("NÃO EXECUTADA" in t and "Nenhuma chamada à conta KILL" in t for t in textos)
+358:+    assert amb.at.session_state.hitl_pendente is None
+359:+    assert _painel_ausente(amb.at)
+361:+    assert devolvido["motivo"] == "FALHA_LOG_APROVACAO" and devolvido["executado"] is False
+364:+def test_web_excecao_em_registrar_decisao(montar_web, monkeypatch):
+377:+    assert amb.at.session_state.hitl_pendente is None
+378:+    assert _painel_ausente(amb.at)
+379:+    assert any("estado desconhecido" in t for t in amb.textos_tela())
+381:+    assert len(tools) == 1
+383:+    assert conteudo["executado"] is None and "estado desconhecido" in conteudo["mensagem"]
+384:+    assert "OPS_KILL_AUDIT" in conteudo["mensagem"]
+385:+    assert "detalhe-interno-xyz" not in tools[0]["content"]
+386:+    assert len(amb.mensagens_llm) == 1, "sem fechamento pelo LLM depois do erro interno"
+387:+    assert amb.oracle.conexoes_kill == [] and amb.emails == []
+390:+def test_web_clique_repetido_nao_reaproveita_pendencia(montar_web, monkeypatch):
+404:+    assert vistos == [None]
+407:+def test_web_resultado_desconhecido(montar_web):
+417:+    assert amb.oracle.conexoes_kill == [USER_KILL_FAKE]
+418:+    assert any("resultado desconhecido: conferir sessão" in t for t in amb.textos_tela())
+419:+    assert len(amb.emails) == 1
+420:+    assert "resultado desconhecido: conferir sessão" in amb.emails[0]["assunto"]
+421:+    assert "NÃO executada" not in amb.emails[0]["assunto"]
+423:+    assert devolvido["resultado_desconhecido"] is True and devolvido["executado"] is False
+424:+    assert "resultado desconhecido: conferir sessão" in devolvido["mensagem"]
+437:+def test_web_reconciliador_na_subida(montar_web):
+443:+    assert not amb.at.exception
+445:+    assert amb.at.session_state.reconciliacao_kill["reconciliadas"] == ["e" * 32]
+446:+    assert any("e" * 32 in w and "OPS_KILL_AUDIT" in w for w in amb.avisos())
+448:+    assert [r["fase"] for r in regs] == ["INTENCAO", "RESULTADO"]
+449:+    assert regs[1]["resultado_banco"] == "NAO_CONCLUIDA" and regs[1]["motivo"] == "RECONCILIADO_NA_SUBIDA"
+452:+    assert len(amb.registros()) == 2
+455:+def test_web_reconciliador_falha_nao_quebra_o_app(montar_web, monkeypatch):
+465:+    assert not amb.at.exception
+466:+    assert any("Reconciliação do log de aprovações NÃO executada" in w for w in amb.avisos())
+467:+    assert amb.at.session_state.reconciliacao_kill["erro"] == "LockLogAprovacaoIndisponivel"
+503:+    assert reg["fase"] == "RESULTADO"
+511:-    assert len(registros) == 1
+512:-    assert registros[0]["decisao"] == "APROVADO"
+513:-    assert registros[0]["motivo"] is None
+514:+    assert len(registros) == 2  # decisão 1: INTENCAO + RESULTADO
+516:+    assert intencao["fase"] == "INTENCAO"
+517:+    assert intencao["decisao"] == "APROVADO"
+518:+    assert intencao["resultado_banco"] is None
+519:+    assert resultado["fase"] == "RESULTADO"
+520:+    assert intencao["id_intervencao"] == resultado["id_intervencao"]
+521:+    assert re.fullmatch(r"[0-9a-f]{32}", resultado["id_intervencao"])
+522:+    assert resultado["decisao"] == "APROVADO"
+523:+    assert resultado["motivo"] is None
+531:-    assert len(registros) == 2
+533:+    assert len(registros) == 3  # decisão 1: INTENCAO + RESULTADO do aprovado, mais o REJEITADO
+539:+    assert intencao["fase"] == "INTENCAO"
+540:+    assert intencao["decisao"] == "APROVADO"
+541:+    assert intencao["resultado_banco"] is None
+542:+    assert aprovado["fase"] == "RESULTADO"
+543:+    assert intencao["id_intervencao"] == aprovado["id_intervencao"]
+544:+    assert re.fullmatch(r"[0-9a-f]{32}", aprovado["id_intervencao"])
+545:+    assert rejeitado["fase"] == "RESULTADO"

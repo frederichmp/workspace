@@ -4,6 +4,7 @@ Aplica isolamento estrito de credenciais via variáveis de ambiente (.env),
 papéis segregados (ORACLE_USER_DIAG para leitura/diagnóstico e ORACLE_USER_KILL para intervenção via PKG_OPS_KILL),
 pré-validação rápida de rede/VPN (Socket TCP), Edge Filtering e trilha de auditoria HITL.
 """
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -12,20 +13,54 @@ import os
 from pathlib import Path
 import re
 import socket
+import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+import uuid
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import oracledb
 from dotenv import load_dotenv
 
 from .notificador import enviar_alerta_email
 
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
+
 # Carrega as variáveis de ambiente do arquivo .env na raiz de IA/PERSONAL_AGENT
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
+# Diretório do log de aprovações de kill: AGENTDBA_LOG_DIR ou o padrão local, fora de pasta sincronizada.
+# A pasta só é criada na primeira gravação (os.makedirs, exist_ok); falha na criação = falha de registro.
+# Nada é criado no import.
+DIRETORIO_LOG_PADRAO = r"C:\AgentDBA\logs"
+DIRETORIO_LOG_APROVACAO = Path(os.getenv("AGENTDBA_LOG_DIR") or DIRETORIO_LOG_PADRAO)
+
 # Log padrão de aprovações de kill (lido em tempo de chamada; testes o redirecionam)
-CAMINHO_LOG_APROVACAO_PADRAO = ROOT_DIR / "data" / "logs" / "kill_approval.log"
+CAMINHO_LOG_APROVACAO_PADRAO = DIRETORIO_LOG_APROVACAO / "kill_approval.log"
+
+# Gravação do JSONL (docs/entregas/1.11/item1/decisao.md, seção a): ponto único, fsync,
+# lock de processo (threads da Web) + lock de arquivo (CLI e Web em processos distintos).
+FASES_REGISTRO_KILL: Tuple[str, ...] = ("INTENCAO", "RESULTADO")
+_REGEX_ID_INTERVENCAO = re.compile(r"[0-9a-f]{32}")
+_LOCK_LOG_APROVACAO = threading.Lock()
+_FSYNC_DIRETORIO = os.name == "posix"  # Windows: sem chamada sobre o diretório (decisão a2)
+LOCK_LOG_TIMEOUT_SEGUNDOS = 5.0
+_LOCK_LOG_INTERVALO_SEGUNDOS = 0.05
+
+# Texto exigido pelo responsável para ERRO_ORACLE a partir do execute do KILL_SESSION (2026-11-17)
+MENSAGEM_RESULTADO_DESCONHECIDO = "resultado desconhecido: conferir sessão"
+
+# Reconciliador na subida
+RESULTADO_NAO_CONCLUIDA = "NAO_CONCLUIDA"
+MOTIVO_RECONCILIADO = "RECONCILIADO_NA_SUBIDA"
+
+
+class LockLogAprovacaoIndisponivel(TimeoutError):
+    """O lock de arquivo do log de aprovações não foi obtido dentro de LOCK_LOG_TIMEOUT_SEGUNDOS."""
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +70,10 @@ DECISOES_KILL: Tuple[str, ...] = ("APROVADO", "REJEITADO", "TIMEOUT")
 # Validade da aprovação humana, contada a partir da preparação (exibição dos dados do alvo).
 # Verificação passiva no momento da decisão: APROVADO fora de [0, TTL) vira TIMEOUT.
 APROVACAO_TTL_SEGUNDOS = 300
+
+# Reconciliador na subida: só INTENCAO sem RESULTADO mais antiga que TTL + 300 s vira NAO_CONCLUIDA,
+# para não marcar uma intervenção ainda em curso em outro processo (CLI x Web).
+RECONCILIACAO_IDADE_MINIMA_SEGUNDOS = APROVACAO_TTL_SEGUNDOS + 300
 
 # Resultados de PKG_OPS_KILL que significam execução efetiva do encerramento
 RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = ("ENCERRADA", "MARCADA_PARA_KILL")
@@ -716,6 +755,10 @@ def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int]) -> str:
 
     connection: Optional[oracledb.Connection] = None
     cursor: Optional[oracledb.Cursor] = None
+    # A partir do execute, um erro do Oracle não prova que o kill deixou de acontecer:
+    # resultado desconhecido (decisão do responsável, 2026-11-17). Antes dele (connect/cursor/var),
+    # o PKG certamente não rodou.
+    execute_iniciado = False
 
     try:
         connection = oracledb.connect(
@@ -727,6 +770,7 @@ def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int]) -> str:
 
         # Execução com binds nomeados conforme contrato de segurança da PKG_OPS_KILL
         status_var = cursor.var(oracledb.DB_TYPE_VARCHAR, size=128)
+        execute_iniciado = True
         cursor.execute(
             """
             BEGIN
@@ -763,16 +807,21 @@ def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int]) -> str:
         )
 
     except oracledb.Error as db_err:
+        if execute_iniciado:
+            mensagem = f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro do Oracle a partir da chamada ao PKG: {db_err}"
+        else:
+            mensagem = str(db_err)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": "ERRO_ORACLE",
                 "status_banco": "ERRO_ORACLE",
+                "resultado_desconhecido": execute_iniciado,
                 "instancia": dsn,
                 "sid": sid_int,
                 "serial": serial_int,
                 "tipo_erro": "OracleError",
-                "mensagem": str(db_err),
+                "mensagem": mensagem,
             },
             ensure_ascii=False,
         )
@@ -859,14 +908,26 @@ def gerar_payload_e_hash_aprovacao(
     return payload, calcular_hash_identidade(alvo)
 
 
-def executar_kill_verificado(inst_id: Any, sid: Any, serial: Any, hash_aprovado: str) -> str:
+def executar_kill_verificado(
+    inst_id: Any,
+    sid: Any,
+    serial: Any,
+    hash_aprovado: str,
+    *,
+    aprovacao_expirada: Callable[[], bool],
+) -> str:
     """
     Verificação de integridade imediatamente antes do encerramento:
       1. reconsulta o alvo pela conta DIAG (consultar_alvo_sessao_diag);
       2. recalcula o hash de identidade e compara com o hash aprovado;
-      3. só então chama matar_sessao_oracle (conta KILL).
+      3. confere a elegibilidade na reconsulta;
+      4. segundo recheck de TTL (aprovacao_expirada(), última checagem antes da conta KILL);
+      5. só então chama matar_sessao_oracle (conta KILL).
     Hash divergente -> ALVO_ALTERADO, sem chamada à conta KILL, com registro no log.
     Falha na reconsulta (alvo sumiu, erro de rede/config) -> o motivo da reconsulta, sem chamada à conta KILL.
+    TTL vencido no recheck -> APROVACAO_EXPIRADA, sem chamada à conta KILL.
+    aprovacao_expirada: keyword-only, sem default. É um callable (e não preparado_em/agora) para que o
+    item 7 troque a base do TTL num único ponto (desvio do plano registrado em docs/plans/1.11.md).
     """
     reconsulta = consultar_alvo_sessao_diag(inst_id=inst_id, sid=sid, serial=serial)
 
@@ -925,7 +986,162 @@ def executar_kill_verificado(inst_id: Any, sid: Any, serial: Any, hash_aprovado:
             ensure_ascii=False,
         )
 
+    if aprovacao_expirada():
+        logger.warning(
+            f"KILL BLOQUEADO NO RECHECK DE TTL: APROVACAO_EXPIRADA | inst_id={inst_id}, sid={sid}, "
+            f"serial={serial} | TTL={APROVACAO_TTL_SEGUNDOS}s"
+        )
+        return json.dumps(
+            {
+                "status": "recusado",
+                "motivo": "APROVACAO_EXPIRADA",
+                "status_banco": "APROVACAO_EXPIRADA",
+                "mensagem": (
+                    f"A aprovação venceu ({APROVACAO_TTL_SEGUNDOS} s desde a preparação) antes da execução. "
+                    "Nenhuma chamada à conta KILL."
+                ),
+            },
+            ensure_ascii=False,
+        )
+
     return matar_sessao_oracle(sid=sid, serial=serial, inst_id=inst_id)
+
+
+def _caminho_log_efetivo(caminho_log: Optional[Path]) -> Path:
+    """Destino do JSONL: o caminho dado ou o padrão do módulo, lido no momento da chamada."""
+    return Path(caminho_log) if caminho_log is not None else CAMINHO_LOG_APROVACAO_PADRAO
+
+
+if os.name == "nt":
+
+    def _travar_arquivo(fd: int) -> None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+
+    def _destravar_arquivo(fd: int) -> None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+else:
+
+    def _travar_arquivo(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _destravar_arquivo(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+@contextmanager
+def _lock_arquivo_log(caminho_log: Path, timeout: Optional[float] = None) -> Iterator[None]:
+    """
+    Lock de SO entre processos (CLI e Web) num arquivo `<log>.lock` ao lado do log.
+    Tenta sem bloquear, com novas tentativas até `timeout` (padrão LOCK_LOG_TIMEOUT_SEGUNDOS);
+    esgotado o prazo, LockLogAprovacaoIndisponivel. O diretório já deve existir.
+    """
+    prazo_s = LOCK_LOG_TIMEOUT_SEGUNDOS if timeout is None else timeout
+    caminho_lock = caminho_log.with_name(caminho_log.name + ".lock")
+    fd = os.open(str(caminho_lock), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        limite = time.monotonic() + prazo_s
+        while True:
+            try:
+                _travar_arquivo(fd)
+                break
+            except OSError:
+                if time.monotonic() >= limite:
+                    raise LockLogAprovacaoIndisponivel(
+                        f"lock do log de aprovações não obtido em {prazo_s} s"
+                    ) from None
+                time.sleep(_LOCK_LOG_INTERVALO_SEGUNDOS)
+        try:
+            yield
+        finally:
+            _destravar_arquivo(fd)
+    finally:
+        os.close(fd)
+
+
+def _fsync_diretorio(diretorio: Path) -> None:
+    """fsync da entrada de diretório (só POSIX; ver _FSYNC_DIRETORIO)."""
+    fd = os.open(str(diretorio), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _anexar_linha_sem_lock(caminho_log: Path, dados: bytes) -> bool:
+    """
+    Anexa `dados` (uma linha JSONL já codificada) com flush + fsync. Chamar só com os dois locks.
+    Se a última linha existente ficou parcial (sem newline), a nova começa em linha própria.
+    Retorna True se o arquivo era novo (vazio).
+    """
+    with open(caminho_log, "a+b") as f:
+        fim = f.seek(0, os.SEEK_END)
+        if fim > 0:
+            f.seek(fim - 1)
+            if f.read(1) != b"\n":
+                dados = b"\n" + dados
+        f.write(dados)
+        f.flush()
+        os.fsync(f.fileno())
+    return fim == 0
+
+
+def _codificar_linha(registro: Dict[str, Any]) -> bytes:
+    """Serializa e codifica (UTF-8 estrito) ANTES de tocar o disco: erro de encoding não toca o arquivo."""
+    return (json.dumps(registro, ensure_ascii=False, default=str) + "\n").encode("utf-8", errors="strict")
+
+
+def _gravar_linha_jsonl_duravel(caminho_log: Path, registro: Dict[str, Any]) -> None:
+    """
+    ÚNICO ponto de escrita do kill_approval.log (INTENCAO e RESULTADO, inclusive REJEITADO/TIMEOUT).
+    Ordem: serializa e codifica; lock de processo; os.makedirs(exist_ok); lock de arquivo (5 s);
+    open "a+b"; write; flush; os.fsync; close; fsync do diretório só em POSIX e só para arquivo novo.
+    Qualquer falha levanta exceção.
+    """
+    dados = _codificar_linha(registro)
+    with _LOCK_LOG_APROVACAO:
+        os.makedirs(caminho_log.parent, exist_ok=True)
+        with _lock_arquivo_log(caminho_log):
+            arquivo_novo = _anexar_linha_sem_lock(caminho_log, dados)
+        if arquivo_novo and _FSYNC_DIRETORIO:
+            _fsync_diretorio(caminho_log.parent)
+
+
+def _montar_registro_aprovacao_kill(
+    aprovador: str,
+    decisao: str,
+    hash_payload: str,
+    parametros: Dict[str, Any],
+    alvo: Optional[Dict[str, Any]],
+    resultado_banco: Optional[str],
+    motivo: Optional[str],
+    *,
+    fase: str,
+    id_intervencao: str,
+) -> Dict[str, Any]:
+    """Monta e valida uma linha do JSONL, sem tocar o disco. Entrada inválida -> ValueError."""
+    if decisao not in DECISOES_KILL:
+        raise ValueError(f"Decisão inválida: {decisao!r}. Esperado um de {DECISOES_KILL}.")
+    if fase not in FASES_REGISTRO_KILL:
+        raise ValueError(f"Fase inválida: {fase!r}. Esperado um de {FASES_REGISTRO_KILL}.")
+    if not isinstance(id_intervencao, str) or not _REGEX_ID_INTERVENCAO.fullmatch(id_intervencao):
+        raise ValueError("id_intervencao fora do formato de 32 hexadecimais minúsculos.")
+    if fase == "INTENCAO" and (decisao != "APROVADO" or resultado_banco is not None):
+        raise ValueError("INTENCAO exige decisao=APROVADO e resultado_banco=None.")
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "fase": fase,
+        "id_intervencao": id_intervencao,
+        "aprovador": aprovador,
+        "decisao": decisao,
+        "resultado_banco": resultado_banco,
+        "motivo": motivo,
+        "hash_payload": hash_payload,
+        "parametros": parametros,
+        "alvo": alvo or {},
+    }
 
 
 def registrar_log_aprovacao_kill(
@@ -937,40 +1153,120 @@ def registrar_log_aprovacao_kill(
     resultado_banco: Optional[str] = None,
     motivo: Optional[str] = None,
     caminho_log: Optional[Path] = None,
+    *,
+    fase: str,
+    id_intervencao: str,
 ) -> Dict[str, Any]:
     """
-    Registra formalmente a decisão de aprovação no arquivo de log da aplicação.
+    Registra uma linha no JSONL de aprovações (append-only), com durabilidade (fsync).
 
     Campos separados:
+      - fase: INTENCAO (antes de qualquer conexão posterior à decisão) | RESULTADO; obrigatório;
+      - id_intervencao: 32 hex minúsculos, mesmo valor na INTENCAO e na RESULTADO; obrigatório;
       - decisao: decisão humana (APROVADO | REJEITADO | TIMEOUT);
       - resultado_banco: status devolvido pela execução (p_status de PKG_OPS_KILL ou
         recusa local anterior à chamada); None quando nada foi executado;
       - motivo: justificativa de decisões não aprovadas (ex.: SEM_IDENTIFICACAO).
-    NUNCA armazena senhas, tokens ou dados sensíveis.
+    NUNCA armazena senhas, tokens ou dados sensíveis. Qualquer falha levanta exceção.
     """
-    if decisao not in DECISOES_KILL:
-        raise ValueError(f"Decisão inválida: {decisao!r}. Esperado um de {DECISOES_KILL}.")
-
-    if caminho_log is None:
-        caminho_log = CAMINHO_LOG_APROVACAO_PADRAO
-
-    caminho_log.parent.mkdir(parents=True, exist_ok=True)
-
-    registro = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "aprovador": aprovador,
-        "decisao": decisao,
-        "resultado_banco": resultado_banco,
-        "motivo": motivo,
-        "hash_payload": hash_payload,
-        "parametros": parametros,
-        "alvo": alvo or {},
-    }
-
-    with open(caminho_log, "a", encoding="utf-8") as f:
-        f.write(json.dumps(registro, ensure_ascii=False, default=str) + "\n")
-
+    registro = _montar_registro_aprovacao_kill(
+        aprovador, decisao, hash_payload, parametros, alvo, resultado_banco, motivo,
+        fase=fase, id_intervencao=id_intervencao,
+    )
+    _gravar_linha_jsonl_duravel(_caminho_log_efetivo(caminho_log), registro)
     return registro
+
+
+def reconciliar_intencoes_orfas(
+    caminho_log: Optional[Path] = None,
+    agora: Optional[Callable[[], datetime]] = None,
+) -> Dict[str, Any]:
+    """
+    Reconciliador chamado na subida da CLI e da Web.
+
+    Sob os dois locks, lê o JSONL e, para cada INTENCAO sem RESULTADO com o mesmo id_intervencao e
+    mais antiga que RECONCILIACAO_IDADE_MINIMA_SEGUNDOS, anexa uma RESULTADO com
+    resultado_banco=NAO_CONCLUIDA e motivo=RECONCILIADO_NA_SUBIDA (mesmo id, aprovador, hash, parametros
+    e alvo da INTENCAO). Para o auditor, NAO_CONCLUIDA é "a conferir em OPS_KILL_AUDIT"; uma RESULTADO
+    real que chegue depois prevalece. INTENCAO mais recente que a idade mínima, ou com timestamp
+    ilegível ou sem fuso, não é tocada (pode estar em curso em outro processo).
+
+    Linhas que não são JSON e linhas sem `fase` (formato anterior à 1.11) são ignoradas.
+    Arquivo inexistente: nada a fazer, nada é criado. Falha de E/S ou de lock levanta exceção.
+
+    Retorna {"reconciliadas": [ids], "recentes": [ids], "timestamp_invalido": [ids], "linhas_invalidas": n}.
+    """
+    destino = _caminho_log_efetivo(caminho_log)
+    resumo: Dict[str, Any] = {"reconciliadas": [], "recentes": [], "timestamp_invalido": [], "linhas_invalidas": 0}
+    if not destino.exists():
+        return resumo
+
+    with _LOCK_LOG_APROVACAO:
+        with _lock_arquivo_log(destino):
+            instante = (agora or _agora_utc)()
+            intencoes: Dict[str, Dict[str, Any]] = {}
+            com_resultado = set()
+            with open(destino, "rb") as f:
+                for linha in f.read().splitlines():
+                    if not linha.strip():
+                        continue
+                    try:
+                        reg = json.loads(linha.decode("utf-8"))
+                    except (UnicodeDecodeError, ValueError):
+                        resumo["linhas_invalidas"] += 1
+                        continue
+                    if not isinstance(reg, dict) or "fase" not in reg:
+                        continue
+                    id_reg = reg.get("id_intervencao")
+                    if not isinstance(id_reg, str) or not _REGEX_ID_INTERVENCAO.fullmatch(id_reg):
+                        resumo["linhas_invalidas"] += 1
+                        continue
+                    if reg.get("fase") == "INTENCAO":
+                        intencoes.setdefault(id_reg, reg)
+                    elif reg.get("fase") == "RESULTADO":
+                        com_resultado.add(id_reg)
+
+            for id_reg, intencao in intencoes.items():
+                if id_reg in com_resultado:
+                    continue
+                try:
+                    inicio = datetime.fromisoformat(intencao.get("timestamp"))
+                    if inicio.tzinfo is None:
+                        raise ValueError("timestamp sem fuso")
+                    idade = instante - inicio
+                except (TypeError, ValueError):
+                    resumo["timestamp_invalido"].append(id_reg)
+                    continue
+                if idade < timedelta(seconds=RECONCILIACAO_IDADE_MINIMA_SEGUNDOS):
+                    resumo["recentes"].append(id_reg)
+                    continue
+                registro = _montar_registro_aprovacao_kill(
+                    intencao.get("aprovador"),
+                    "APROVADO",
+                    intencao.get("hash_payload"),
+                    intencao.get("parametros"),
+                    intencao.get("alvo"),
+                    RESULTADO_NAO_CONCLUIDA,
+                    MOTIVO_RECONCILIADO,
+                    fase="RESULTADO",
+                    id_intervencao=id_reg,
+                )
+                _anexar_linha_sem_lock(destino, _codificar_linha(registro))
+                resumo["reconciliadas"].append(id_reg)
+
+    for id_reg in resumo["reconciliadas"]:
+        logger.warning(
+            f"AUDITORIA HITL: INTENCAO sem RESULTADO reconciliada como {RESULTADO_NAO_CONCLUIDA} | "
+            f"id_intervencao={id_reg} | conferir OPS_KILL_AUDIT"
+        )
+    if resumo["timestamp_invalido"]:
+        logger.warning(
+            f"AUDITORIA HITL: INTENCAO sem RESULTADO com timestamp ilegível (não reconciliada): "
+            f"{resumo['timestamp_invalido']}"
+        )
+    if resumo["linhas_invalidas"]:
+        logger.warning(f"AUDITORIA HITL: {resumo['linhas_invalidas']} linha(s) inválida(s) no log de aprovações")
+    return resumo
 
 
 def montar_notificacao_kill(
@@ -981,14 +1277,29 @@ def montar_notificacao_kill(
     resultado_banco: str,
     hash_payload: str,
     canal: str,
+    resultado_desconhecido: bool = False,
 ) -> Tuple[str, str]:
     """
     Monta assunto e corpo do e-mail de uma intervenção aprovada.
     O assunto "Intervenção Aprovada" só é usado quando resultado_banco indica execução
-    efetiva (ENCERRADA ou MARCADA_PARA_KILL); qualquer outro resultado gera
+    efetiva (ENCERRADA ou MARCADA_PARA_KILL). resultado_desconhecido (ERRO_ORACLE a partir do
+    execute do PKG) gera MENSAGEM_RESULTADO_DESCONHECIDO. Qualquer outro resultado gera
     "Intervenção NÃO executada", informando o status.
     """
-    if resultado_banco in RESULTADOS_KILL_EXECUTADO:
+    if resultado_desconhecido:
+        assunto = (
+            f"[AGENTE DBA] Intervenção com {MENSAGEM_RESULTADO_DESCONHECIDO}: Kill Session {sid},{serial} "
+            f"(status {resultado_banco})"
+        )
+        corpo = (
+            f"O encerramento da sessão SID={sid}, SERIAL={serial}, INST_ID={inst_id} "
+            f"foi aprovado por {aprovador} ({canal}); a chamada ao PKG_OPS_KILL retornou erro do Oracle.\n"
+            f"{MENSAGEM_RESULTADO_DESCONHECIDO[0].upper()}{MENSAGEM_RESULTADO_DESCONHECIDO[1:]} "
+            f"(GV$SESSION e OPS_KILL_AUDIT).\n"
+            f"Status retornado: {resultado_banco}\n"
+            f"Hash SHA-256 de identidade do alvo: {hash_payload}"
+        )
+    elif resultado_banco in RESULTADOS_KILL_EXECUTADO:
         assunto = (
             f"[AGENTE DBA] Intervenção Aprovada por {aprovador}: "
             f"Kill Session {sid},{serial}"
@@ -1033,6 +1344,14 @@ def _aprovacao_expirada(preparado_em: Optional[str], instante: datetime) -> bool
     return decorrido < timedelta(0) or decorrido >= timedelta(seconds=APROVACAO_TTL_SEGUNDOS)
 
 
+def _serializar_para_log(registro: Dict[str, Any]) -> str:
+    """Serialização tolerante do registro para logger (nunca levanta)."""
+    try:
+        return json.dumps(registro, ensure_ascii=False, default=str)
+    except Exception:
+        return repr(registro)
+
+
 def registrar_decisao_kill(
     decisao: str,
     aprovador: str,
@@ -1049,26 +1368,40 @@ def registrar_decisao_kill(
 ) -> Dict[str, Any]:
     """
     Aplica a decisão humana sobre uma intervenção já preparada (alvo elegível e hash exibido).
+    Ordem fail-closed (item 1, docs/entregas/1.11/item1/decisao.md):
 
-    - APROVADO com aprovador identificado: executa o encerramento, grava decisao e
-      resultado_banco separados e envia e-mail conforme o resultado efetivo.
+    - APROVADO com aprovador identificado e dentro do TTL:
+        1. grava a INTENCAO (fsync) ANTES de qualquer conexão posterior à decisão;
+           falha -> FALHA_LOG_APROVACAO: sem reconsulta DIAG, sem conta KILL, sem e-mail;
+        2. executar_kill_verificado (reconsulta, hash, elegibilidade, recheck de TTL, conta KILL);
+           Exception -> ERRO_INTERNO (segue o fluxo); BaseException -> RESULTADO INTERROMPIDO e re-raise;
+        3. grava a RESULTADO (mesmo id_intervencao); falha -> logger.critical com o registro e
+           e-mail com o marcador [REGISTRO DE RESULTADO FALHOU];
+        4. e-mail conforme o resultado efetivo.
     - APROVADO sem aprovador: convertido em REJEITADO (motivo SEM_IDENTIFICACAO), sem execução.
     - APROVADO fora da validade (preparado_em + APROVACAO_TTL_SEGUNDOS, fail-closed): convertido
       em TIMEOUT (motivo APROVACAO_EXPIRADA), sem reconsulta, sem execução e sem e-mail.
-    - REJEITADO / TIMEOUT: grava a decisão sem execução e sem e-mail.
+    - REJEITADO / TIMEOUT: uma linha RESULTADO, sem execução e sem e-mail; falha de gravação ->
+      logger.error com o registro, desfecho normal com falha_registro="RESULTADO".
 
     preparado_em: timestamp ISO-8601 com fuso devolvido por preparar_intervencao_kill.
-    agora: relógio injetável (padrão: UTC atual); lido uma única vez, antes de qualquer conexão.
+    agora: relógio injetável (padrão: UTC atual); o relógio é lido duas vezes: na decisão e de novo
+    no recheck de TTL, imediatamente antes da conta KILL (via aprovacao_expirada).
 
-    Retorna dict com decisao, resultado_banco, executado, motivo, resultado_tool (JSON para o LLM),
-    registro gravado e dados da notificação.
+    Retorna dict com decisao, resultado_banco, executado, motivo, resultado_tool (JSON para o LLM,
+    sem id_intervencao), registro gravado (ou None), falha_registro (None | "INTENCAO" | "RESULTADO"),
+    id_intervencao, resultado_desconhecido e dados da notificação.
     """
     if decisao not in DECISOES_KILL:
         raise ValueError(f"Decisão inválida: {decisao!r}. Esperado um de {DECISOES_KILL}.")
 
-    instante_decisao = (agora or _agora_utc)()
+    relogio = agora or _agora_utc
+    instante_decisao = relogio()
     parametros = {"inst_id": inst_id, "sid": sid, "serial": serial}
     aprovador_limpo = (aprovador or "").strip()
+    destino_log = _caminho_log_efetivo(caminho_log)
+    # Gerado antes de qualquer ramo: todo registro (inclusive REJEITADO/TIMEOUT) leva o id.
+    id_intervencao = uuid.uuid4().hex
 
     if decisao == "APROVADO" and not aprovador_limpo:
         decisao = "REJEITADO"
@@ -1086,16 +1419,41 @@ def registrar_decisao_kill(
         if motivo is None:
             motivo = "TIMEOUT_APROVACAO" if decisao == "TIMEOUT" else "REJEITADO_PELO_APROVADOR"
         aprovador_registro = aprovador_limpo or "NAO_INFORMADO"
-        registro = registrar_log_aprovacao_kill(
-            aprovador=aprovador_registro,
-            decisao=decisao,
-            hash_payload=hash_aprovado,
-            parametros=parametros,
-            alvo=alvo,
-            resultado_banco=None,
-            motivo=motivo,
-            caminho_log=caminho_log,
-        )
+        falha_registro: Optional[str] = None
+        try:
+            registro = registrar_log_aprovacao_kill(
+                aprovador=aprovador_registro,
+                decisao=decisao,
+                hash_payload=hash_aprovado,
+                parametros=parametros,
+                alvo=alvo,
+                resultado_banco=None,
+                motivo=motivo,
+                caminho_log=destino_log,
+                fase="RESULTADO",
+                id_intervencao=id_intervencao,
+            )
+        except Exception as exc:
+            registro = None
+            falha_registro = "RESULTADO"
+            logger.error(
+                f"AUDITORIA HITL: FALHA AO GRAVAR RESULTADO ({decisao}/{motivo}, {canal}) | "
+                f"id_intervencao={id_intervencao} | erro={type(exc).__name__} "
+                f"errno={getattr(exc, 'errno', None)} | registro="
+                + _serializar_para_log(
+                    {
+                        "fase": "RESULTADO",
+                        "id_intervencao": id_intervencao,
+                        "aprovador": aprovador_registro,
+                        "decisao": decisao,
+                        "resultado_banco": None,
+                        "motivo": motivo,
+                        "hash_payload": hash_aprovado,
+                        "parametros": parametros,
+                        "alvo": alvo or {},
+                    }
+                )
+            )
         logger.warning(
             f"AUDITORIA HITL: {decisao} ({motivo}) por {aprovador_registro} ({canal}) | "
             f"inst_id={inst_id}, sid={sid}, serial={serial} | Hash={hash_aprovado}"
@@ -1130,40 +1488,185 @@ def registrar_decisao_kill(
             "motivo": motivo,
             "resultado_tool": resultado_tool,
             "registro": registro,
+            "falha_registro": falha_registro,
+            "id_intervencao": id_intervencao,
+            "resultado_desconhecido": False,
             "assunto_email": None,
             "email_enviado": None,
             "email_detalhe": None,
         }
 
-    # Decisão APROVADO com aprovador identificado: reconsulta + verificação de hash antes da conta KILL
-    resultado_exec = executar_kill_verificado(
-        inst_id=inst_id, sid=sid, serial=serial, hash_aprovado=hash_aprovado
-    )
+    # 1. INTENCAO durável ANTES de qualquer conexão posterior à decisão (reconsulta DIAG, sonda, KILL).
+    try:
+        registrar_log_aprovacao_kill(
+            aprovador=aprovador_limpo,
+            decisao="APROVADO",
+            hash_payload=hash_aprovado,
+            parametros=parametros,
+            alvo=alvo,
+            resultado_banco=None,
+            motivo=None,
+            caminho_log=destino_log,
+            fase="INTENCAO",
+            id_intervencao=id_intervencao,
+        )
+    except Exception as exc:
+        # Sem a INTENCAO não há prova de que a aprovação foi registrada antes da ação: recusa.
+        # A mensagem da exceção fica fora do log (pode trazer caminho); só tipo e errno.
+        logger.error(
+            f"AUDITORIA HITL: FALHA_LOG_APROVACAO ({canal}) | id_intervencao={id_intervencao} | "
+            f"inst_id={inst_id}, sid={sid}, serial={serial} | Hash={hash_aprovado} | "
+            f"aprovador={aprovador_limpo} | erro={type(exc).__name__} errno={getattr(exc, 'errno', None)} | "
+            "KILL NAO EXECUTADO"
+        )
+        resultado_tool = json.dumps(
+            {
+                "status": "abortado",
+                "decisao": "APROVADO",
+                "motivo": "FALHA_LOG_APROVACAO",
+                "resultado_banco": None,
+                "executado": False,
+                "mensagem": (
+                    "Falha ao gravar o registro de aprovação; intervenção NÃO executada. "
+                    "Nenhuma chamada à conta KILL foi feita."
+                ),
+            },
+            ensure_ascii=False,
+        )
+        return {
+            "decisao": "APROVADO",
+            "resultado_banco": None,
+            "executado": False,
+            "motivo": "FALHA_LOG_APROVACAO",
+            "resultado_tool": resultado_tool,
+            "registro": None,
+            "falha_registro": "INTENCAO",
+            "id_intervencao": id_intervencao,
+            "resultado_desconhecido": False,
+            "assunto_email": None,
+            "email_enviado": None,
+            "email_detalhe": None,
+        }
+
+    # 2. Reconsulta + hash + elegibilidade + recheck de TTL antes da conta KILL.
+    motivo_resultado: Optional[str] = None
+    try:
+        resultado_exec = executar_kill_verificado(
+            inst_id=inst_id,
+            sid=sid,
+            serial=serial,
+            hash_aprovado=hash_aprovado,
+            aprovacao_expirada=lambda: _aprovacao_expirada(preparado_em, relogio()),
+        )
+    except Exception as exc:
+        motivo_resultado = type(exc).__name__
+        logger.error(
+            f"AUDITORIA HITL: ERRO_INTERNO no fluxo de kill ({canal}) | id_intervencao={id_intervencao} | "
+            f"inst_id={inst_id}, sid={sid}, serial={serial} | erro={motivo_resultado}"
+        )
+        resultado_exec = json.dumps(
+            {
+                "status": "erro",
+                "motivo": "ERRO_INTERNO",
+                "status_banco": "ERRO_INTERNO",
+                "tipo_erro": motivo_resultado,
+                "mensagem": (
+                    "Erro interno no fluxo de kill; estado no banco não confirmado. Consulte OPS_KILL_AUDIT."
+                ),
+            },
+            ensure_ascii=False,
+        )
+    except BaseException as exc:
+        registro_interrompido = {
+            "fase": "RESULTADO",
+            "id_intervencao": id_intervencao,
+            "aprovador": aprovador_limpo,
+            "decisao": "APROVADO",
+            "resultado_banco": "INTERROMPIDO",
+            "motivo": type(exc).__name__,
+            "hash_payload": hash_aprovado,
+            "parametros": parametros,
+            "alvo": alvo or {},
+        }
+        gravado = False
+        try:
+            registrar_log_aprovacao_kill(
+                aprovador=aprovador_limpo,
+                decisao="APROVADO",
+                hash_payload=hash_aprovado,
+                parametros=parametros,
+                alvo=alvo,
+                resultado_banco="INTERROMPIDO",
+                motivo=type(exc).__name__,
+                caminho_log=destino_log,
+                fase="RESULTADO",
+                id_intervencao=id_intervencao,
+            )
+            gravado = True
+        except Exception:
+            gravado = False
+        logger.critical(
+            f"AUDITORIA HITL: INTERROMPIDO ({canal}) | id_intervencao={id_intervencao} | "
+            f"inst_id={inst_id}, sid={sid}, serial={serial} | erro={type(exc).__name__} | "
+            "desfecho desconhecido; consulte OPS_KILL_AUDIT"
+            + ("" if gravado else " | RESULTADO NAO GRAVADA | registro=" + _serializar_para_log(registro_interrompido))
+        )
+        raise
+
     try:
         dados_exec = json.loads(resultado_exec)
     except (TypeError, ValueError):
         dados_exec = {"status": "erro", "mensagem": str(resultado_exec)}
     resultado_banco = str(dados_exec.get("status_banco") or dados_exec.get("motivo") or "DESCONHECIDO")
     executado = resultado_banco in RESULTADOS_KILL_EXECUTADO
+    resultado_desconhecido = bool(dados_exec.get("resultado_desconhecido"))
 
-    registro = registrar_log_aprovacao_kill(
-        aprovador=aprovador_limpo,
-        decisao="APROVADO",
-        hash_payload=hash_aprovado,
-        parametros=parametros,
-        alvo=alvo,
-        resultado_banco=resultado_banco,
-        motivo=None,
-        caminho_log=caminho_log,
-    )
+    # 3. RESULTADO com o mesmo id_intervencao.
+    falha_registro = None
+    try:
+        registro = registrar_log_aprovacao_kill(
+            aprovador=aprovador_limpo,
+            decisao="APROVADO",
+            hash_payload=hash_aprovado,
+            parametros=parametros,
+            alvo=alvo,
+            resultado_banco=resultado_banco,
+            motivo=motivo_resultado,
+            caminho_log=destino_log,
+            fase="RESULTADO",
+            id_intervencao=id_intervencao,
+        )
+    except Exception as exc:
+        registro = None
+        falha_registro = "RESULTADO"
+        logger.critical(
+            f"AUDITORIA HITL: FALHA AO GRAVAR RESULTADO ({canal}) | id_intervencao={id_intervencao} | "
+            f"erro={type(exc).__name__} errno={getattr(exc, 'errno', None)} | registro="
+            + _serializar_para_log(
+                {
+                    "fase": "RESULTADO",
+                    "id_intervencao": id_intervencao,
+                    "aprovador": aprovador_limpo,
+                    "decisao": "APROVADO",
+                    "resultado_banco": resultado_banco,
+                    "motivo": motivo_resultado,
+                    "hash_payload": hash_aprovado,
+                    "parametros": parametros,
+                    "alvo": alvo or {},
+                }
+            )
+        )
+
     nivel_log = logging.INFO if executado else logging.WARNING
     logger.log(
         nivel_log,
         f"AUDITORIA HITL: APROVADO por {aprovador_limpo} ({canal}) | "
         f"inst_id={inst_id}, sid={sid}, serial={serial} | Hash={hash_aprovado} | "
-        f"resultado_banco={resultado_banco} | executado={executado}",
+        f"resultado_banco={resultado_banco} | executado={executado} | "
+        f"resultado_desconhecido={resultado_desconhecido} | id_intervencao={id_intervencao}",
     )
 
+    # 4. E-mail conforme o resultado efetivo.
     assunto, corpo = montar_notificacao_kill(
         aprovador=aprovador_limpo,
         inst_id=inst_id,
@@ -1172,7 +1675,14 @@ def registrar_decisao_kill(
         resultado_banco=resultado_banco,
         hash_payload=hash_aprovado,
         canal=canal,
+        resultado_desconhecido=resultado_desconhecido,
     )
+    if falha_registro == "RESULTADO":
+        assunto = "[REGISTRO DE RESULTADO FALHOU] " + assunto
+        corpo += (
+            "\nATENÇÃO: a linha RESULTADO não foi gravada em kill_approval.log; registro completo no log "
+            f"da aplicação (CRITICAL), id_intervencao={id_intervencao}."
+        )
     email_enviado, email_detalhe = enviar_alerta_email(assunto, corpo)
     logger.info(f"NOTIFICAÇÃO SMTP: Sucesso={email_enviado} | Assunto={assunto} | Detalhe: {email_detalhe}")
 
@@ -1185,9 +1695,12 @@ def registrar_decisao_kill(
         "decisao": "APROVADO",
         "resultado_banco": resultado_banco,
         "executado": executado,
-        "motivo": None,
+        "motivo": motivo_resultado,
         "resultado_tool": resultado_tool,
         "registro": registro,
+        "falha_registro": falha_registro,
+        "id_intervencao": id_intervencao,
+        "resultado_desconhecido": resultado_desconhecido,
         "assunto_email": assunto,
         "email_enviado": email_enviado,
         "email_detalhe": email_detalhe,
@@ -1303,6 +1816,10 @@ def conduzir_kill_hitl(
             "executado": False,
             "motivo": prep["motivo"],
             "resultado_tool": prep["resultado_tool"],
+            "registro": None,
+            "falha_registro": None,
+            "id_intervencao": None,
+            "resultado_desconhecido": False,
             "assunto_email": None,
             "email_enviado": None,
             "email_detalhe": None,

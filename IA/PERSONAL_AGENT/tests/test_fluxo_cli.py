@@ -8,6 +8,8 @@ Os patches de Oracle miram `tools.oracle_dba` (objeto usado por main.py), não `
 """
 import json
 import logging
+import os
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -134,8 +136,8 @@ def cenario(main_cli, monkeypatch, isolar_log_aprovacao, caplog, capsys):
     monkeypatch.setattr(od, "enviar_alerta_email", _email)
     caplog.set_level(logging.INFO)
 
-    def executar(linhas_diag, status_pkg, entradas, kill_permitido=True):
-        oracle = _OracleFake(linhas_diag, status_pkg=status_pkg, kill_permitido=kill_permitido)
+    def executar(linhas_diag, status_pkg, entradas, kill_permitido=True, erro_kill=None):
+        oracle = _OracleFake(linhas_diag, status_pkg=status_pkg, kill_permitido=kill_permitido, erro_kill=erro_kill)
         monkeypatch.setattr(od.oracledb, "connect", oracle.connect)
         iterador = iter(entradas)
         monkeypatch.setattr("builtins.input", lambda *a, **k: next(iterador))
@@ -160,6 +162,18 @@ def _um_registro(r):
     return r.linhas[0]
 
 
+def _par_intencao_resultado(r):
+    """APROVADO grava 2 linhas (decisão 1): [0] INTENCAO (resultado_banco None) e [1] RESULTADO, mesmo id."""
+    assert len(r.linhas) == 2
+    intencao, resultado = r.linhas
+    assert intencao["fase"] == "INTENCAO" and intencao["decisao"] == "APROVADO"
+    assert intencao["resultado_banco"] is None
+    assert resultado["fase"] == "RESULTADO"
+    assert intencao["id_intervencao"] == resultado["id_intervencao"]
+    assert re.fullmatch(r"[0-9a-f]{32}", resultado["id_intervencao"])
+    return resultado
+
+
 def _sem_filehandler_real():
     assert not _filehandlers_auditoria()
 
@@ -169,7 +183,7 @@ def test_cli_aprovado_encerrada(cenario):
     assert r.consultas_diag == 2
     assert len(r.oracle.conexoes_kill) == 1
     assert len(r.emails) == 1 and "Intervenção Aprovada" in r.emails[0][0]
-    reg = _um_registro(r)
+    reg = _par_intencao_resultado(r)
     assert reg["decisao"] == "APROVADO" and reg["resultado_banco"] == "ENCERRADA"
     assert reg["aprovador"] == "dba"
     assert "EXECUTADA COM SUCESSO" in r.tela
@@ -184,7 +198,7 @@ def test_cli_aprovado_nao_usuario(cenario):
     assert r.consultas_diag == 2
     assert len(r.oracle.conexoes_kill) == 1
     assert len(r.emails) == 1 and "NÃO executada" in r.emails[0][0]
-    reg = _um_registro(r)
+    reg = _par_intencao_resultado(r)
     assert reg["decisao"] == "APROVADO" and reg["resultado_banco"] == "NAO_USUARIO"
     assert "mas NÃO EXECUTADA" in r.tela
     assert r.json_tool["decisao"] == "APROVADO" and r.json_tool["executado"] is False
@@ -224,7 +238,7 @@ def test_cli_alvo_alterado(cenario):
     assert r.consultas_diag == 2
     assert len(r.oracle.conexoes_kill) == 0
     assert len(r.emails) == 1 and "NÃO executada" in r.emails[0][0]
-    reg = _um_registro(r)
+    reg = _par_intencao_resultado(r)
     assert reg["decisao"] == "APROVADO" and reg["resultado_banco"] == "ALVO_ALTERADO"
     assert "mas NÃO EXECUTADA" in r.tela
     assert "ALVO_ALTERADO" in r.log
@@ -240,3 +254,98 @@ def test_cli_nao_grava_auditoria_real(cenario):
     depois = [_snapshot(p) for p in LOGS_REAIS]
     assert antes == depois, "auditoria_oracle.log real foi alterado pelo fluxo CLI"
     _sem_filehandler_real()
+
+
+# ---------------------------------------------------------------------------
+# Item 1 (1d, T13, T14, reconciliador): mensagens da CLI
+# ---------------------------------------------------------------------------
+
+def test_cli_falha_log_aprovacao(cenario, monkeypatch):
+    """T13: falha do log na INTENCAO -> NÃO EXECUTADA, 0 KILL, 1 só DIAG, 0 e-mail."""
+    def _fsync_falha(fd):
+        raise OSError(5, "fsync falhou (injetado)")
+
+    monkeypatch.setattr(os, "fsync", _fsync_falha)
+    r = cenario([_linha_alvo()], None, ["dba", "S"], kill_permitido=False)
+
+    assert r.consultas_diag == 1, "sem reconsulta DIAG depois da decisão"
+    assert len(r.oracle.conexoes_kill) == 0
+    assert r.emails == []
+    assert "NÃO EXECUTADA" in r.tela
+    assert "nenhuma chamada à conta kill" in r.tela.lower()
+    assert "FALHA_LOG_APROVACAO" in r.tela
+    assert r.json_tool["motivo"] == "FALHA_LOG_APROVACAO" and r.json_tool["executado"] is False
+    assert "FALHA_LOG_APROVACAO" in r.log
+    _sem_filehandler_real()
+
+
+def test_cli_excecao_rota_kill(cenario, monkeypatch):
+    """T14 (CLI, plano 9.3): exceção no fluxo de kill não é silenciosa e o estado é declarado desconhecido."""
+    import tools.oracle_dba as od
+
+    def _explode(*a, **k):
+        raise RuntimeError("detalhe-interno-xyz")
+
+    monkeypatch.setattr(od, "registrar_decisao_kill", _explode)
+    r = cenario([_linha_alvo()], None, ["dba", "S"], kill_permitido=False)
+
+    assert "[Sistema]: ERRO interno no fluxo de kill; estado desconhecido" in r.tela
+    assert r.json_tool["executado"] is None
+    assert "estado desconhecido" in r.json_tool["mensagem"]
+    assert "detalhe-interno-xyz" not in json.dumps(r.json_tool)
+    assert len(r.oracle.conexoes_kill) == 0
+    _sem_filehandler_real()
+
+
+def test_cli_resultado_desconhecido(cenario):
+    """ERRO_ORACLE a partir do execute do KILL_SESSION: tela, e-mail e resultado_tool dizem 'resultado desconhecido'."""
+    import oracledb
+    import tools.oracle_dba as od
+
+    r = cenario(
+        [_linha_alvo(), _linha_alvo()], None, ["dba", "S"], erro_kill=oracledb.DatabaseError("PLS-00306: x")
+    )
+
+    assert "resultado desconhecido: conferir sessão" in r.tela
+    assert "resultado desconhecido: conferir sessão" in r.emails[0][0]
+    assert "NÃO executada" not in r.emails[0][0]
+    assert r.json_tool["resultado_desconhecido"] is True
+    assert "resultado desconhecido: conferir sessão" in r.json_tool["mensagem"]
+    assert r.json_tool["executado"] is False
+    assert od.MENSAGEM_RESULTADO_DESCONHECIDO == "resultado desconhecido: conferir sessão"
+
+
+def test_cli_reconciliador_na_subida(main_cli, isolar_log_aprovacao, capsys):
+    """Reconciliador da CLI: INTENCAO antiga ganha RESULTADO NAO_CONCLUIDA e é avisada; nunca levanta."""
+    from datetime import datetime, timedelta, timezone
+
+    antiga = {
+        "timestamp": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(), "fase": "INTENCAO",
+        "id_intervencao": "d" * 32, "aprovador": "dba", "decisao": "APROVADO", "resultado_banco": None,
+        "motivo": None, "hash_payload": "h", "parametros": {"inst_id": 1, "sid": 1, "serial": 1}, "alvo": {},
+    }
+    isolar_log_aprovacao.write_text(json.dumps(antiga) + "\n", encoding="utf-8")
+
+    main_cli._reconciliar_na_subida_cli()
+
+    tela = capsys.readouterr().out
+    assert "d" * 32 in tela and "OPS_KILL_AUDIT" in tela
+    linhas = [json.loads(l) for l in isolar_log_aprovacao.read_text(encoding="utf-8").splitlines()]
+    assert [l["fase"] for l in linhas] == ["INTENCAO", "RESULTADO"]
+    assert linhas[1]["resultado_banco"] == "NAO_CONCLUIDA" and linhas[1]["motivo"] == "RECONCILIADO_NA_SUBIDA"
+
+    main_cli._reconciliar_na_subida_cli()  # idempotente
+    assert len(isolar_log_aprovacao.read_text(encoding="utf-8").splitlines()) == 2
+    assert "d" * 32 not in capsys.readouterr().out
+
+
+def test_cli_reconciliador_falha_nao_derruba(main_cli, monkeypatch, capsys):
+    """Qualquer falha do reconciliador (lock, E/S) vira aviso na tela; a CLI sobe do mesmo jeito."""
+    import tools.oracle_dba as od
+
+    def _lock_indisponivel(*a, **k):
+        raise od.LockLogAprovacaoIndisponivel("lock indisponível (injetado)")
+
+    monkeypatch.setattr(main_cli, "reconciliar_intencoes_orfas", _lock_indisponivel)
+    main_cli._reconciliar_na_subida_cli()  # não levanta
+    assert "Reconciliação do log de aprovações NÃO executada" in capsys.readouterr().out

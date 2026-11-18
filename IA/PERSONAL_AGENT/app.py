@@ -62,7 +62,9 @@ from tools.oracle_dba import (
     coletar_plano_execucao,
     preparar_intervencao_kill,
     registrar_decisao_kill,
+    reconciliar_intencoes_orfas,
     APROVACAO_TTL_SEGUNDOS,
+    MENSAGEM_RESULTADO_DESCONHECIDO,
 )
 from tools.gemini_router import (
     gemini_tools_schema,
@@ -327,9 +329,9 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
     Exige identificação do aprovador para aprovação, gera log formal sem senhas,
     executa matar_sessao_oracle via PKG_OPS_KILL e retoma o orquestrador.
     """
-    pendencia = st.session_state.hitl_pendente
-    if not pendencia:
+    if not st.session_state.hitl_pendente:
         return True
+    pendencia = dict(st.session_state.hitl_pendente)
 
     sid = pendencia["sid"]
     serial = pendencia["serial"]
@@ -345,18 +347,56 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
         st.error("Identificação do aprovador é obrigatória (não pode ser vazia).")
         return False
 
+    # Item 1 (1c): a pendência já foi copiada; limpa antes da chamada para que um novo clique
+    # (ou um rerun) nunca reaproveite a mesma aprovação.
+    st.session_state.hitl_pendente = None
+
     # Decisão (humana) e resultado_banco (execução) são registrados separadamente
-    desfecho = registrar_decisao_kill(
-        decisao="APROVADO" if aprovado else "REJEITADO",
-        aprovador=id_aprovador_limpo,
-        inst_id=inst_id,
-        sid=sid,
-        serial=serial,
-        alvo=dados_alvo,
-        hash_aprovado=hash_payload,
-        canal="Web UI",
-        preparado_em=pendencia.get("timestamp"),  # validade medida no clique; ausente -> TIMEOUT
-    )
+    try:
+        desfecho = registrar_decisao_kill(
+            decisao="APROVADO" if aprovado else "REJEITADO",
+            aprovador=id_aprovador_limpo,
+            inst_id=inst_id,
+            sid=sid,
+            serial=serial,
+            alvo=dados_alvo,
+            hash_aprovado=hash_payload,
+            canal="Web UI",
+            preparado_em=pendencia.get("timestamp"),  # validade medida no clique; ausente -> TIMEOUT
+        )
+    except Exception as exc:
+        logging.error(f"ERRO interno no fluxo de kill (Web UI): {type(exc).__name__}")
+        texto_erro = (
+            f"❌ **Erro interno no fluxo de kill da sessão `{sid},{serial}`: estado desconhecido.** "
+            "Consulte OPS_KILL_AUDIT antes de qualquer nova tentativa."
+        )
+        st.error(texto_erro)
+        st.session_state.llm_messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "name": nome_funcao,
+                "content": json.dumps(
+                    {
+                        "status": "erro",
+                        "executado": None,
+                        "mensagem": "Erro interno no fluxo de kill; estado desconhecido; consulte OPS_KILL_AUDIT.",
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        )
+        for call_extra in pendencia.get("calls_restantes", []):
+            st.session_state.llm_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call_extra["id"],
+                    "name": call_extra["name"],
+                    "content": json.dumps({"status": "cancelado_por_barreira_hitl"}),
+                }
+            )
+        st.session_state.messages.append({"role": "assistant", "content": texto_erro})
+        return True
     resultado_tool = desfecho["resultado_tool"]
 
     if desfecho["decisao"] == "TIMEOUT":
@@ -371,6 +411,20 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
             f"🛑 **Ação Abortada pelo Aprovador (`{aprovador_registro}`):** "
             f"O encerramento da sessão `{sid},{serial}` foi negado. Nenhuma execução no banco."
         )
+    elif desfecho.get("motivo") == "FALHA_LOG_APROVACAO":
+        aviso_ui = (
+            f"❌ **Intervenção APROVADA por `{id_aprovador_limpo}`, mas NÃO EXECUTADA:** falha ao gravar o "
+            "registro de aprovação (FALHA_LOG_APROVACAO). Nenhuma chamada à conta KILL foi feita. "
+            f"Incidente registrado no log da aplicação (id_intervencao=`{desfecho.get('id_intervencao')}`)."
+        )
+        st.error(aviso_ui)
+    elif desfecho.get("resultado_desconhecido"):
+        aviso_ui = (
+            f"❌ **Intervenção aprovada por `{id_aprovador_limpo}`: {MENSAGEM_RESULTADO_DESCONHECIDO}** "
+            f"(erro do Oracle a partir da chamada ao PKG; resultado: `{desfecho['resultado_banco']}`). "
+            f"*(Notificação SMTP: {desfecho['email_detalhe']})*"
+        )
+        st.error(aviso_ui)
     elif desfecho["executado"]:
         aviso_ui = (
             f"✅ **Intervenção aprovada por `{id_aprovador_limpo}` e executada com sucesso** via PKG_OPS_KILL "
@@ -383,6 +437,14 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
             f"(resultado: `{desfecho['resultado_banco']}`). "
             f"*(Notificação SMTP: {desfecho['email_detalhe']})*"
         )
+
+    if desfecho.get("falha_registro") == "RESULTADO":
+        alerta_registro = (
+            "❌ **ATENÇÃO: a linha RESULTADO não foi gravada em kill_approval.log;** registro completo no "
+            f"log da aplicação (CRITICAL), id_intervencao=`{desfecho.get('id_intervencao')}`."
+        )
+        st.error(alerta_registro)
+        aviso_ui = f"{aviso_ui}\n\n{alerta_registro}"
 
     logging.info(f"RESULTADO ORACLE: {resultado_tool}")
 
@@ -461,6 +523,26 @@ if "llm_messages" not in st.session_state:
 
 if "hitl_pendente" not in st.session_state:
     st.session_state.hitl_pendente = None
+
+# Reconciliador na subida (uma vez por sessão do navegador; idempotente): INTENCAO sem RESULTADO
+# mais antiga que o TTL + margem vira NAO_CONCLUIDA. Falha não derruba a interface.
+if "reconciliacao_kill" not in st.session_state:
+    try:
+        st.session_state.reconciliacao_kill = reconciliar_intencoes_orfas()
+    except Exception as exc:
+        logging.error(f"Reconciliação do log de aprovações não executada: {type(exc).__name__}")
+        st.session_state.reconciliacao_kill = {"erro": type(exc).__name__, "reconciliadas": []}
+
+if st.session_state.reconciliacao_kill.get("erro"):
+    st.warning(
+        "⚠️ Reconciliação do log de aprovações NÃO executada "
+        f"({st.session_state.reconciliacao_kill['erro']})."
+    )
+for _id_reconciliado in st.session_state.reconciliacao_kill.get("reconciliadas", []):
+    st.warning(
+        f"⚠️ Intervenção não concluída (INTENCAO sem RESULTADO), id_intervencao=`{_id_reconciliado}`. "
+        "Conferir OPS_KILL_AUDIT."
+    )
 
 
 # ------------------------------------------------------------------------------

@@ -1,0 +1,45 @@
+== branch
+item1/reaplicado
+== log
+a89791a docs: excecao do auditoria_oracle.log e limite do T8 (item 1)
+4609954 revert: aa9a0a5 Python v2 do item 6 (so codigo e testes)
+19f19f2 docs: decisao de seguranca do item 1 (INTENCAO antes do kill)
+== status --short
+ M .env.example
+ M app.py
+ M docs/GOVERNANCA_LOG.md
+ M docs/plans/1.11.md
+ M src/main.py
+ M src/tools/oracle_dba.py
+ M tests/conftest.py
+ M tests/fakes_oracle.py
+ M tests/test_fluxo_cli.py
+ M tests/test_fluxo_web.py
+ M tests/test_oracle_kill.py
+?? ../ARCANA_REALM/
+?? ../MAHJONG_GAME/
+?? db/ops_kill.sqlbkp
+?? docs/entregas/1.11/item1/conferencia_reaplicacao.md
+?? docs/entregas/1.11/item1/diff_producao.diff
+?? docs/entregas/1.11/item1/diff_testes.diff
+?? docs/entregas/1.11/item1/diff_tests.txt
+?? docs/entregas/1.11/item1/greps.txt
+?? docs/entregas/1.11/item1/pytest_run1.txt
+?? docs/entregas/1.11/item1/pytest_run2.txt
+?? docs/entregas/1.11/item1/reaplicado/
+?? docs/entregas/1.11/item1/verificacao.md
+?? tests/test_item1_intencao.py
+== diff --stat
+warning: in the working copy of 'IA/PERSONAL_AGENT/docs/GOVERNANCA_LOG.md', LF will be replaced by CRLF the next time Git touches it
+ IA/PERSONAL_AGENT/.env.example              |   3 +
+ IA/PERSONAL_AGENT/app.py                    | 108 ++++-
+ IA/PERSONAL_AGENT/docs/GOVERNANCA_LOG.md    |   1 +
+ IA/PERSONAL_AGENT/docs/plans/1.11.md        |  16 +
+ IA/PERSONAL_AGENT/src/main.py               |  62 ++-
+ IA/PERSONAL_AGENT/src/tools/oracle_dba.py   | 639 +++++++++++++++++++++++++---
+ IA/PERSONAL_AGENT/tests/conftest.py         |  39 ++
+ IA/PERSONAL_AGENT/tests/fakes_oracle.py     |   8 +-
+ IA/PERSONAL_AGENT/tests/test_fluxo_cli.py   | 119 +++++-
+ IA/PERSONAL_AGENT/tests/test_fluxo_web.py   | 153 ++++++-
+ IA/PERSONAL_AGENT/tests/test_oracle_kill.py |  36 +-
+ 11 files changed, 1092 insertions(+), 92 deletions(-)

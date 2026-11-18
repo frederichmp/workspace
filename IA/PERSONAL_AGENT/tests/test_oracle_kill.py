@@ -189,6 +189,8 @@ def test_aprovacao_negada_ou_sem_identificacao_sem_chamada_kill(monkeypatch, tmp
         resultado_banco=None,
         motivo="SEM_IDENTIFICACAO",
         caminho_log=log_teste,
+        fase="RESULTADO",
+        id_intervencao="0" * 32,
     )
     assert reg_recusa["decisao"] == "REJEITADO"
     assert reg_recusa["motivo"] == "SEM_IDENTIFICACAO"
@@ -205,6 +207,8 @@ def test_aprovacao_negada_ou_sem_identificacao_sem_chamada_kill(monkeypatch, tmp
         resultado_banco=None,
         motivo="REJEITADO_PELO_APROVADOR",
         caminho_log=log_teste,
+        fase="RESULTADO",
+        id_intervencao="0" * 32,
     )
     assert reg_negado["decisao"] == "REJEITADO"
     assert reg_negado["aprovador"] == "dba_marcos"
@@ -233,6 +237,8 @@ def test_hash_canonico_determinismo_e_formato_log(tmp_path):
         alvo=alvo_a,
         resultado_banco="ENCERRADA",
         caminho_log=log_teste,
+        fase="RESULTADO",
+        id_intervencao="0" * 32,
     )
     assert reg["resultado_banco"] == "ENCERRADA"
 
@@ -489,6 +495,7 @@ def test_aprovacao_expirada_vira_timeout(monkeypatch, tmp_path, ambiente_fake, d
     registros = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()]
     assert len(registros) == 1
     reg = registros[0]
+    assert reg["fase"] == "RESULTADO"
     assert reg["decisao"] == "TIMEOUT"
     assert reg["motivo"] == "APROVACAO_EXPIRADA"
     assert reg["resultado_banco"] is None
@@ -553,9 +560,16 @@ def test_aprovacao_dentro_do_ttl_executa(monkeypatch, tmp_path, ambiente_fake, d
     assert ambiente_fake[0]["assunto"].startswith("[AGENTE DBA] Intervenção Aprovada por dba_teste")
 
     registros = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()]
-    assert len(registros) == 1
-    assert registros[0]["decisao"] == "APROVADO"
-    assert registros[0]["motivo"] is None
+    assert len(registros) == 2  # decisão 1: INTENCAO + RESULTADO
+    intencao, resultado = registros
+    assert intencao["fase"] == "INTENCAO"
+    assert intencao["decisao"] == "APROVADO"
+    assert intencao["resultado_banco"] is None
+    assert resultado["fase"] == "RESULTADO"
+    assert intencao["id_intervencao"] == resultado["id_intervencao"]
+    assert re.fullmatch(r"[0-9a-f]{32}", resultado["id_intervencao"])
+    assert resultado["decisao"] == "APROVADO"
+    assert resultado["motivo"] is None
 
 
 def test_resultado_nao_usuario_com_aprovacao_nao_envia_email_de_aprovada(monkeypatch, tmp_path, ambiente_fake):
@@ -600,12 +614,19 @@ def test_registro_log_contem_decisao_e_resultado_banco_separados(monkeypatch, tm
     )
 
     registros = [json.loads(l) for l in log_aprovacao.read_text(encoding="utf-8").splitlines()]
-    assert len(registros) == 2
-    aprovado, rejeitado = registros
+    assert len(registros) == 3  # decisão 1: INTENCAO + RESULTADO do aprovado, mais o REJEITADO
+    intencao, aprovado, rejeitado = registros
     for reg in registros:
         assert "decisao" in reg and "resultado_banco" in reg
         assert "status_banco" not in reg
 
+    assert intencao["fase"] == "INTENCAO"
+    assert intencao["decisao"] == "APROVADO"
+    assert intencao["resultado_banco"] is None
+    assert aprovado["fase"] == "RESULTADO"
+    assert intencao["id_intervencao"] == aprovado["id_intervencao"]
+    assert re.fullmatch(r"[0-9a-f]{32}", aprovado["id_intervencao"])
+    assert rejeitado["fase"] == "RESULTADO"
     assert aprovado["decisao"] == "APROVADO"
     assert aprovado["resultado_banco"] == "ENCERRADA"
     assert rejeitado["decisao"] == "REJEITADO"
@@ -637,7 +658,10 @@ def test_caminho_padrao_redirecionado(isolar_log_aprovacao):
     assert isolar_log_aprovacao != real
     assert not isolar_log_aprovacao.exists()
 
-    registrar_log_aprovacao_kill("dba_teste", "REJEITADO", "hash-fake", {"sid": 1}, motivo="TESTE")
+    registrar_log_aprovacao_kill(
+        "dba_teste", "REJEITADO", "hash-fake", {"sid": 1}, motivo="TESTE",
+        fase="RESULTADO", id_intervencao="0" * 32,
+    )
 
     assert isolar_log_aprovacao.exists()
     registro = json.loads(isolar_log_aprovacao.read_text(encoding="utf-8").splitlines()[0])
