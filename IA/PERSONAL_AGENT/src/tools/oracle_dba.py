@@ -27,14 +27,14 @@ if os.name == "nt":
 else:
     import fcntl
 
-# Diretório do log de aprovações de kill: AGENTDBA_LOG_DIR ou o padrão local, fora de pasta sincronizada.
-# A pasta só é criada na primeira gravação (os.makedirs, exist_ok); falha na criação = falha de registro.
-# Nada é criado no import.
+# Diretório do log de aprovações de kill: AGENTDBA_LOG_DIR ou o padrão local, fora de pasta sincronizada,
+# resolvido em tempo de chamada (_diretorio_log_aprovacao; A3: nada é congelado no import, então as cópias
+# tools.* e src.tools.* resolvem o mesmo destino). A pasta só é criada na primeira gravação (os.makedirs,
+# exist_ok); falha na criação = falha de registro. Nada é criado no import nem na resolução.
 DIRETORIO_LOG_PADRAO = r"C:\AgentDBA\logs"
-DIRETORIO_LOG_APROVACAO = Path(os.getenv("AGENTDBA_LOG_DIR") or DIRETORIO_LOG_PADRAO)
 
-# Log padrão de aprovações de kill (lido em tempo de chamada; testes o redirecionam)
-CAMINHO_LOG_APROVACAO_PADRAO = DIRETORIO_LOG_APROVACAO / "kill_approval.log"
+# Gancho de teste: None = destino resolvido em tempo de chamada; um Path aqui (monkeypatch) fixa o destino.
+CAMINHO_LOG_APROVACAO_PADRAO: Optional[Path] = None
 
 # Gravação do JSONL (docs/entregas/1.11/item1/decisao.md, seção a): ponto único, fsync,
 # lock de processo (threads da Web) + lock de arquivo (CLI e Web em processos distintos).
@@ -1002,9 +1002,18 @@ def executar_kill_verificado(
     return matar_sessao_oracle(sid=sid, serial=serial, inst_id=inst_id)
 
 
+def _diretorio_log_aprovacao() -> Path:
+    """AGENTDBA_LOG_DIR (ou o padrão) lido no momento da chamada (A3). Não cria nada."""
+    return Path(os.getenv("AGENTDBA_LOG_DIR") or DIRETORIO_LOG_PADRAO)
+
+
 def _caminho_log_efetivo(caminho_log: Optional[Path]) -> Path:
-    """Destino do JSONL: o caminho dado ou o padrão do módulo, lido no momento da chamada."""
-    return Path(caminho_log) if caminho_log is not None else CAMINHO_LOG_APROVACAO_PADRAO
+    """Destino do JSONL: o caminho dado, o gancho do módulo (testes) ou o padrão resolvido agora."""
+    if caminho_log is not None:
+        return Path(caminho_log)
+    if CAMINHO_LOG_APROVACAO_PADRAO is not None:
+        return Path(CAMINHO_LOG_APROVACAO_PADRAO)
+    return _diretorio_log_aprovacao() / "kill_approval.log"
 
 
 if os.name == "nt":

@@ -44,6 +44,7 @@ def _wrapper(dotenv_path=None, *args, **kwargs):
     chamadas.append({
         "caminho": None if dotenv_path is None else str(dotenv_path),
         "override": kwargs["override"] if "override" in kwargs else "AUSENTE",
+        "src_oracle_dba_importado": "src.tools.oracle_dba" in sys.modules,
     })
     kwargs.setdefault("override", False)
     return _original(env_ficticio, *args, **kwargs)
@@ -78,6 +79,10 @@ class _Captura(logging.Handler):
     def emit(self, record):
         capturados.append((record.levelname, record.getMessage()))
 
+
+if cfg.get("pre_importar_src"):
+    # Cenário A3a: a cópia src.tools.oracle_dba é importada antes da entrada (e antes da carga do .env).
+    import src.tools.oracle_dba  # noqa: F401
 
 raiz_log = logging.getLogger()
 raiz_log.addHandler(_Captura())
@@ -133,6 +138,13 @@ try:
 except Exception as exc:  # erro do harness: aparece no JSON em vez de derrubar o filho
     excecoes_harness.append(type(exc).__name__ + ": " + str(exc) + " | " + traceback.format_exc()[-400:])
 
+def _destino_log(nome):
+    modulo = sys.modules.get(nome)
+    try:
+        return None if modulo is None else str(modulo._caminho_log_efetivo(None))  # só resolve; nunca grava
+    except Exception as exc:
+        return "erro " + type(exc).__name__
+
 final = _estado([])
 print("\n" + json.dumps({
     "sandbox": final["sandbox"],
@@ -145,15 +157,21 @@ print("\n" + json.dumps({
     "chamadas_values": chamadas_values,
     "leituras_reais": leituras_reais,
     "excecoes_harness": excecoes_harness,
+    "destino_log": {"src": _destino_log("src.tools.oracle_dba"), "tools": _destino_log("tools.oracle_dba")},
 }))
 """
 
 MENSAGEM_FALHA_CARGA = "Carga do .env falhou"
 
 
-def _rodar(entrada, tmp_path, conteudo_env, sandbox_shell=None, runs=1, sessoes=1, apos_run=None):
+def _rodar(
+    entrada, tmp_path, conteudo_env, sandbox_shell=None, runs=1, sessoes=1, apos_run=None,
+    sem_log_dir=False, pre_importar_src=False,
+):
     """Roda a entrada em subprocesso. `conteudo_env` e os valores de `apos_run` ({índice_do_run: conteúdo})
-    aceitam str ou bytes; `apos_run` regrava o fictício depois do run indicado (alteração em disco)."""
+    aceitam str ou bytes; `apos_run` regrava o fictício depois do run indicado (alteração em disco).
+    `sem_log_dir` tira AGENTDBA_LOG_DIR do ambiente do filho; `pre_importar_src` importa
+    src.tools.oracle_dba antes da entrada."""
     def _bytes(c):
         return c if isinstance(c, bytes) else c.encode("utf-8")
 
@@ -162,10 +180,14 @@ def _rodar(entrada, tmp_path, conteudo_env, sandbox_shell=None, runs=1, sessoes=
     cfg = {
         "runs": runs,
         "sessoes": sessoes,
+        "pre_importar_src": pre_importar_src,
         "apos_run": {str(i): _bytes(c).hex() for i, c in (apos_run or {}).items()},
     }
     env = {k: v for k, v in os.environ.items() if not k.startswith(_PREFIXOS)}
-    env["AGENTDBA_LOG_DIR"] = str(tmp_path / "log")
+    if sem_log_dir:
+        env.pop("AGENTDBA_LOG_DIR", None)
+    else:
+        env["AGENTDBA_LOG_DIR"] = str(tmp_path / "log")
     env["SCRIPTS_REGISTRY_PATH"] = str(RAIZ / "registry" / "test_scripts.yaml")
     if sandbox_shell is not None:
         env["ORACLE_SANDBOX"] = sandbox_shell
@@ -260,4 +282,28 @@ def test_r_f2_1_duas_sessoes_uma_carga(tmp_path):
     resumo = f"sandbox={dados['sandbox']}, chamadas={dados['chamadas']}, por_run={dados['por_run']}"
     assert len(dados["chamadas"]) == 1, resumo
     assert dados["sandbox"] == "AUSENTE", resumo
+    assert dados["leituras_reais"] == []
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_a3_src_tools_antes_da_entrada_mesmo_destino(entrada, tmp_path):
+    """A3a: src.tools.oracle_dba importada antes da entrada resolve o mesmo destino de log que tools.oracle_dba.
+
+    O filho não tem AGENTDBA_LOG_DIR no ambiente; o fictício o define. Só resolve o destino, nunca grava o
+    log (em d05577e a cópia src aponta para C:/AgentDBA/logs e uma gravação criaria a pasta real).
+    """
+    dir_env = tmp_path / "dir_env"
+    esperado = dir_env / "kill_approval.log"
+    agentdba_existia = Path("C:/AgentDBA").exists()
+    dados = _rodar(
+        entrada, tmp_path, f"AGENTDBA_LOG_DIR={dir_env.as_posix()}\n",
+        sem_log_dir=True, pre_importar_src=True,
+    )
+    destinos = dados["destino_log"]
+    resumo = f"destino_log={destinos}, esperado={esperado}, chamadas={dados['chamadas']}"
+    assert destinos["src"] is not None and Path(destinos["src"]) == esperado, resumo
+    assert destinos["tools"] is not None and Path(destinos["tools"]) == esperado, resumo
+    assert [c["src_oracle_dba_importado"] for c in dados["chamadas"]] == [True], resumo  # cenário do A3a
+    assert not dir_env.exists()
+    assert Path("C:/AgentDBA").exists() == agentdba_existia
     assert dados["leituras_reais"] == []

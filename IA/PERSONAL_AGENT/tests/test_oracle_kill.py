@@ -655,6 +655,7 @@ def test_caminho_padrao_redirecionado(isolar_log_aprovacao):
     """registrar_log_aprovacao_kill sem caminho_log grava no tmp redirecionado, não no real."""
     real = Path(__file__).resolve().parent.parent / "data" / "logs" / "kill_approval.log"
     assert oracle_dba.CAMINHO_LOG_APROVACAO_PADRAO == isolar_log_aprovacao
+    assert oracle_dba._caminho_log_efetivo(None) == isolar_log_aprovacao
     assert isolar_log_aprovacao != real
     assert not isolar_log_aprovacao.exists()
 

@@ -102,3 +102,52 @@ tests\test_carga_env_entrada.py:261: AssertionError
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
 4 passed, 6 deselected, 13 warnings in 15.12s
 ```
+
+## Passo 2
+
+Modelo: Sonnet 5.5 (claude-sonnet-5-5), subagente `mecanico`. Arquivos: `tests/test_item1_intencao.py`, `tests/test_oracle_kill.py`, `tests/test_carga_env_entrada.py`. Produção (`src/tools/oracle_dba.py`) já editada pela sessão principal; não tocada.
+
+### Working tree (sem ORACLE_SANDBOX)
+
+`env -u ORACLE_SANDBOX PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -rs -p no:cacheprovider tests/test_item1_intencao.py tests/test_oracle_kill.py tests/test_carga_env_entrada.py`
+
+```text
+98 passed, 6 skipped, 13 warnings in 49.22s
+SKIPPED [6] tests\conftest.py:188: Teste ignorado: requer ambiente de sandbox autorizado (ORACLE_SANDBOX=1)
+```
+
+### Controle negativo do teste A3 em d05577e
+
+Cópia por `git archive --format=tar d05577e IA/PERSONAL_AGENT` + `tar --force-local` em pasta nova de %TEMP% (`src/tools/oracle_dba.py` da cópia igual ao de d05577e); teste da cópia sobrescrito pela versão do working tree (diff de 277 linhas, não vazio, L3). `C:\AgentDBA` existe antes: False; depois: False. Pasta removida depois.
+
+```text
+FF                                                                       [100%]
+================================== FAILURES ===================================
+____________ test_a3_src_tools_antes_da_entrada_mesmo_destino[cli] ____________
+
+entrada = 'cli'
+tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-115/test_a3_src_tools_antes_da_ent0')
+
+>       assert destinos["src"] is not None and Path(destinos["src"]) == esperado, resumo
+E       AssertionError: destino_log={'src': 'C:\\AgentDBA\\logs\\kill_approval.log', 'tools': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\pytest-of-Frederich\\pytest-115\\test_a3_src_tools_antes_da_ent0\\dir_env\\kill_approval.log'}, esperado=C:\Users\Frederich\AppData\Local\Temp\pytest-of-Frederich\pytest-115\test_a3_src_tools_antes_da_ent0\dir_env\kill_approval.log, chamadas=[{'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.1joxfvmnKl\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False, 'src_oracle_dba_importado': True}]
+E       assert ('C:\\AgentDBA\\logs\\kill_approval.log' is not None and WindowsPath('C:/AgentDBA/logs/kill_approval.log') == WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-115/test_a3_src_tools_antes_da_ent0/dir_env/kill_approval.log'))
+E        +  where WindowsPath('C:/AgentDBA/logs/kill_approval.log') = Path('C:\\AgentDBA\\logs\\kill_approval.log')
+
+tests\test_carga_env_entrada.py:304: AssertionError
+____________ test_a3_src_tools_antes_da_entrada_mesmo_destino[web] ____________
+
+entrada = 'web'
+tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-115/test_a3_src_tools_antes_da_ent1')
+
+>       assert destinos["src"] is not None and Path(destinos["src"]) == esperado, resumo
+E       AssertionError: destino_log={'src': 'C:\\AgentDBA\\logs\\kill_approval.log', 'tools': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\pytest-of-Frederich\\pytest-115\\test_a3_src_tools_antes_da_ent1\\dir_env\\kill_approval.log'}, esperado=C:\Users\Frederich\AppData\Local\Temp\pytest-of-Frederich\pytest-115\test_a3_src_tools_antes_da_ent1\dir_env\kill_approval.log, chamadas=[{'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.1joxfvmnKl\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False, 'src_oracle_dba_importado': True}]
+E       assert ('C:\\AgentDBA\\logs\\kill_approval.log' is not None and WindowsPath('C:/AgentDBA/logs/kill_approval.log') == WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-115/test_a3_src_tools_antes_da_ent1/dir_env/kill_approval.log'))
+E        +  where WindowsPath('C:/AgentDBA/logs/kill_approval.log') = Path('C:\\AgentDBA\\logs\\kill_approval.log')
+
+tests\test_carga_env_entrada.py:304: AssertionError
+============================== warnings summary ===============================
+..\..\..\..\..\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2 failed, 10 deselected, 13 warnings in 8.64s
+```

@@ -998,9 +998,10 @@ sys.path.insert(0, raiz)
 antes = os.path.exists(esperado_dir)
 from src.tools import oracle_dba as od
 assert os.path.exists(esperado_dir) == antes, "o import não pode criar nem remover a pasta"
-print(str(od.DIRETORIO_LOG_APROVACAO))
-print(str(od.CAMINHO_LOG_APROVACAO_PADRAO))
+print(str(od._diretorio_log_aprovacao()))
+print(str(od._caminho_log_efetivo(None)))
 print(od.DIRETORIO_LOG_PADRAO)
+assert os.path.exists(esperado_dir) == antes, "resolver o destino não pode criar a pasta"
 """
 
 
@@ -1041,9 +1042,13 @@ def test_import_com_padrao_nao_cria_C_AgentDBA(tmp_path):
 
 
 def test_conftest_define_diretorio_antes_do_import():
-    """AGENTDBA_LOG_DIR (tmp, fora do OneDrive) já valia quando o módulo de produção foi importado."""
+    """AGENTDBA_LOG_DIR (tmp, fora do OneDrive) é o diretório que o módulo resolve."""
     destino = Path(os.environ["AGENTDBA_LOG_DIR"])
-    assert oracle_dba.DIRETORIO_LOG_APROVACAO == destino
+    assert oracle_dba._diretorio_log_aprovacao() == destino
+    for nome in ("src.tools.oracle_dba", "tools.oracle_dba"):
+        modulo = sys.modules.get(nome)
+        if modulo is not None:
+            assert modulo._diretorio_log_aprovacao() == destino
     assert destino.name.startswith("agentdba_test_")
     assert "onedrive" not in str(destino).lower()
 
