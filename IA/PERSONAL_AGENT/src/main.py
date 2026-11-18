@@ -4,6 +4,7 @@ import logging
 import os
 import socket
 import sys
+import threading
 from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -15,17 +16,42 @@ for path_str in (str(ROOT_DIR), str(SRC_DIR)):
     if path_str not in sys.path:
         sys.path.insert(0, path_str)
 
-# Carga única do .env (isolamento do .env, D1/D2), antes de qualquer import do projeto.
-# override=False: variável definida no shell vence o arquivo (decisão 2a). Nenhum módulo recarrega o .env;
-# alterar o .env exige reiniciar a CLI (decisão 2b).
-# ORACLE_SANDBOX só vale se definida pelo operador no shell (incidente 01:27): se vier do arquivo, é
-# descartada aqui; o WARNING sai depois do logging.basicConfig (antes dele, a configuração seria implícita).
-_ORACLE_SANDBOX_DO_SHELL = "ORACLE_SANDBOX" in os.environ
-load_dotenv(ROOT_DIR / ".env", override=False)
-_ORACLE_SANDBOX_DESCARTADA = False
-if not _ORACLE_SANDBOX_DO_SHELL and "ORACLE_SANDBOX" in os.environ:
-    del os.environ["ORACLE_SANDBOX"]
-    _ORACLE_SANDBOX_DESCARTADA = True
+# >>> carga-env (texto idêntico em app.py e src/main.py; isolamento do .env, decisão em
+# docs/entregas/isolamento_env/decisao_fase3.md, P1)
+# - Uma carga por processo, antes de qualquer import do projeto. O estado fica em sys (um por processo; sobrevive
+#   aos reruns do Streamlit) e a carga roda sob lock. Alterar o .env exige reiniciar a CLI ou a Web.
+# - override=False: o ambiente (shell ou perfil) vence o arquivo.
+# - ORACLE_SANDBOX só vale se já estava no ambiente antes da primeira carga (incidente 01:27). Se vier do arquivo,
+#   o finally a remove, inclusive quando a carga falha (C1).
+# - Falha na carga: fail-closed até reiniciar o processo, sem nova tentativa (mensagem fixa, sem valores).
+_AVISO_SANDBOX_DESCARTADA = (
+    "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell. "
+    "Remova a chave do .env."
+)
+_ESTADO_ENV = vars(sys).setdefault(
+    "_personal_agent_estado_env",
+    {"lock": threading.Lock(), "estado": None, "falha": None, "sandbox_descartada": False, "sombreadas": ()},
+)
+_CARREGOU_AGORA = False
+with _ESTADO_ENV["lock"]:
+    if _ESTADO_ENV["estado"] is None:
+        _CARREGOU_AGORA = True
+        _ESTADO_ENV["estado"] = "falhou"
+        _sandbox_do_shell = "ORACLE_SANDBOX" in os.environ
+        try:
+            load_dotenv(ROOT_DIR / ".env", override=False)
+            _ESTADO_ENV["estado"] = "ok"
+        except Exception as exc:
+            _ESTADO_ENV["falha"] = type(exc).__name__
+        finally:
+            if not _sandbox_do_shell and os.environ.pop("ORACLE_SANDBOX", None) is not None:
+                _ESTADO_ENV["sandbox_descartada"] = True
+if _ESTADO_ENV["estado"] != "ok":
+    raise RuntimeError(
+        f"Carga do .env falhou nesta subida ({_ESTADO_ENV['falha'] or 'interrompida'}); "
+        "nada do agente foi carregado. Corrija o .env e reinicie o processo."
+    )
+# <<< carga-env
 
 # Configuração do Log de Auditoria (Formato: YYYY-MM-DD HH:MM:SS | INFO | Mensagem)
 LOG_FILE_ROOT = ROOT_DIR / "auditoria_oracle.log"
@@ -44,10 +70,10 @@ logging.basicConfig(
 # Silencia logs de transporte HTTP para manter o auditoria_oracle.log 100% limpo
 for noisy_logger in ("httpx", "httpx2", "httpcore", "httpcore2", "openai"):
     logging.getLogger(noisy_logger).setLevel(logging.WARNING)
-if _ORACLE_SANDBOX_DESCARTADA:
-    logging.getLogger(__name__).warning(
-        "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell."
-    )
+if _CARREGOU_AGORA:  # avisos da carga: uma vez por processo, depois do basicConfig
+    _log_carga = logging.getLogger(__name__)
+    if _ESTADO_ENV["sandbox_descartada"]:
+        _log_carga.warning(_AVISO_SANDBOX_DESCARTADA)
 
 # 1. Importando as Ferramentas de SO
 from tools.os_tools import (
