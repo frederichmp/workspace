@@ -14,7 +14,7 @@ Você verifica; não corrige nada. O CLAUDE.md do projeto já está no seu conte
 
 ## Sequência (detalhes e greps em docs/PROCESSO.md §5)
 0. Perfil do Windows, só nomes, nunca valores (PowerShell, comando no §5). Esperado: nenhum nome com prefixo `ORACLE_`, `EMAIL_`, `GEMINI_`, `AGENTDBA_` ou `SCRIPTS_`.
-1. `git status --short -- .`, comparado com os arquivos previstos no pedido ou no plano.
+1. `git status --short -- .`, comparado com os arquivos previstos no pedido ou no plano. Caminho fora do previsto, rastreado ou não, é FALHA: informe o caminho, sem ler nem apagar. Se estiver em `tests/`, `src/` ou na raiz do projeto, PARE antes do pytest (ele seria coletado ou importado).
 2. pytest sem conexão, com a saída gravada em `docs/entregas/<tarefa>/`:
    `env -u ORACLE_SANDBOX PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -rs -p no:cacheprovider`
 3. Greps padrão do §5 e os da seção "Verificação" do plano da tarefa (`docs/plans/<tarefa>.md`), cada um com o resultado esperado.

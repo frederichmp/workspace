@@ -80,7 +80,7 @@ Ordem: perfil, estado do git, pytest, greps. FALHA no passo 0 ou no 2: parar e i
 @((Get-Item 'HKCU:\Environment').Property) + @((Get-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment').Property) | Where-Object { $_ -match '^(ORACLE_|EMAIL_|GEMINI_|AGENTDBA_|SCRIPTS_)' }
 ```
 
-**1. Estado do git.** Esperado: só os arquivos previstos no plano. A raiz do git é `Workspace/`; o `-- .` limita ao projeto.
+**1. Estado do git.** Esperado: só os arquivos previstos no plano. Caminho fora do previsto, rastreado ou não, é FALHA; em `tests/`, `src/` ou na raiz do projeto, parar antes do pytest. A raiz do git é `Workspace/`; o `-- .` limita ao projeto.
 
 ```bash
 git status --short -- .
@@ -148,6 +148,7 @@ Curadas pela sessão principal ao fechar cada tarefa; entram no commit e não s�
 - **L9. Linhas envelhecem (recorrente).** `arquivo:linha` citado em plano e log muda a cada commit. → Reconferir antes de citar ou decidir. → Trecho citado que não bate com a linha.
 - **L10. Raiz do git (estrutura).** A raiz é `Workspace/`: os diffs mostram `IA/PERSONAL_AGENT/...` e outros projetos aparecem como não rastreados. → `git add` com caminhos explícitos, nunca `-A` ou `.`. → `git diff --cached --stat` antes do commit.
 - **L11. Frontmatter frágil (2026-11-18; `124e12c`).** As descrições de `mecanico` e `seguranca` tinham ": " sem aspas, YAML inválido num parser estrito; o Claude Code tolerava, mas YAML que não faz parse descarta o agente sem aviso. → Descrições entre aspas; validar com PyYAML. → Agente ausente em `/agents`.
+- **L12. Não rastreado fora da lista (2026-11-18; verificação da tarefa `processo-subagentes`).** O `verificador`, ainda com a definição antiga, marcou o `git status` como OK listando um não rastreado fora da lista prevista (`docs/entregas/revisao_fases_1_2/revisao_adversarial_gemini.md`, criado às 12:28 fora da sessão). → Caminho fora do previsto, rastreado ou não, é FALHA no retorno; em `tests/`, `src/` ou na raiz, parar antes do pytest; a sessão principal confere a lista do retorno. → Comparar o `git status` da abertura com o do retorno.
 
 ## 8. Abertura de chat (para o responsável)
 
