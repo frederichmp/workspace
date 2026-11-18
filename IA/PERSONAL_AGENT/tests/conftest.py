@@ -62,6 +62,22 @@ def _snapshot_arquivo(caminho):
 SNAPSHOT_LOG_PADRAO_INICIO = _snapshot_arquivo(LOG_PADRAO_PRODUCAO)
 PASTA_PADRAO_EXISTIA_NO_INICIO = PASTA_PADRAO_PRODUCAO.exists()
 
+# Logs reais vigiados (somente stat; sem ler conteúdo e sem criar pastas).
+LOGS_REAIS_VIGIADOS = (LOG_PADRAO_PRODUCAO, LOG_REAL_APROVACAO)
+
+
+def _instantaneo_logs_reais():
+    """Instantâneo (existe, tamanho, mtime_ns) de cada log real vigiado."""
+    return tuple(_snapshot_arquivo(c) for c in LOGS_REAIS_VIGIADOS)
+
+
+INSTANTANEO_LOGS_REAIS_INICIO = _instantaneo_logs_reais()
+
+
+def _log_real_tocado(inicio, atual):
+    """True se algum log vigiado foi criado ou teve tamanho/mtime alterado."""
+    return tuple(inicio) != tuple(atual)
+
 
 @pytest.fixture(scope="session")
 def snapshot_log_real_inicio():
@@ -99,6 +115,16 @@ def pytest_sessionfinish(session, exitstatus):
         session.exitstatus = 1
     if not PASTA_PADRAO_EXISTIA_NO_INICIO and PASTA_PADRAO_PRODUCAO.exists():
         print("\nFALHA DE GOVERNANCA: a suíte de testes criou C:\\AgentDBA.")
+        session.exitstatus = 1
+
+    if os.environ.get("AGENTDBA_LOG_DIR") != _DIR_LOG_TESTE:
+        print(
+            "\nFALHA DE GOVERNANCA: AGENTDBA_LOG_DIR foi sobrescrito durante a sessão de testes "
+            "(o diretório do log de aprovações deixou de ser o temporário da suíte)."
+        )
+        session.exitstatus = 1
+    if _log_real_tocado(INSTANTANEO_LOGS_REAIS_INICIO, _instantaneo_logs_reais()):
+        print("\nFALHA DE GOVERNANCA: log real de aprovação foi tocado durante a sessão de testes.")
         session.exitstatus = 1
 
     shutil.rmtree(_DIR_LOG_TESTE, ignore_errors=True)
