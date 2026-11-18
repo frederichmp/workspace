@@ -862,10 +862,22 @@ sys.stdin.readline()
 """
 
 
+_PREFIXOS_ENV_SENSIVEIS = ("ORACLE_", "EMAIL_", "GEMINI_")
+
+
+def _env_sem_segredos(remover=()):
+    """Cópia de os.environ sem ORACLE_*, EMAIL_*, GEMINI_* (O2 do item 1) e sem as chaves em `remover`."""
+    return {
+        k: v for k, v in os.environ.items()
+        if not k.startswith(_PREFIXOS_ENV_SENSIVEIS) and k not in remover
+    }
+
+
 def _filho_com_lock(caminho_lock):
     proc = subprocess.Popen(
         [sys.executable, "-I", "-c", _CODIGO_FILHO_LOCK, str(caminho_lock)],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        env=_env_sem_segredos(),
     )
     linha = proc.stdout.readline()
     assert linha.strip() == "LOCKED", f"filho não obteve o lock: {proc.stderr.read() if proc.poll() else linha!r}"
@@ -993,7 +1005,7 @@ print(od.DIRETORIO_LOG_PADRAO)
 
 
 def _importar_em_subprocesso(tmp_path, env_extra, pasta_a_vigiar):
-    env = {k: v for k, v in os.environ.items() if k not in ("AGENTDBA_LOG_DIR", "ORACLE_SANDBOX")}
+    env = _env_sem_segredos(remover=("AGENTDBA_LOG_DIR",))
     env.update(env_extra)
     res = subprocess.run(
         [sys.executable, "-I", "-c", _CODIGO_FILHO_IMPORT, str(RAIZ), str(pasta_a_vigiar)],
@@ -1001,6 +1013,16 @@ def _importar_em_subprocesso(tmp_path, env_extra, pasta_a_vigiar):
     )
     assert res.returncode == 0, res.stderr
     return res.stdout.splitlines()
+
+
+def test_env_de_subprocesso_sem_segredos(monkeypatch):
+    for nome in ("ORACLE_USER_KILL", "EMAIL_SENHA_APP", "GEMINI_API_KEY", "ORACLE_SANDBOX"):
+        monkeypatch.setenv(nome, "x")
+    monkeypatch.setenv("OUTRA_VAR", "ok")
+    env = _env_sem_segredos()
+    assert not [k for k in env if k.startswith(_PREFIXOS_ENV_SENSIVEIS)]
+    assert env["OUTRA_VAR"] == "ok"
+    assert "OUTRA_VAR" not in _env_sem_segredos(remover=("OUTRA_VAR",))
 
 
 def test_import_nao_cria_a_pasta_do_log(tmp_path):
