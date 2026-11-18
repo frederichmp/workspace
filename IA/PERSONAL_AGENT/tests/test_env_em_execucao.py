@@ -7,7 +7,7 @@ import dotenv
 import dotenv.main
 import oracledb
 
-from src.tools import gemini_router, notificador, oracle_dba
+from src.tools import executor, gemini_router, notificador, oracle_dba, rag_search
 from src.tools.oracle_dba import conduzir_kill_hitl
 from tests.fakes_oracle import USER_DIAG_FAKE, USER_KILL_FAKE, _OracleFake, _linha_alvo
 
@@ -105,7 +105,8 @@ def test_kill_apos_alteracao_do_env_usa_valores_do_start(monkeypatch, tmp_path):
 
 
 def test_fluxo_nao_le_nem_recarrega_dotenv(monkeypatch, tmp_path):
-    """D6.2: nenhum leitor de .env é acionado durante o fluxo (kill, e-mail e análise Gemini).
+    """D6.2: nenhum leitor de .env é acionado durante o fluxo (kill, e-mail, análise Gemini, execução de
+    script homologado e busca RAG).
 
     O guarda em DotEnv.__init__ pega qualquer leitura, inclusive de nomes ligados no import
     (`from dotenv import load_dotenv`) e de caminho explícito; load_dotenv e dotenv_values trocados por
@@ -133,6 +134,8 @@ def test_fluxo_nao_le_nem_recarrega_dotenv(monkeypatch, tmp_path):
     for chave, valor in VALORES_START.items():
         monkeypatch.setenv(chave, valor)
     monkeypatch.setenv("GEMINI_API_KEY", "chave_ficticia_d62")
+    monkeypatch.setenv("ORACLE_USER_READ", "read_inicio")
+    monkeypatch.setenv("ORACLE_PASSWORD_READ", "senha_read_inicio")
 
     _SmtpFake.logins = []
     _SmtpFake.enviados = 0
@@ -143,7 +146,58 @@ def test_fluxo_nao_le_nem_recarrega_dotenv(monkeypatch, tmp_path):
         lambda dsn, timeout=3.0: {"acessivel": True, "host": "host-teste", "porta": 1521, "latencia_ms": 0.1},
     )
     fake = _OracleFakeValoresStart([_linha_alvo(), _linha_alvo()], status_pkg="ENCERRADA")
-    monkeypatch.setattr(oracledb, "connect", fake.connect)
+
+    # executar_script (conta READ): conexão e cursor falsos devolvem uma linha fixa; o kill segue no fake acima.
+    conexoes_read = []
+
+    class _CursorSelectFalso:
+        description = [("INST_ID",)]
+
+        def execute(self, sql, binds=None):
+            pass
+
+        def fetchone(self):
+            return (1,)
+
+        def fetchmany(self, n):
+            return [(1,)]
+
+        def close(self):
+            pass
+
+    class _ConexaoSelectFalsa:
+        call_timeout = None
+
+        def cursor(self):
+            return _CursorSelectFalso()
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    def _connect(user=None, password=None, dsn=None, **kwargs):
+        if user == "read_inicio":
+            conexoes_read.append(user)
+            return _ConexaoSelectFalsa()
+        return fake.connect(user=user, password=password, dsn=dsn, **kwargs)
+
+    monkeypatch.setattr(oracledb, "connect", _connect)
+
+    # buscar_script_interno: base vetorial falsa (sem chromadb, modelo ou rede); CHROMA_DB_DIR existe em tmp_path.
+    chroma_dir = tmp_path / "chroma_db"
+    chroma_dir.mkdir()
+    monkeypatch.setattr(rag_search, "CHROMA_DB_DIR", chroma_dir)
+
+    class _VectorstoreFalso:
+        def similarity_search_with_score(self, consulta, k=3):
+            doc = types.SimpleNamespace(
+                metadata={"source": str(tmp_path / "script_fictico.sql")}, page_content="SELECT 1 FROM dual"
+            )
+            return [(doc, 0.25)]
+
+    monkeypatch.setattr(rag_search, "_obter_vectorstore", lambda: _VectorstoreFalso())
 
     # Gemini neutralizado: sem rede; só registra a chave recebida (booleano) e devolve texto fixo.
     chaves_configuradas = []
@@ -159,6 +213,8 @@ def test_fluxo_nao_le_nem_recarrega_dotenv(monkeypatch, tmp_path):
     monkeypatch.setattr(gemini_router.genai, "GenerativeModel", _ModeloFalso)
 
     desfecho = None
+    saida_script = None
+    busca = None
     try:
         desfecho = conduzir_kill_hitl(
             {"inst_id": 1, "sid": 101, "serial": 202},
@@ -167,6 +223,8 @@ def test_fluxo_nao_le_nem_recarrega_dotenv(monkeypatch, tmp_path):
             caminho_log=tmp_path / "kill.log",
         )
         laudo = json.loads(gemini_router.analisar_log_complexo("dados fictícios", "contexto fictício"))
+        saida_script = json.loads(executor.executar_script("verificar_dual", {}))
+        busca = json.loads(rag_search.buscar_script_interno("sessões bloqueadas"))
     except AssertionError:
         laudo = None  # a leitura já foi registrada em `leituras`
 
@@ -175,3 +233,8 @@ def test_fluxo_nao_le_nem_recarrega_dotenv(monkeypatch, tmp_path):
     assert _SmtpFake.logins == ["remetente_inicio@exemplo.invalid"]
     assert laudo is not None and laudo["status"] == "sucesso"
     assert chaves_configuradas == ["chave_ficticia_d62"]
+    assert saida_script is not None and saida_script["status"] == "sucesso"
+    assert saida_script["tipo"] == "SELECT" and saida_script["saida"] == [{"inst_id": 1}]
+    assert conexoes_read == ["read_inicio"]
+    assert busca is not None and busca["status"] == "sucesso"
+    assert busca["total_encontrado"] == 1 and busca["scripts_homologados"][0]["arquivo"] == "script_fictico.sql"

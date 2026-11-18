@@ -159,3 +159,14 @@ def test_operador_e_lido_do_ambiente_no_inicio_do_processo(tmp_path, sandbox_she
     ultima = (res.stderr.strip().splitlines() or [""])[-1]
     assert res.returncode == 0, f"subprocesso falhou (returncode={res.returncode}): {ultima}"
     assert json.loads(res.stdout.strip().splitlines()[-1])["operador_visto"] == sandbox_shell
+
+
+def test_guard_oracle_sandbox_e_autouse_e_de_sessao(request):
+    """D6.4: a fixture guard_oracle_sandbox é autouse (aparece em fixturenames sem ser pedida) e tem escopo session."""
+    assert "guard_oracle_sandbox" in request.fixturenames  # este teste não a pede: só o autouse a traz
+    # fixturenames inclui dependências: o autouse `inicializar_registro_testes` pede a guard e a traria mesmo
+    # sem autouse. A lista de autouse do nó (API interna do pytest 9, conferida) fecha essa brecha.
+    assert "guard_oracle_sandbox" in set(request._fixturemanager._getautousenames(request.node))
+    definicoes = request._fixturemanager.getfixturedefs("guard_oracle_sandbox", request.node)
+    assert definicoes, "FixtureDef de guard_oracle_sandbox não encontrada"
+    assert definicoes[-1].scope == "session"
