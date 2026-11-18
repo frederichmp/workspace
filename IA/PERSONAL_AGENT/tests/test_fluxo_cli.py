@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests._guarda_env import instalar as _instalar_guarda_env
 from tests.fakes_oracle import (
     USER_DIAG_FAKE,
     USER_KILL_FAKE,
@@ -75,40 +76,45 @@ def _filehandlers_auditoria():
     return encontrados
 
 
-def _instalar_guarda_dotenv(mp):
-    """dotenv_values vira stub (devolve {}); DotEnv recusa e registra qualquer leitura de RAIZ/.env.
+def _instalar_guarda_dotenv(mp, ficticio):
+    """load_dotenv e dotenv_values viram stubs que registram a chamada; o guarda de tests/_guarda_env.py
+    recusa (LeituraEnvRealBloqueada) e registra qualquer leitura de RAIZ/.env e redireciona open/io.open/os.stat
+    do .env real para `ficticio` (arquivo vazio de teste).
 
-    Devolve a lista de leituras reais, que o teste afirma vazia (P3b; nenhum leitor chega ao .env real)."""
+    Devolve o registro; o teste afirma `leituras_env_reais == []` (nenhum leitor chega ao .env real) e
+    `cargas` conta as chamadas a load_dotenv (a carga em si). As chamadas a dotenv_values ficam em `valores`."""
     import dotenv
-    import dotenv.main
 
-    leituras = []
-    real = os.path.normcase(os.path.realpath(RAIZ / ".env"))
-    init_original = dotenv.main.DotEnv.__init__
+    registro = _instalar_guarda_env(mp.setattr, RAIZ / ".env", ficticio)
 
-    def _guarda_init(self, *args, **kwargs):
-        caminho = kwargs["dotenv_path"] if "dotenv_path" in kwargs else (args[0] if args else None)
-        if caminho is not None and not hasattr(caminho, "read"):
-            try:
-                alvo = os.path.normcase(os.path.realpath(os.fspath(caminho)))
-            except Exception:
-                alvo = None
-            if alvo == real:
-                leituras.append(str(caminho))
-                raise AssertionError("leitura do .env real bloqueada pelo guarda do teste")
-        return init_original(self, *args, **kwargs)
+    def _load_dotenv(*a, **k):
+        registro.cargas.append({"funcao": "load_dotenv"})
+        return False
 
-    mp.setattr(dotenv, "dotenv_values", lambda *a, **k: {})
-    mp.setattr(dotenv.main.DotEnv, "__init__", _guarda_init)
-    return leituras
+    def _dotenv_values(*a, **k):
+        registro.valores.append({"funcao": "dotenv_values"})
+        return {}
+
+    mp.setattr(dotenv, "load_dotenv", _load_dotenv)
+    mp.setattr(dotenv, "dotenv_values", _dotenv_values)
+    return registro
+
+
+_AUSENTE = object()
+_ATRIBUTO_ESTADO_ENV = "_personal_agent_estado_env"
 
 
 @pytest.fixture(scope="module")
-def main_cli():
+def main_cli(tmp_path_factory):
     mp = pytest.MonkeyPatch()
-    import dotenv
-    mp.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
-    leituras_env_reais = _instalar_guarda_dotenv(mp)
+    ficticio = tmp_path_factory.mktemp("env_ficticio_cli") / "ficticio.env"
+    ficticio.write_bytes(b"")
+    registro = _instalar_guarda_dotenv(mp, ficticio)
+    leituras_env_reais = registro.leituras_env_reais
+    # Achado 2: o estado da carga do .env vive em sys; se já existir, o import de main não carregaria nada.
+    # Salvo aqui e removido logo antes do import; restaurado EXATAMENTE no teardown (sem
+    # monkeypatch.delattr: não registra restauração sobre atributo ausente, L1).
+    estado_env_antes = vars(sys).get(_ATRIBUTO_ESTADO_ENV, _AUSENTE)
     for caminho in (str(RAIZ / "src"), str(RAIZ)):
         mp.syspath_prepend(caminho)
     mp.setenv("ORACLE_USER_DIAG", USER_DIAG_FAKE)
@@ -130,11 +136,13 @@ def main_cli():
     nulo = logging.NullHandler()
     logging.getLogger().addHandler(nulo)
     ja_importado = "main" in sys.modules
+    vars(sys).pop(_ATRIBUTO_ESTADO_ENV, None)
     try:
         import main
         main.client = _LLMFalso()
         assert not _filehandlers_auditoria(), "import de main não pode adicionar FileHandler de auditoria"
         assert leituras_env_reais == []
+        assert len(registro.cargas) == 1, "a carga do .env deveria ter rodado exatamente 1 vez no import de main"
         yield main
         assert leituras_env_reais == []
     finally:
@@ -142,6 +150,11 @@ def main_cli():
         if not ja_importado:
             sys.modules.pop("main", None)
         mp.undo()
+        if estado_env_antes is _AUSENTE:
+            vars(sys).pop(_ATRIBUTO_ESTADO_ENV, None)
+        else:
+            vars(sys)[_ATRIBUTO_ESTADO_ENV] = estado_env_antes
+        assert leituras_env_reais == []
 
 
 @pytest.fixture

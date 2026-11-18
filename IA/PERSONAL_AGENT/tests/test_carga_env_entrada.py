@@ -32,12 +32,11 @@ import dotenv.main
 
 chamadas = []          # load_dotenv: (caminho recebido, override)
 chamadas_values = []   # dotenv_values: (caminho recebido)
-leituras_reais = []    # qualquer DotEnv(...) que resolva para RAIZ/.env
+
+from tests._guarda_env import instalar, LeituraEnvRealBloqueada  # noqa: F401  (raiz está no sys.path)
 
 _original = dotenv.load_dotenv
 _original_values = dotenv.dotenv_values
-_init_original = dotenv.main.DotEnv.__init__
-_real = os.path.normcase(os.path.realpath(os.path.join(raiz, ".env")))
 
 
 def _wrapper(dotenv_path=None, *args, **kwargs):
@@ -55,22 +54,12 @@ def _wrapper_values(dotenv_path=None, *args, **kwargs):
     return _original_values(env_ficticio, *args, **kwargs)
 
 
-def _guarda_init(self, *args, **kwargs):
-    caminho = kwargs["dotenv_path"] if "dotenv_path" in kwargs else (args[0] if args else None)
-    if caminho is not None and not hasattr(caminho, "read"):
-        try:
-            alvo = os.path.normcase(os.path.realpath(os.fspath(caminho)))
-        except Exception:
-            alvo = None
-        if alvo == _real:
-            leituras_reais.append(str(caminho))
-            raise AssertionError("leitura do .env real bloqueada pelo guarda do teste")
-    return _init_original(self, *args, **kwargs)
-
-
 dotenv.load_dotenv = _wrapper
 dotenv.dotenv_values = _wrapper_values
-dotenv.main.DotEnv.__init__ = _guarda_init
+# Guarda do .env real (open/io.open/os.stat redirecionados ao fictício; DotEnv do real bloqueado). Os wrappers
+# acima ainda redirecionam load_dotenv/dotenv_values; setattr simples basta (o processo é descartável).
+registro = instalar(setattr, os.path.join(raiz, ".env"), env_ficticio)
+leituras_reais = registro.leituras_env_reais  # qualquer leitura de RAIZ/.env (DotEnv, open, io.open)
 
 capturados = []
 
@@ -117,6 +106,17 @@ por_run = []       # um item por run: estado do ambiente e exceções depois do 
 excecoes_harness = []
 
 
+aberturas_por_run = []  # por run: aberturas redirecionadas de open/io.open (só caminho original e tipo)
+_aberturas_vistas = 0
+
+
+def _aberturas_do_run():
+    global _aberturas_vistas
+    novas = [a for a in registro.aberturas_redirecionadas if a["tipo"] in ("open", "io.open")][_aberturas_vistas:]
+    _aberturas_vistas += len(novas)
+    return novas
+
+
 def _estado(excecoes):
     return {
         "sandbox": os.environ.get("ORACLE_SANDBOX", "AUSENTE"),
@@ -156,6 +156,7 @@ try:
             estado["warning_tela"].extend(str(w.value) for w in at.warning)
             estado["tela_texto"] += repr(at.main) + repr(at.sidebar)
         por_run.append(estado)
+        aberturas_por_run.append(_aberturas_do_run())
         apos = cfg.get("apos_run", {}).get(str(i))
         if apos is not None:
             with open(env_ficticio, "wb") as f:
@@ -186,6 +187,7 @@ print("\n" + json.dumps({
     "chamadas": chamadas,
     "chamadas_values": chamadas_values,
     "leituras_reais": leituras_reais,
+    "aberturas_por_run": aberturas_por_run,
     "excecoes_harness": excecoes_harness,
     "destino_log": {"src": _destino_log("src.tools.oracle_dba"), "tools": _destino_log("tools.oracle_dba")},
 }))

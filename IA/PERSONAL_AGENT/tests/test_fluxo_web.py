@@ -9,11 +9,13 @@ import logging
 import os
 import re
 import socket
+import sys
 import types
 from pathlib import Path
 
 import pytest
 
+from tests._guarda_env import instalar as _instalar_guarda_env
 from tests.fakes_oracle import USER_DIAG_FAKE, USER_KILL_FAKE, _linha_alvo, _OracleFake
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -112,32 +114,32 @@ def snapshot_logs_reais():
     assert _snapshot_logs_reais() == antes, "Log real alterado pelo teste Web"
 
 
-def _instalar_guarda_dotenv(mp):
-    """dotenv_values vira stub (devolve {}); DotEnv recusa e registra qualquer leitura de RAIZ/.env.
+def _instalar_guarda_dotenv(mp, ficticio):
+    """load_dotenv e dotenv_values viram stubs que registram a chamada; o guarda de tests/_guarda_env.py
+    recusa (LeituraEnvRealBloqueada) e registra qualquer leitura de RAIZ/.env e redireciona open/io.open/os.stat
+    do .env real para `ficticio` (arquivo vazio de teste).
 
-    Devolve a lista de leituras reais, que o teste afirma vazia (P3b; nenhum leitor chega ao .env real)."""
+    Devolve o registro; o teste afirma `leituras_env_reais == []` (nenhum leitor chega ao .env real) e
+    `cargas >= 1` (a carga rodou; `cargas` conta as chamadas a load_dotenv, `valores` as de dotenv_values)."""
     import dotenv
-    import dotenv.main
 
-    leituras = []
-    real = os.path.normcase(os.path.realpath(RAIZ / ".env"))
-    init_original = dotenv.main.DotEnv.__init__
+    registro = _instalar_guarda_env(mp.setattr, RAIZ / ".env", ficticio)
 
-    def _guarda_init(self, *args, **kwargs):
-        caminho = kwargs["dotenv_path"] if "dotenv_path" in kwargs else (args[0] if args else None)
-        if caminho is not None and not hasattr(caminho, "read"):
-            try:
-                alvo = os.path.normcase(os.path.realpath(os.fspath(caminho)))
-            except Exception:
-                alvo = None
-            if alvo == real:
-                leituras.append(str(caminho))
-                raise AssertionError("leitura do .env real bloqueada pelo guarda do teste")
-        return init_original(self, *args, **kwargs)
+    def _load_dotenv(*a, **k):
+        registro.cargas.append({"funcao": "load_dotenv"})
+        return False
 
-    mp.setattr(dotenv, "dotenv_values", lambda *a, **k: {})
-    mp.setattr(dotenv.main.DotEnv, "__init__", _guarda_init)
-    return leituras
+    def _dotenv_values(*a, **k):
+        registro.valores.append({"funcao": "dotenv_values"})
+        return {}
+
+    mp.setattr(dotenv, "load_dotenv", _load_dotenv)
+    mp.setattr(dotenv, "dotenv_values", _dotenv_values)
+    return registro
+
+
+_AUSENTE = object()
+_ATRIBUTO_ESTADO_ENV = "_personal_agent_estado_env"
 
 
 def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=True):
@@ -151,11 +153,10 @@ def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=
     monkeypatch.setenv("EMAIL_DESTINATARIO", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
 
-    # app.py chama load_dotenv(ROOT/".env"): proibido ler o .env
-    import dotenv
-
-    monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
-    leituras_env_reais = _instalar_guarda_dotenv(monkeypatch)
+    # app.py chama load_dotenv(ROOT/".env"): proibido ler o .env real (stubs + guarda; open/stat vão ao fictício)
+    ficticio = tmp_path / "env_ficticio_web.env"
+    ficticio.write_bytes(b"")
+    registro_env = _instalar_guarda_dotenv(monkeypatch, ficticio)
 
     # logging.basicConfig vira no-op (já existe handler na raiz) e não cria FileHandler real
     raiz_log = logging.getLogger()
@@ -212,26 +213,41 @@ def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=
 
     amb.at = AppTest.from_file(str(APP), default_timeout=30)
     amb.destinos_inesperados = destinos_inesperados
-    amb.leituras_env_reais = leituras_env_reais
+    amb.leituras_env_reais = registro_env.leituras_env_reais
+    amb.cargas = registro_env.cargas
     amb._null = null
     return amb
 
 
 @pytest.fixture
 def montar_web(monkeypatch, tmp_path, snapshot_logs_reais):
-    """Fábrica de cenários; remove o NullHandler da raiz ao fim."""
+    """Fábrica de cenários; remove o NullHandler da raiz ao fim.
+
+    Achado 2: o estado da carga do .env vive em sys; se já existir (outro teste, outra entrada), a carga
+    não rodaria e o teste não provaria nada. Salvo na abertura, removido antes de cada cenário e restaurado
+    EXATAMENTE no teardown (sem monkeypatch.delattr: não registra restauração sobre atributo ausente, L1)."""
     criados = []
+    estado_env_antes = vars(sys).get(_ATRIBUTO_ESTADO_ENV, _AUSENTE)
 
     def _fabrica(linhas_diag, status_pkg=None, kill_permitido=True):
+        vars(sys).pop(_ATRIBUTO_ESTADO_ENV, None)
         amb = _montar(monkeypatch, tmp_path, linhas_diag, status_pkg, kill_permitido)
         criados.append(amb)
         return amb
 
-    yield _fabrica
+    try:
+        yield _fabrica
+    finally:
+        if estado_env_antes is _AUSENTE:
+            vars(sys).pop(_ATRIBUTO_ESTADO_ENV, None)
+        else:
+            vars(sys)[_ATRIBUTO_ESTADO_ENV] = estado_env_antes
+        for amb in criados:
+            logging.getLogger().removeHandler(amb._null)
     for amb in criados:
-        logging.getLogger().removeHandler(amb._null)
+        assert amb.leituras_env_reais == [], "leitura do .env real durante o teste Web"
         assert amb.destinos_inesperados == []
-        assert amb.leituras_env_reais == []
+        assert len(amb.cargas) >= 1, "a carga do .env não rodou neste teste Web"
 
 
 def _ate_painel_hitl(amb):
