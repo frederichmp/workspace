@@ -15,7 +15,17 @@ for path_str in (str(ROOT_DIR), str(SRC_DIR)):
     if path_str not in sys.path:
         sys.path.insert(0, path_str)
 
-load_dotenv(ROOT_DIR / ".env")
+# Carga única do .env (isolamento do .env, D1/D2), antes de qualquer import do projeto.
+# override=False: variável definida no shell vence o arquivo (decisão 2a). Nenhum módulo recarrega o .env;
+# alterar o .env exige reiniciar a CLI (decisão 2b).
+# ORACLE_SANDBOX só vale se definida pelo operador no shell (incidente 01:27): se vier do arquivo, é
+# descartada aqui; o WARNING sai depois do logging.basicConfig (antes dele, a configuração seria implícita).
+_ORACLE_SANDBOX_DO_SHELL = "ORACLE_SANDBOX" in os.environ
+load_dotenv(ROOT_DIR / ".env", override=False)
+_ORACLE_SANDBOX_DESCARTADA = False
+if not _ORACLE_SANDBOX_DO_SHELL and "ORACLE_SANDBOX" in os.environ:
+    del os.environ["ORACLE_SANDBOX"]
+    _ORACLE_SANDBOX_DESCARTADA = True
 
 # Configuração do Log de Auditoria (Formato: YYYY-MM-DD HH:MM:SS | INFO | Mensagem)
 LOG_FILE_ROOT = ROOT_DIR / "auditoria_oracle.log"
@@ -34,6 +44,10 @@ logging.basicConfig(
 # Silencia logs de transporte HTTP para manter o auditoria_oracle.log 100% limpo
 for noisy_logger in ("httpx", "httpx2", "httpcore", "httpcore2", "openai"):
     logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+if _ORACLE_SANDBOX_DESCARTADA:
+    logging.getLogger(__name__).warning(
+        "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell."
+    )
 
 # 1. Importando as Ferramentas de SO
 from tools.os_tools import (
