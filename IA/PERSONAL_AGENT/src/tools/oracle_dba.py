@@ -1450,7 +1450,6 @@ def registrar_decisao_kill(
                         "motivo": motivo,
                         "hash_payload": hash_aprovado,
                         "parametros": parametros,
-                        "alvo": alvo or {},
                     }
                 )
             )
@@ -1586,7 +1585,6 @@ def registrar_decisao_kill(
             "motivo": type(exc).__name__,
             "hash_payload": hash_aprovado,
             "parametros": parametros,
-            "alvo": alvo or {},
         }
         gravado = False
         try:

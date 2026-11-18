@@ -608,8 +608,8 @@ def test_interrupcao_grava_resultado_e_propaga(monkeypatch, tmp_path, ambiente_f
     assert len(criticos) == 1 and resultado["id_intervencao"] in criticos[0].getMessage()
 
 
-def test_interrupcao_com_gravacao_falhando_traz_alvo_no_critical(monkeypatch, tmp_path, ambiente_fake, caplog):
-    """T10 (variante): a gravação do INTERROMPIDO (2ª) falha -> o CRITICAL leva o registro, com o alvo."""
+def test_interrupcao_com_gravacao_falhando_vai_para_o_critical(monkeypatch, tmp_path, ambiente_fake, caplog):
+    """T10 (variante): a gravação do INTERROMPIDO (2ª) falha -> o CRITICAL leva o registro."""
     _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo(), _linha_alvo()], kill_permitido=False))
     _sonda_que_levanta_na_2a(monkeypatch, KeyboardInterrupt())
     log = tmp_path / "kill.log"
@@ -624,7 +624,6 @@ def test_interrupcao_com_gravacao_falhando_traz_alvo_no_critical(monkeypatch, tm
     assert len(criticos) == 1 and "RESULTADO NAO GRAVADA" in criticos[0]
     serializado = json.loads(criticos[0].split("registro=", 1)[1])
     assert serializado["resultado_banco"] == "INTERROMPIDO"
-    assert serializado["alvo"]["username"] == "APP_USER"
 
 
 # =============================================================================
@@ -676,7 +675,6 @@ def test_falha_registro_rejeitado_e_timeout(monkeypatch, tmp_path, ambiente_fake
     serializado = json.loads(erros[0].split("registro=", 1)[1])
     assert serializado["fase"] == "RESULTADO" and serializado["decisao"] == decisao
     assert serializado["id_intervencao"] == desfecho["id_intervencao"]
-    assert serializado["alvo"]["username"] == "APP_USER", "o ERROR traz o alvo serializado"
     assert not log.exists()
 
 
