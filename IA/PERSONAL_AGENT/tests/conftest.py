@@ -5,6 +5,10 @@ e carrega o registro de testes (registry/test_scripts.yaml).
 """
 
 import os
+
+# Valor de ORACLE_SANDBOX definido pelo operador antes do início do processo; nada do conftest nem dos testes executou ainda.
+ORACLE_SANDBOX_DO_OPERADOR = os.environ.get("ORACLE_SANDBOX")
+
 import shutil
 import sys
 import tempfile
@@ -24,8 +28,33 @@ if test_registry_path.is_file():
     os.environ["SCRIPTS_REGISTRY_PATH"] = str(test_registry_path)
 
 
+ORACLE_SANDBOX_INICIO_SESSAO = None
+_SNAPSHOT_SESSAO_TOMADO = False
+
+
+def _estado_sandbox(valor):
+    return "ausente" if valor is None else "presente"
+
+
 @pytest.fixture(scope="session", autouse=True)
-def inicializar_registro_testes():
+def guard_oracle_sandbox():
+    """Aborta a sessão se ORACLE_SANDBOX mudou entre o início do processo e o início da sessão."""
+    global ORACLE_SANDBOX_INICIO_SESSAO, _SNAPSHOT_SESSAO_TOMADO
+    atual = os.environ.get("ORACLE_SANDBOX")
+    if atual != ORACLE_SANDBOX_DO_OPERADOR:
+        pytest.exit(
+            "FALHA DE GOVERNANCA: ORACLE_SANDBOX alterado entre o início do processo e o início da sessão "
+            f"(operador: {_estado_sandbox(ORACLE_SANDBOX_DO_OPERADOR)}, atual: {_estado_sandbox(atual)}). "
+            "Nenhum teste executado.",
+            returncode=3,
+        )
+    ORACLE_SANDBOX_INICIO_SESSAO = atual
+    _SNAPSHOT_SESSAO_TOMADO = True
+    yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def inicializar_registro_testes(guard_oracle_sandbox):
     """Garante que a suíte de testes utilize registry/test_scripts.yaml com cache inicializado."""
     from src.tools.registry import carregar_registro
     carregar_registro(forcar_recarga=True)
@@ -82,6 +111,17 @@ def isolar_log_aprovacao(monkeypatch, tmp_path):
 
 
 def pytest_sessionfinish(session, exitstatus):
+    final_sandbox = os.environ.get("ORACLE_SANDBOX")
+    if final_sandbox != ORACLE_SANDBOX_DO_OPERADOR or (
+        _SNAPSHOT_SESSAO_TOMADO and final_sandbox != ORACLE_SANDBOX_INICIO_SESSAO
+    ):
+        print(
+            "\nFALHA DE GOVERNANCA: ORACLE_SANDBOX mudou durante a sessão de testes "
+            f"(início: {_estado_sandbox(ORACLE_SANDBOX_INICIO_SESSAO if _SNAPSHOT_SESSAO_TOMADO else ORACLE_SANDBOX_DO_OPERADOR)}, "
+            f"fim: {_estado_sandbox(final_sandbox)})."
+        )
+        session.exitstatus = 1
+
     final = _snapshot_log_real()
     if final != SNAPSHOT_LOG_REAL_INICIO:
         print(

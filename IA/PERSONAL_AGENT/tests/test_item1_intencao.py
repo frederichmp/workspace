@@ -1016,7 +1016,7 @@ def _importar_em_subprocesso(tmp_path, env_extra, pasta_a_vigiar):
 
 
 def test_env_de_subprocesso_sem_segredos(monkeypatch):
-    for nome in ("ORACLE_USER_KILL", "EMAIL_SENHA_APP", "GEMINI_API_KEY", "ORACLE_SANDBOX"):
+    for nome in ("ORACLE_USER_KILL", "EMAIL_SENHA_APP", "GEMINI_API_KEY", "ORACLE_PREFIXO_TESTE"):
         monkeypatch.setenv(nome, "x")
     monkeypatch.setenv("OUTRA_VAR", "ok")
     env = _env_sem_segredos()

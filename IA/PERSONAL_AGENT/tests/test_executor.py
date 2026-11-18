@@ -20,7 +20,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 # Carrega variáveis de ambiente
-load_dotenv(dotenv_path=BASE_DIR / ".env", override=True)
+# override=False: o override reescreveria os.environ no import e poderia trazer ORACLE_SANDBOX do .env (incidente 01:27).
+load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
 
 from src.tools.executor import (
     _analisar_blocos_plsql,
