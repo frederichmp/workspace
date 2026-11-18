@@ -29,9 +29,17 @@ def _obter_vectorstore() -> Chroma:
     if _EMBEDDINGS_INSTANCE is None:
         _EMBEDDINGS_INSTANCE = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL_NAME)
     if _VECTORSTORE_INSTANCE is None:
+        # Isolamento do .env (fase 4, Achado 4): sem client_settings o Chroma cria Settings() que lê cwd/.env
+        # fora da carga-env. O argumento do pydantic-settings é `_env_file` (com sublinhado); a forma sem sublinhado
+        # seria ignorada em silêncio (model_config com extra="ignore"). Residual: o import do chromadb (na 1ª chamada)
+        # ainda cria Settings() em argumentos-padrão do próprio pacote; por isso o import fica aqui, e não no topo
+        # (no topo, essas leituras iriam para a subida das entradas e para a coleta dos testes).
+        import chromadb.config
+
         _VECTORSTORE_INSTANCE = Chroma(
             persist_directory=str(CHROMA_DB_DIR),
             embedding_function=_EMBEDDINGS_INSTANCE,
+            client_settings=chromadb.config.Settings(is_persistent=True, _env_file=None),
         )
     return _VECTORSTORE_INSTANCE
 
