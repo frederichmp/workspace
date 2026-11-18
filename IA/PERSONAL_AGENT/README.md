@@ -41,6 +41,10 @@ PERSONAL_AGENT/
    ```powershell
    Copy-Item .env.example .env
    ```
+   **Carga do `.env`:**
+   - O `.env` é lido só na subida da CLI (`src/main.py`) e da Web (`app.py`). Nenhum módulo de `src/tools/` o recarrega.
+   - **Alterar o `.env` exige reiniciar a CLI e a Web.** Os processos em execução continuam com os valores lidos na subida, inclusive as credenciais Oracle e de e-mail.
+   - Uma variável definida no shell ou no perfil do Windows **vence** o valor do `.env`. Depois de alterar variáveis do perfil, confira se há nomes `ORACLE_*`, `EMAIL_*`, `GEMINI_*`, `AGENTDBA_*` ou `SCRIPTS_*` definidos fora do `.env`.
 4. Execute o agente:
    ```powershell
    python -m src.main

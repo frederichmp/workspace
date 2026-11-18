@@ -1,0 +1,12 @@
+cwd: C:\Users\FREDER~1\AppData\Local\Temp\sentinela_isolamento\sentinela_head\IA\PERSONAL_AGENT
+comando: python -m pytest -q -p no:cacheprovider tests/test_isolamento_env.py
+exit: 0
+
+.                                                                        [100%]
+============================== warnings summary ===============================
+..\..\..\..\..\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
+  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1 passed, 13 warnings in 3.48s

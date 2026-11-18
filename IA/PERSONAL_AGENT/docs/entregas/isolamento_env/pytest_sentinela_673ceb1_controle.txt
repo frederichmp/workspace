@@ -1,0 +1,41 @@
+cwd: C:\Users\FREDER~1\AppData\Local\Temp\sentinela_isolamento\sentinela_673ceb1\IA\PERSONAL_AGENT
+comando: python -m pytest -q -p no:cacheprovider tests/test_isolamento_env.py
+exit: 1
+
+F                                                                        [100%]
+================================== FAILURES ===================================
+__________________ test_imports_de_teste_nao_alteram_environ __________________
+
+tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-93/test_imports_de_teste_nao_alte0')
+
+    def test_imports_de_teste_nao_alteram_environ(tmp_path):
+        env = {k: v for k, v in os.environ.items() if not k.startswith(_PREFIXOS)}
+        env["AGENTDBA_LOG_DIR"] = str(tmp_path / "log")
+        env["SCRIPTS_REGISTRY_PATH"] = str(RAIZ / "registry" / "test_scripts.yaml")
+        res = subprocess.run(
+            [sys.executable, "-c", _SCRIPT, str(RAIZ), str(RAIZ / "tests")],
+            capture_output=True, text=True, env=env, timeout=120, cwd=str(RAIZ),
+        )
+        ultima = (res.stderr.strip().splitlines() or [""])[-1]
+        assert res.returncode == 0, f"subprocesso falhou (returncode={res.returncode}): {ultima}"
+        dados = json.loads(res.stdout.strip().splitlines()[-1])
+        resumo = (
+            f"adicionadas_n={dados['adicionadas_n']}, removidas_n={dados['removidas_n']}, "
+            f"alteradas_n={dados['alteradas_n']}, nomes_nao_sensiveis={dados['nomes_nao_sensiveis']}"
+        )
+        assert dados["oracle_sandbox_antes"] == "ausente", resumo
+        assert dados["oracle_sandbox_depois"] == "ausente", resumo
+>       assert dados["adicionadas_n"] == 0 and dados["removidas_n"] == 0, resumo
+E       AssertionError: adicionadas_n=3, removidas_n=0, alteradas_n=0, nomes_nao_sensiveis=[]
+E       assert (3 == 0)
+
+tests\test_isolamento_env.py:59: AssertionError
+============================== warnings summary ===============================
+..\..\..\..\..\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
+  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_isolamento_env.py::test_imports_de_teste_nao_alteram_environ
+1 failed, 13 warnings in 4.00s
