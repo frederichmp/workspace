@@ -121,7 +121,6 @@ def _solicitar_aprovacao_cli(prep: dict) -> tuple[str, str, str | None]:
     print(f"Alvo Identificado: inst_id={alvo_dados.get('inst_id')}, sid={alvo_dados.get('sid')}, serial#={alvo_dados.get('serial#')}")
     print(f"Usuário Oracle  : {alvo_dados.get('username')}")
     print(f"Programa/Máquina: {alvo_dados.get('program')} / {alvo_dados.get('machine')}")
-    print(f"Logon (hora BD) : {alvo_dados.get('logon_time')}")
     print(f"Status Atual    : {alvo_dados.get('status')}")
     print(f"SQL ID          : {alvo_dados.get('sql_id')}")
     print(f"Evento Espera   : {alvo_dados.get('event')}")

@@ -13,7 +13,6 @@ from pathlib import Path
 import re
 import socket
 import time
-import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import oracledb
@@ -41,19 +40,7 @@ APROVACAO_TTL_SEGUNDOS = 300
 RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = ("ENCERRADA", "MARCADA_PARA_KILL")
 
 # Campos que identificam a sessão alvo; únicos campos cobertos pelo hash de aprovação
-CAMPOS_IDENTIDADE_ALVO: Tuple[str, ...] = (
-    "inst_id",
-    "sid",
-    "serial#",
-    "username",
-    "program",
-    "machine",
-    "logon_time",
-)
-
-# Formato de p_ref_aprovacao (id_intervencao): 32 hexadecimais minúsculos.
-# Mesmo padrão validado pelo pacote (REGEXP_LIKE ... 'c'). Só registro; não é autorização.
-_REGEX_REF_APROVACAO = re.compile(r"[0-9a-f]{32}")
+CAMPOS_IDENTIDADE_ALVO: Tuple[str, ...] = ("inst_id", "sid", "serial#", "username", "program", "machine")
 
 # Usuários que nunca podem ser alvo de encerramento.
 # Fonte única no Python; deve permanecer idêntica a c_protegidos em
@@ -514,7 +501,7 @@ def consultar_alvo_sessao_diag(
 ) -> Dict[str, Any]:
     """
     Consulta os metadados da sessão na GV$SESSION utilizando a conta ORACLE_USER_DIAG.
-    Retorna os campos: inst_id, sid, serial#, username, program, machine, logon_time, status, sql_id, event, type.
+    Retorna os campos: inst_id, sid, serial#, username, program, machine, status, sql_id, event, type.
 
     Elegibilidade (mesma ordem de checagem de PKG_OPS_KILL):
       - sessão inexistente            -> encontrado=False, motivo ALVO_NAO_ENCONTRADO;
@@ -575,7 +562,6 @@ def consultar_alvo_sessao_diag(
                    username,
                    program,
                    machine,
-                   logon_time,
                    status,
                    sql_id,
                    event,
@@ -666,51 +652,13 @@ def consultar_alvo_sessao_diag(
                 pass
 
 
-def _validar_identidade_esperada(identidade: Any, ref_aprovacao: Any) -> Optional[str]:
-    """
-    Valida localmente a identidade esperada e a referência de aprovação exigidas pelo pacote v2.
-    Retorna None se válidas, ou a descrição do problema (sem valores) -> PARAM_INVALIDO.
-    Obrigatórias, sem default: username não vazio, chaves program e machine presentes
-    (podem ser None), logon_time datetime, ref_aprovacao com 32 hex minúsculos.
-    """
-    if not isinstance(identidade, dict) or not identidade:
-        return "identidade_esperada ausente ou vazia"
-    username = identidade.get("username")
-    if not isinstance(username, str) or not username.strip():
-        return "identidade_esperada sem username"
-    for chave in ("program", "machine"):
-        if chave not in identidade:
-            return f"identidade_esperada sem a chave {chave}"
-        if identidade[chave] is not None and not isinstance(identidade[chave], str):
-            return f"identidade_esperada com {chave} que não é texto"
-    if not isinstance(identidade.get("logon_time"), datetime):
-        return "identidade_esperada sem logon_time (datetime)"
-    if not isinstance(ref_aprovacao, str) or not _REGEX_REF_APROVACAO.fullmatch(ref_aprovacao):
-        return "ref_aprovacao fora do formato de 32 hexadecimais minúsculos"
-    return None
-
-
-def matar_sessao_oracle(
-    sid: int,
-    serial: int,
-    inst_id: Optional[int],
-    *,
-    identidade_esperada: Dict[str, Any],
-    ref_aprovacao: str,
-) -> str:
+def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int]) -> str:
     """
     Executa o procedimento homologado de encerramento de sessão via conta segregada ORACLE_USER_KILL.
-    Chama OPS_OWNER.PKG_OPS_KILL.KILL_SESSION (v2) com os 9 formais associados por nome:
-    p_inst_id, p_sid, p_serial, p_username_esperado, p_program_esperado, p_machine_esperado,
-    p_logon_time_esperado, p_ref_aprovacao, p_status. Uma única chamada; sem fallback para a
-    assinatura antiga de 4 parâmetros (contra o banco v1 o bloco falha na compilação, PLS-00306).
+    Chama OPS_OWNER.PKG_OPS_KILL.KILL_SESSION com binds nomeados (p_inst_id, p_sid, p_serial, p_status).
     NÃO executa comando de sessão direto no Python.
     inst_id é obrigatório: não há instância padrão. Ausente (None) ou não inteiro positivo
     retorna PARAM_INVALIDO antes de qualquer consulta ou conexão.
-    identidade_esperada (username, program, machine, logon_time) e ref_aprovacao (id_intervencao)
-    são keyword-only e obrigatórios: ausentes -> TypeError; vazios/incompletos/inválidos ->
-    PARAM_INVALIDO local, antes de getenv e connect. O pacote compara a identidade com a sessão
-    viva e devolve ALVO_DIVERGENTE (sem kill) se algum campo diferir.
     """
     # 1. Validação local antes de qualquer conexão: inteiros positivos, todos obrigatórios
     validados = validar_parametros_kill(inst_id, sid, serial)
@@ -728,21 +676,6 @@ def matar_sessao_oracle(
             ensure_ascii=False,
         )
     inst_id_int, sid_int, serial_int = validados
-
-    problema_identidade = _validar_identidade_esperada(identidade_esperada, ref_aprovacao)
-    if problema_identidade is not None:
-        return json.dumps(
-            {
-                "status": "recusado",
-                "motivo": "PARAM_INVALIDO",
-                "status_banco": "PARAM_INVALIDO",
-                "mensagem": (
-                    f"Parâmetros inválidos para encerramento de sessão: {problema_identidade}. "
-                    "A identidade esperada e a referência de aprovação são obrigatórias."
-                ),
-            },
-            ensure_ascii=False,
-        )
 
     # 2. Verificação de credenciais segregadas da conta KILL
     user = os.getenv("ORACLE_USER_KILL")
@@ -798,26 +731,16 @@ def matar_sessao_oracle(
             """
             BEGIN
                 OPS_OWNER.PKG_OPS_KILL.KILL_SESSION(
-                    p_inst_id             => :p_inst_id,
-                    p_sid                 => :p_sid,
-                    p_serial              => :p_serial,
-                    p_username_esperado   => :p_username_esperado,
-                    p_program_esperado    => :p_program_esperado,
-                    p_machine_esperado    => :p_machine_esperado,
-                    p_logon_time_esperado => :p_logon_time_esperado,
-                    p_ref_aprovacao       => :p_ref_aprovacao,
-                    p_status              => :p_status
+                    p_inst_id => :p_inst_id,
+                    p_sid     => :p_sid,
+                    p_serial  => :p_serial,
+                    p_status  => :p_status
                 );
             END;
             """,
             p_inst_id=inst_id_int,
             p_sid=sid_int,
             p_serial=serial_int,
-            p_username_esperado=identidade_esperada["username"],
-            p_program_esperado=identidade_esperada["program"],
-            p_machine_esperado=identidade_esperada["machine"],
-            p_logon_time_esperado=identidade_esperada["logon_time"],
-            p_ref_aprovacao=ref_aprovacao,
             p_status=status_var,
         )
         status_banco = str(status_var.getvalue() or "").strip()
@@ -887,8 +810,6 @@ def _normalizar_valor_identidade(valor: Any) -> Any:
     """Normaliza tipos numéricos vindos do driver para que o hash não dependa do tipo Python."""
     if valor is None or isinstance(valor, (bool, str)):
         return valor
-    if isinstance(valor, datetime):
-        return valor.isoformat()
     if isinstance(valor, int):
         return valor
     try:
@@ -909,7 +830,7 @@ def extrair_identidade_alvo(alvo: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 def calcular_hash_identidade(alvo: Optional[Dict[str, Any]]) -> str:
     """
     Hash SHA-256 canônico calculado apenas sobre os campos de identidade:
-    inst_id, sid, serial#, username, program, machine, logon_time.
+    inst_id, sid, serial#, username, program, machine.
     timestamp, status, event e sql_id ficam de fora, pois variam sem que o alvo mude.
     """
     identidade = extrair_identidade_alvo(alvo)
@@ -938,15 +859,12 @@ def gerar_payload_e_hash_aprovacao(
     return payload, calcular_hash_identidade(alvo)
 
 
-def executar_kill_verificado(
-    inst_id: Any, sid: Any, serial: Any, hash_aprovado: str, *, ref_aprovacao: str
-) -> str:
+def executar_kill_verificado(inst_id: Any, sid: Any, serial: Any, hash_aprovado: str) -> str:
     """
     Verificação de integridade imediatamente antes do encerramento:
       1. reconsulta o alvo pela conta DIAG (consultar_alvo_sessao_diag);
       2. recalcula o hash de identidade e compara com o hash aprovado;
-      3. só então chama matar_sessao_oracle (conta KILL), passando a identidade CRUA da
-         reconsulta (cujo hash bateu com o aprovado) e ref_aprovacao (id_intervencao).
+      3. só então chama matar_sessao_oracle (conta KILL).
     Hash divergente -> ALVO_ALTERADO, sem chamada à conta KILL, com registro no log.
     Falha na reconsulta (alvo sumiu, erro de rede/config) -> o motivo da reconsulta, sem chamada à conta KILL.
     """
@@ -1007,20 +925,7 @@ def executar_kill_verificado(
             ensure_ascii=False,
         )
 
-    alvo_reconsulta = reconsulta.get("alvo") or {}
-    identidade_esperada = {
-        "username": alvo_reconsulta.get("username"),
-        "program": alvo_reconsulta.get("program"),
-        "machine": alvo_reconsulta.get("machine"),
-        "logon_time": alvo_reconsulta.get("logon_time"),
-    }
-    return matar_sessao_oracle(
-        sid=sid,
-        serial=serial,
-        inst_id=inst_id,
-        identidade_esperada=identidade_esperada,
-        ref_aprovacao=ref_aprovacao,
-    )
+    return matar_sessao_oracle(sid=sid, serial=serial, inst_id=inst_id)
 
 
 def registrar_log_aprovacao_kill(
@@ -1032,7 +937,6 @@ def registrar_log_aprovacao_kill(
     resultado_banco: Optional[str] = None,
     motivo: Optional[str] = None,
     caminho_log: Optional[Path] = None,
-    id_intervencao: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Registra formalmente a decisão de aprovação no arquivo de log da aplicação.
@@ -1062,8 +966,6 @@ def registrar_log_aprovacao_kill(
         "parametros": parametros,
         "alvo": alvo or {},
     }
-    if id_intervencao is not None:
-        registro["id_intervencao"] = id_intervencao
 
     with open(caminho_log, "a", encoding="utf-8") as f:
         f.write(json.dumps(registro, ensure_ascii=False, default=str) + "\n")
@@ -1233,15 +1135,9 @@ def registrar_decisao_kill(
             "email_detalhe": None,
         }
 
-    # Decisão APROVADO com aprovador identificado: reconsulta + verificação de hash antes da conta KILL.
-    # id_intervencao liga o log da aplicação à linha de OPS_KILL_AUDIT (p_ref_aprovacao; só registro).
-    id_intervencao = uuid.uuid4().hex
+    # Decisão APROVADO com aprovador identificado: reconsulta + verificação de hash antes da conta KILL
     resultado_exec = executar_kill_verificado(
-        inst_id=inst_id,
-        sid=sid,
-        serial=serial,
-        hash_aprovado=hash_aprovado,
-        ref_aprovacao=id_intervencao,
+        inst_id=inst_id, sid=sid, serial=serial, hash_aprovado=hash_aprovado
     )
     try:
         dados_exec = json.loads(resultado_exec)
@@ -1259,7 +1155,6 @@ def registrar_decisao_kill(
         resultado_banco=resultado_banco,
         motivo=None,
         caminho_log=caminho_log,
-        id_intervencao=id_intervencao,
     )
     nivel_log = logging.INFO if executado else logging.WARNING
     logger.log(
@@ -1283,7 +1178,6 @@ def registrar_decisao_kill(
 
     dados_exec["decisao"] = "APROVADO"
     dados_exec["resultado_banco"] = resultado_banco
-    # id_intervencao fica só no JSONL (registro); o LLM não fornece nem vê esse valor (implantacao.md §1.1).
     dados_exec["executado"] = executado
     resultado_tool = json.dumps(dados_exec, ensure_ascii=False, default=str)
 

@@ -646,11 +646,10 @@ with col_chat:
                 f"- **Instância / SID / Serial#:** `inst_id={alvo.get('inst_id')}`, `sid={alvo.get('sid')}`, `serial#={alvo.get('serial#')}`\n"
                 f"- **Usuário Oracle:** `{alvo.get('username')}`\n"
                 f"- **Programa / Máquina:** `{alvo.get('program')}` / `{alvo.get('machine')}`\n"
-                f"- **Logon (hora do servidor do banco):** `{alvo.get('logon_time')}`\n"
                 f"- **Status Atual:** `{alvo.get('status')}`\n"
                 f"- **SQL ID:** `{alvo.get('sql_id')}`\n"
                 f"- **Evento de Espera:** `{alvo.get('event')}`\n\n"
-                f"🔒 **Hash SHA-256 de identidade do alvo** (inst_id, sid, serial#, username, program, machine, logon_time; "
+                f"🔒 **Hash SHA-256 de identidade do alvo** (inst_id, sid, serial#, username, program, machine; "
                 f"reconferido antes da execução): `{pend.get('hash_payload')}`\n\n"
                 f"Ao aprovar, um alerta de governança será disparado por e-mail para `{email_dest}`."
             )
