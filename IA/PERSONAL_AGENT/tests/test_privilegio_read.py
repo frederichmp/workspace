@@ -8,13 +8,7 @@ NÃO executa nenhum comando de escrita (DML/DDL).
 """
 
 import os
-from pathlib import Path
 import pytest
-from dotenv import load_dotenv
-
-env_path = Path(__file__).resolve().parent.parent / ".env"
-if env_path.is_file():
-    load_dotenv(dotenv_path=env_path, override=False)
 
 import oracledb
 

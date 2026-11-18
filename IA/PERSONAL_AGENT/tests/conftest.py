@@ -27,6 +27,44 @@ test_registry_path = Path(__file__).resolve().parent.parent / "registry" / "test
 if test_registry_path.is_file():
     os.environ["SCRIPTS_REGISTRY_PATH"] = str(test_registry_path)
 
+# D5 (incidente 01:27): credenciais de sandbox vêm do .env só por lista fechada de chaves e só com
+# ORACLE_SANDBOX definido pelo operador; nunca ORACLE_SANDBOX, ORACLE_USER legado nem outras chaves.
+from dotenv import dotenv_values
+
+CHAVES_ENV_SANDBOX = (
+    "ORACLE_DSN",
+    "ORACLE_USER_READ",
+    "ORACLE_PASSWORD_READ",
+    "ORACLE_USER_MUT",
+    "ORACLE_PASSWORD_MUT",
+    "ORACLE_USER_DIAG",
+    "ORACLE_PASSWORD_DIAG",
+    "ORACLE_USER_KILL",
+    "ORACLE_PASSWORD_KILL",
+    "ORACLE_CALL_TIMEOUT_MS",
+    "ORACLE_SELECT_LIMIT",
+    "ORACLE_LOB_LIMIT",
+)
+
+
+def credenciais_sandbox_do_env(caminho_env, operador, ambiente):
+    """Função pura: devolve as chaves de CHAVES_ENV_SANDBOX do arquivo, sem sobrescrever `ambiente`."""
+    if operador != "1" or not Path(caminho_env).is_file():
+        return {}
+    valores = dotenv_values(caminho_env)
+    return {
+        k: v
+        for k, v in valores.items()
+        if k in CHAVES_ENV_SANDBOX and v and k not in ambiente
+    }
+
+
+os.environ.update(
+    credenciais_sandbox_do_env(
+        Path(__file__).resolve().parent.parent / ".env", ORACLE_SANDBOX_DO_OPERADOR, os.environ
+    )
+)
+
 
 ORACLE_SANDBOX_INICIO_SESSAO = None
 _SNAPSHOT_SESSAO_TOMADO = False

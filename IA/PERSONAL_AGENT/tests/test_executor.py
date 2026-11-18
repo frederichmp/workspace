@@ -13,15 +13,10 @@ from unittest.mock import patch
 
 import oracledb
 import pytest
-from dotenv import load_dotenv
 
 # Adiciona o diretório raiz do projeto PERSONAL_AGENT ao PYTHONPATH
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
-
-# Carrega variáveis de ambiente
-# override=False: o override reescreveria os.environ no import e poderia trazer ORACLE_SANDBOX do .env (incidente 01:27).
-load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
 
 from src.tools.executor import (
     _analisar_blocos_plsql,
