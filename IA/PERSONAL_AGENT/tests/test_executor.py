@@ -19,9 +19,8 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-# Carrega variáveis de ambiente. override=False: valores já definidos (AGENTDBA_LOG_DIR do conftest,
-# ORACLE_SANDBOX da sessão) prevalecem sobre o .env.
-load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
+# Carrega variáveis de ambiente
+load_dotenv(dotenv_path=BASE_DIR / ".env", override=True)
 
 from src.tools.executor import (
     _analisar_blocos_plsql,
