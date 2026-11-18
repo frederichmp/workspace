@@ -7,12 +7,10 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Tuple
-from dotenv import load_dotenv
 
 
 def enviar_alerta_email(assunto: str, corpo: str) -> Tuple[bool, str]:
     """Envia um e-mail de alerta utilizando SMTP do Gmail (TLS na porta 587)."""
-    load_dotenv(override=True)
     remetente = os.getenv("EMAIL_REMETENTE", "").strip()
     # Remove espaços caso a senha de app de 16 dígitos tenha sido colada com espaços
     senha = os.getenv("EMAIL_SENHA_APP", "").replace(" ", "").strip()

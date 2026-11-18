@@ -13,7 +13,6 @@ warnings.filterwarnings("ignore")
 
 import google.generativeai as genai
 from google.generativeai.types import RequestOptions
-from dotenv import load_dotenv
 
 # Configuração da API com a chave do cofre (.env) usando transport="rest" (compatível com VPN corporativa)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -31,7 +30,6 @@ def analisar_log_complexo(dados_brutos: str, contexto_solicitacao: str) -> str:
     solicitação para o Google Gemini em nuvem, exigindo retorno estrito no formato executivo:
     Diagnóstico, Evidências, Possíveis Causas e Próximo Passo.
     """
-    load_dotenv(override=True)
     api_key = os.getenv("GEMINI_API_KEY", "")
 
     if not api_key or api_key in ("sua_chave_aqui", "your_gemini_api_key_here"):
