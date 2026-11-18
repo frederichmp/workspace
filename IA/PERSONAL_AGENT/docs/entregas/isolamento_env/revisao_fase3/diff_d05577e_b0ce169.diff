@@ -1,0 +1,1282 @@
+diff --git a/IA/PERSONAL_AGENT/app.py b/IA/PERSONAL_AGENT/app.py
+index 60a8277..b0630c7 100644
+--- a/IA/PERSONAL_AGENT/app.py
++++ b/IA/PERSONAL_AGENT/app.py
+@@ -11,12 +11,13 @@ import logging
+ import os
+ import socket
+ import sys
++import threading
+ from pathlib import Path
+ from typing import Any, Dict, Generator, List
+ 
+ import pandas as pd
+ import streamlit as st
+-from dotenv import load_dotenv
++from dotenv import dotenv_values, load_dotenv
+ from openai import OpenAI
+ 
+ # ==============================================================================
+@@ -30,17 +31,54 @@ for path_str in (str(ROOT_DIR), str(SRC_DIR)):
+     if path_str not in sys.path:
+         sys.path.insert(0, path_str)
+ 
+-# Carga única do .env (isolamento do .env, D1/D2), antes de qualquer import do projeto; roda a cada rerun.
+-# override=False: variável definida no shell vence o arquivo (decisão 2a). Nenhum módulo recarrega o .env;
+-# alterar o .env exige reiniciar a Web (decisão 2b).
+-# ORACLE_SANDBOX só vale se definida pelo operador no shell (incidente 01:27): se vier do arquivo, é
+-# descartada aqui; o WARNING sai depois do logging.basicConfig (antes dele, a configuração seria implícita).
+-_ORACLE_SANDBOX_DO_SHELL = "ORACLE_SANDBOX" in os.environ
+-load_dotenv(ROOT_DIR / ".env", override=False)
+-_ORACLE_SANDBOX_DESCARTADA = False
+-if not _ORACLE_SANDBOX_DO_SHELL and "ORACLE_SANDBOX" in os.environ:
+-    del os.environ["ORACLE_SANDBOX"]
+-    _ORACLE_SANDBOX_DESCARTADA = True
++# >>> carga-env (texto idêntico em app.py e src/main.py; isolamento do .env, decisão em
++# docs/entregas/isolamento_env/decisao_fase3.md, P1)
++# - Uma carga por processo, antes de qualquer import do projeto. O estado fica em sys (um por processo; sobrevive
++#   aos reruns do Streamlit) e a carga roda sob lock. Alterar o .env exige reiniciar a CLI ou a Web.
++# - override=False: o ambiente (shell ou perfil) vence o arquivo.
++# - ORACLE_SANDBOX só vale se já estava no ambiente antes da primeira carga (incidente 01:27). Se vier do arquivo,
++#   o finally a remove, inclusive quando a carga falha (C1).
++# - Falha na carga: fail-closed até reiniciar o processo, sem nova tentativa (mensagem fixa, sem valores).
++_AVISO_SANDBOX_DESCARTADA = (
++    "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell. "
++    "Remova a chave do .env."
++)
++_AVISO_SOMBREADAS = "Variáveis do .env ignoradas porque o ambiente já as define com outro valor: "
++
++
++def _nomes_sombreados(caminho):
++    """B3: nomes das chaves do .env que o ambiente já define com outro valor. Os valores não saem daqui."""
++    return tuple(sorted(
++        nome for nome, valor in dotenv_values(caminho).items()
++        if valor is not None and nome in os.environ and os.environ[nome] != valor
++    ))
++
++
++_ESTADO_ENV = vars(sys).setdefault(
++    "_personal_agent_estado_env",
++    {"lock": threading.Lock(), "estado": None, "falha": None, "sandbox_descartada": False, "sombreadas": ()},
++)
++_CARREGOU_AGORA = False
++with _ESTADO_ENV["lock"]:
++    if _ESTADO_ENV["estado"] is None:
++        _CARREGOU_AGORA = True
++        _ESTADO_ENV["estado"] = "falhou"
++        _sandbox_do_shell = "ORACLE_SANDBOX" in os.environ
++        try:
++            _ESTADO_ENV["sombreadas"] = _nomes_sombreados(ROOT_DIR / ".env")  # antes da carga: ambiente ainda intacto
++            load_dotenv(ROOT_DIR / ".env", override=False)
++            _ESTADO_ENV["estado"] = "ok"
++        except Exception as exc:
++            _ESTADO_ENV["falha"] = type(exc).__name__
++        finally:
++            if not _sandbox_do_shell and os.environ.pop("ORACLE_SANDBOX", None) is not None:
++                _ESTADO_ENV["sandbox_descartada"] = True
++if _ESTADO_ENV["estado"] != "ok":
++    raise RuntimeError(
++        f"Carga do .env falhou nesta subida ({_ESTADO_ENV['falha'] or 'interrompida'}); "
++        "nada do agente foi carregado. Corrija o .env e reinicie o processo."
++    )
++# <<< carga-env
+ 
+ LOG_FILE_ROOT = ROOT_DIR / "auditoria_oracle.log"
+ LOG_FILE_DATA = ROOT_DIR / "data" / "logs" / "auditoria_oracle.log"
+@@ -57,10 +95,12 @@ logging.basicConfig(
+ )
+ for noisy_logger in ("httpx", "httpx2", "httpcore", "httpcore2", "openai"):
+     logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+-if _ORACLE_SANDBOX_DESCARTADA:
+-    logging.getLogger(__name__).warning(
+-        "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell."
+-    )
++if _CARREGOU_AGORA:  # avisos da carga: uma vez por processo, depois do basicConfig
++    _log_carga = logging.getLogger(__name__)
++    if _ESTADO_ENV["sandbox_descartada"]:
++        _log_carga.warning(_AVISO_SANDBOX_DESCARTADA)
++    if _ESTADO_ENV["sombreadas"]:  # B3: só nomes
++        _log_carga.warning(_AVISO_SOMBREADAS + ", ".join(_ESTADO_ENV["sombreadas"]))
+ 
+ # Importação das Ferramentas do Agente
+ from tools.os_tools import (
+@@ -516,6 +556,12 @@ st.set_page_config(
+     initial_sidebar_state="expanded",
+ )
+ 
++# Avisos da carga do .env (C3/B3): em todo rerun, enquanto valerem neste processo; texto fixo e só nomes.
++if _ESTADO_ENV["sandbox_descartada"]:
++    st.warning(_AVISO_SANDBOX_DESCARTADA)
++if _ESTADO_ENV["sombreadas"]:
++    st.warning(_AVISO_SOMBREADAS + ", ".join(_ESTADO_ENV["sombreadas"]))
++
+ # Inicialização de estados persistentes no st.session_state
+ if "messages" not in st.session_state:
+     st.session_state.messages = [
+diff --git a/IA/PERSONAL_AGENT/src/main.py b/IA/PERSONAL_AGENT/src/main.py
+index e9dafa3..c4b7e87 100644
+--- a/IA/PERSONAL_AGENT/src/main.py
++++ b/IA/PERSONAL_AGENT/src/main.py
+@@ -4,8 +4,9 @@ import logging
+ import os
+ import socket
+ import sys
++import threading
+ from pathlib import Path
+-from dotenv import load_dotenv
++from dotenv import dotenv_values, load_dotenv
+ from openai import OpenAI
+ 
+ # Garante que os pacotes em src/ sejam resolvidos independentemente do diretório de execução
+@@ -15,17 +16,54 @@ for path_str in (str(ROOT_DIR), str(SRC_DIR)):
+     if path_str not in sys.path:
+         sys.path.insert(0, path_str)
+ 
+-# Carga única do .env (isolamento do .env, D1/D2), antes de qualquer import do projeto.
+-# override=False: variável definida no shell vence o arquivo (decisão 2a). Nenhum módulo recarrega o .env;
+-# alterar o .env exige reiniciar a CLI (decisão 2b).
+-# ORACLE_SANDBOX só vale se definida pelo operador no shell (incidente 01:27): se vier do arquivo, é
+-# descartada aqui; o WARNING sai depois do logging.basicConfig (antes dele, a configuração seria implícita).
+-_ORACLE_SANDBOX_DO_SHELL = "ORACLE_SANDBOX" in os.environ
+-load_dotenv(ROOT_DIR / ".env", override=False)
+-_ORACLE_SANDBOX_DESCARTADA = False
+-if not _ORACLE_SANDBOX_DO_SHELL and "ORACLE_SANDBOX" in os.environ:
+-    del os.environ["ORACLE_SANDBOX"]
+-    _ORACLE_SANDBOX_DESCARTADA = True
++# >>> carga-env (texto idêntico em app.py e src/main.py; isolamento do .env, decisão em
++# docs/entregas/isolamento_env/decisao_fase3.md, P1)
++# - Uma carga por processo, antes de qualquer import do projeto. O estado fica em sys (um por processo; sobrevive
++#   aos reruns do Streamlit) e a carga roda sob lock. Alterar o .env exige reiniciar a CLI ou a Web.
++# - override=False: o ambiente (shell ou perfil) vence o arquivo.
++# - ORACLE_SANDBOX só vale se já estava no ambiente antes da primeira carga (incidente 01:27). Se vier do arquivo,
++#   o finally a remove, inclusive quando a carga falha (C1).
++# - Falha na carga: fail-closed até reiniciar o processo, sem nova tentativa (mensagem fixa, sem valores).
++_AVISO_SANDBOX_DESCARTADA = (
++    "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell. "
++    "Remova a chave do .env."
++)
++_AVISO_SOMBREADAS = "Variáveis do .env ignoradas porque o ambiente já as define com outro valor: "
++
++
++def _nomes_sombreados(caminho):
++    """B3: nomes das chaves do .env que o ambiente já define com outro valor. Os valores não saem daqui."""
++    return tuple(sorted(
++        nome for nome, valor in dotenv_values(caminho).items()
++        if valor is not None and nome in os.environ and os.environ[nome] != valor
++    ))
++
++
++_ESTADO_ENV = vars(sys).setdefault(
++    "_personal_agent_estado_env",
++    {"lock": threading.Lock(), "estado": None, "falha": None, "sandbox_descartada": False, "sombreadas": ()},
++)
++_CARREGOU_AGORA = False
++with _ESTADO_ENV["lock"]:
++    if _ESTADO_ENV["estado"] is None:
++        _CARREGOU_AGORA = True
++        _ESTADO_ENV["estado"] = "falhou"
++        _sandbox_do_shell = "ORACLE_SANDBOX" in os.environ
++        try:
++            _ESTADO_ENV["sombreadas"] = _nomes_sombreados(ROOT_DIR / ".env")  # antes da carga: ambiente ainda intacto
++            load_dotenv(ROOT_DIR / ".env", override=False)
++            _ESTADO_ENV["estado"] = "ok"
++        except Exception as exc:
++            _ESTADO_ENV["falha"] = type(exc).__name__
++        finally:
++            if not _sandbox_do_shell and os.environ.pop("ORACLE_SANDBOX", None) is not None:
++                _ESTADO_ENV["sandbox_descartada"] = True
++if _ESTADO_ENV["estado"] != "ok":
++    raise RuntimeError(
++        f"Carga do .env falhou nesta subida ({_ESTADO_ENV['falha'] or 'interrompida'}); "
++        "nada do agente foi carregado. Corrija o .env e reinicie o processo."
++    )
++# <<< carga-env
+ 
+ # Configuração do Log de Auditoria (Formato: YYYY-MM-DD HH:MM:SS | INFO | Mensagem)
+ LOG_FILE_ROOT = ROOT_DIR / "auditoria_oracle.log"
+@@ -44,10 +82,15 @@ logging.basicConfig(
+ # Silencia logs de transporte HTTP para manter o auditoria_oracle.log 100% limpo
+ for noisy_logger in ("httpx", "httpx2", "httpcore", "httpcore2", "openai"):
+     logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+-if _ORACLE_SANDBOX_DESCARTADA:
+-    logging.getLogger(__name__).warning(
+-        "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell."
+-    )
++if _CARREGOU_AGORA:  # avisos da carga: uma vez por processo, depois do basicConfig
++    _log_carga = logging.getLogger(__name__)
++    if _ESTADO_ENV["sandbox_descartada"]:
++        _log_carga.warning(_AVISO_SANDBOX_DESCARTADA)
++        # C3: visível ao operador mesmo com o logging suprimido (texto fixo, sem valores)
++        print(f"[Sistema]: AVISO: {_AVISO_SANDBOX_DESCARTADA}", file=sys.stderr)
++    if _ESTADO_ENV["sombreadas"]:  # B3: só nomes
++        _log_carga.warning(_AVISO_SOMBREADAS + ", ".join(_ESTADO_ENV["sombreadas"]))
++        print(f"[Sistema]: AVISO: {_AVISO_SOMBREADAS}{', '.join(_ESTADO_ENV['sombreadas'])}", file=sys.stderr)
+ 
+ # 1. Importando as Ferramentas de SO
+ from tools.os_tools import (
+diff --git a/IA/PERSONAL_AGENT/src/tools/oracle_dba.py b/IA/PERSONAL_AGENT/src/tools/oracle_dba.py
+index 49aa3ed..cde9acf 100644
+--- a/IA/PERSONAL_AGENT/src/tools/oracle_dba.py
++++ b/IA/PERSONAL_AGENT/src/tools/oracle_dba.py
+@@ -27,14 +27,14 @@ if os.name == "nt":
+ else:
+     import fcntl
+ 
+-# Diretório do log de aprovações de kill: AGENTDBA_LOG_DIR ou o padrão local, fora de pasta sincronizada.
+-# A pasta só é criada na primeira gravação (os.makedirs, exist_ok); falha na criação = falha de registro.
+-# Nada é criado no import.
++# Diretório do log de aprovações de kill: AGENTDBA_LOG_DIR ou o padrão local, fora de pasta sincronizada,
++# resolvido em tempo de chamada (_diretorio_log_aprovacao; A3: nada é congelado no import, então as cópias
++# tools.* e src.tools.* resolvem o mesmo destino). A pasta só é criada na primeira gravação (os.makedirs,
++# exist_ok); falha na criação = falha de registro. Nada é criado no import nem na resolução.
+ DIRETORIO_LOG_PADRAO = r"C:\AgentDBA\logs"
+-DIRETORIO_LOG_APROVACAO = Path(os.getenv("AGENTDBA_LOG_DIR") or DIRETORIO_LOG_PADRAO)
+ 
+-# Log padrão de aprovações de kill (lido em tempo de chamada; testes o redirecionam)
+-CAMINHO_LOG_APROVACAO_PADRAO = DIRETORIO_LOG_APROVACAO / "kill_approval.log"
++# Gancho de teste: None = destino resolvido em tempo de chamada; um Path aqui (monkeypatch) fixa o destino.
++CAMINHO_LOG_APROVACAO_PADRAO: Optional[Path] = None
+ 
+ # Gravação do JSONL (docs/entregas/1.11/item1/decisao.md, seção a): ponto único, fsync,
+ # lock de processo (threads da Web) + lock de arquivo (CLI e Web em processos distintos).
+@@ -1002,9 +1002,18 @@ def executar_kill_verificado(
+     return matar_sessao_oracle(sid=sid, serial=serial, inst_id=inst_id)
+ 
+ 
++def _diretorio_log_aprovacao() -> Path:
++    """AGENTDBA_LOG_DIR (ou o padrão) lido no momento da chamada (A3). Não cria nada."""
++    return Path(os.getenv("AGENTDBA_LOG_DIR") or DIRETORIO_LOG_PADRAO)
++
++
+ def _caminho_log_efetivo(caminho_log: Optional[Path]) -> Path:
+-    """Destino do JSONL: o caminho dado ou o padrão do módulo, lido no momento da chamada."""
+-    return Path(caminho_log) if caminho_log is not None else CAMINHO_LOG_APROVACAO_PADRAO
++    """Destino do JSONL: o caminho dado, o gancho do módulo (testes) ou o padrão resolvido agora."""
++    if caminho_log is not None:
++        return Path(caminho_log)
++    if CAMINHO_LOG_APROVACAO_PADRAO is not None:
++        return Path(CAMINHO_LOG_APROVACAO_PADRAO)
++    return _diretorio_log_aprovacao() / "kill_approval.log"
+ 
+ 
+ if os.name == "nt":
+diff --git a/IA/PERSONAL_AGENT/tests/test_carga_env_entrada.py b/IA/PERSONAL_AGENT/tests/test_carga_env_entrada.py
+index aec4d0e..ec42cfa 100644
+--- a/IA/PERSONAL_AGENT/tests/test_carga_env_entrada.py
++++ b/IA/PERSONAL_AGENT/tests/test_carga_env_entrada.py
+@@ -1,8 +1,12 @@
+-"""Fase 2 (D1/D2): a carga do .env nas entradas (src/main.py e app.py) não pode introduzir ORACLE_SANDBOX.
++"""Fases 2 e 3 (D1/D2, B4, C1, C2a, R-F2-1): a carga do .env nas entradas (src/main.py e app.py).
+ 
+-REGRA DE SEGURANÇA (incidente 01:27): o .env fictício com ORACLE_SANDBOX só é lido DENTRO DE SUBPROCESSO
++REGRA DE SEGURANÇA (incidente 01:27): o .env fictício com ORACLE_SANDBOX=1 só é lido DENTRO DE SUBPROCESSO
+ sem credenciais (nenhuma chave ORACLE_/EMAIL_/GEMINI_ herdada). O processo do pytest nunca tem
+-ORACLE_SANDBOX alterada e o .env real nunca é lido (load_dotenv é redirecionado para o arquivo fictício).
++ORACLE_SANDBOX alterada. O .env real nunca é lido: no filho, load_dotenv e dotenv_values são
++redirecionados para o arquivo fictício e um guarda em dotenv.main.DotEnv.__init__ registra (e recusa com
++AssertionError) qualquer leitura que resolva para RAIZ/.env; todo teste afirma `leituras_reais == []`.
++O filho sempre imprime o JSON, mesmo quando a entrada levanta exceção. Nenhum teste lê ou grava o estado
++privado das entradas (`_personal_agent_estado_env`): tudo é observado de fora, em subprocesso.
+ """
+ 
+ import json
+@@ -17,70 +21,225 @@ RAIZ = Path(__file__).resolve().parent.parent
+ _PREFIXOS = ("ORACLE_", "EMAIL_", "GEMINI_")
+ 
+ _SCRIPT = r"""
+-import json, logging, os, socket, sys
+-raiz, entrada, env_ficticio = sys.argv[1], sys.argv[2], sys.argv[3]
++import json, logging, os, socket, sys, traceback
++raiz, entrada, env_ficticio, cfg_json = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
++cfg = json.loads(cfg_json)
+ sys.path.insert(0, raiz)
+ sys.path.insert(0, os.path.join(raiz, "src"))
+ 
+ import dotenv
++import dotenv.main
++
++chamadas = []          # load_dotenv: (caminho recebido, override)
++chamadas_values = []   # dotenv_values: (caminho recebido)
++leituras_reais = []    # qualquer DotEnv(...) que resolva para RAIZ/.env
++
+ _original = dotenv.load_dotenv
+-chamadas = []
++_original_values = dotenv.dotenv_values
++_init_original = dotenv.main.DotEnv.__init__
++_real = os.path.normcase(os.path.realpath(os.path.join(raiz, ".env")))
++
+ 
+ def _wrapper(dotenv_path=None, *args, **kwargs):
+     chamadas.append({
+         "caminho": None if dotenv_path is None else str(dotenv_path),
+         "override": kwargs["override"] if "override" in kwargs else "AUSENTE",
++        "src_oracle_dba_importado": "src.tools.oracle_dba" in sys.modules,
+     })
+     kwargs.setdefault("override", False)
+     return _original(env_ficticio, *args, **kwargs)
+ 
++
++def _wrapper_values(dotenv_path=None, *args, **kwargs):
++    chamadas_values.append({"caminho": None if dotenv_path is None else str(dotenv_path)})
++    return _original_values(env_ficticio, *args, **kwargs)
++
++
++def _guarda_init(self, *args, **kwargs):
++    caminho = kwargs["dotenv_path"] if "dotenv_path" in kwargs else (args[0] if args else None)
++    if caminho is not None and not hasattr(caminho, "read"):
++        try:
++            alvo = os.path.normcase(os.path.realpath(os.fspath(caminho)))
++        except Exception:
++            alvo = None
++        if alvo == _real:
++            leituras_reais.append(str(caminho))
++            raise AssertionError("leitura do .env real bloqueada pelo guarda do teste")
++    return _init_original(self, *args, **kwargs)
++
++
+ dotenv.load_dotenv = _wrapper
++dotenv.dotenv_values = _wrapper_values
++dotenv.main.DotEnv.__init__ = _guarda_init
+ 
+ capturados = []
+ 
++
++eventos = []  # ordem de basicConfig e dos WARNINGs (D6.3b)
++
++
+ class _Captura(logging.Handler):
+     def emit(self, record):
+         capturados.append((record.levelname, record.getMessage()))
++        if record.levelname == "WARNING":
++            eventos.append(["WARNING", record.getMessage()])
++
++
++if cfg.get("pre_importar_src"):
++    # Cenário A3a: a cópia src.tools.oracle_dba é importada antes da entrada (e antes da carga do .env).
++    import src.tools.oracle_dba  # noqa: F401
++
++if cfg.get("raiz_em_error"):
++    # C3: a raiz já configurada em ERROR antes da entrada (o log de WARNING fica suprimido).
++    logging.basicConfig(level=logging.ERROR)
++_basic_original = logging.basicConfig
++
+ 
++def _basic_wrapper(*a, **k):
++    eventos.append(["basicConfig"])
++    return _basic_original(*a, **k)
++
++
++logging.basicConfig = _basic_wrapper
+ raiz_log = logging.getLogger()
+ raiz_log.addHandler(_Captura())
+-raiz_log.setLevel(logging.INFO)  # handlers existentes: basicConfig vira no-op, sem FileHandler novo
++if not cfg.get("raiz_em_error"):
++    raiz_log.setLevel(logging.INFO)  # handlers existentes: basicConfig vira no-op, sem FileHandler novo
++
+ 
+ def _sem_rede(*a, **k):
+     raise OSError("rede neutralizada no teste")
+ 
++
+ socket.create_connection = _sem_rede
+ 
+-if entrada == "cli":
+-    import main  # noqa: F401
+-else:
+-    from streamlit.testing.v1 import AppTest
+-    AppTest.from_file(os.path.join(raiz, "app.py"), default_timeout=30).run()
++por_run = []       # um item por run: estado do ambiente e exceções depois do run
++excecoes_harness = []
+ 
+-print(json.dumps({
+-    "sandbox": os.environ.get("ORACLE_SANDBOX", "AUSENTE"),
+-    "sentinela": os.environ.get("SENTINELA_FASE2", "AUSENTE"),
++
++def _estado(excecoes):
++    return {
++        "sandbox": os.environ.get("ORACLE_SANDBOX", "AUSENTE"),
++        "sentinela": os.environ.get("SENTINELA_FASE2", "AUSENTE"),
++        "sentinela_fase3": os.environ.get("SENTINELA_FASE3", "AUSENTE"),
++        "sentinela_tardia": os.environ.get("SENTINELA_TARDIA_FASE3", "AUSENTE"),
++        "oracle_dsn_do_shell": os.environ.get("ORACLE_DSN") == "dsn_shell_ficticio",  # nunca imprime o valor
++        "excecoes": excecoes,
++        "warning_tela": [],
++        "tela_texto": "",
++    }
++
++
++try:
++    ats = []
++    if entrada == "web":
++        from streamlit.testing.v1 import AppTest
++        for _ in range(cfg.get("sessoes", 1)):
++            ats.append(AppTest.from_file(os.path.join(raiz, "app.py"), default_timeout=30))
++    for i in range(cfg.get("runs", 1)):
++        excecoes = []
++        if entrada == "cli":
++            sys.modules.pop("main", None)  # reimport: simula nova subida da entrada no mesmo processo
++            try:
++                import main  # noqa: F401
++            except Exception as exc:
++                excecoes.append(type(exc).__name__ + ": " + str(exc))
++        else:
++            for at in ats:
++                try:
++                    at.run()
++                except Exception as exc:
++                    excecoes.append("harness " + type(exc).__name__ + ": " + str(exc))
++                excecoes.extend(type(e).__name__ + ": " + str(e.value) for e in at.exception)
++        estado = _estado(excecoes)
++        for at in ats:
++            estado["warning_tela"].extend(str(w.value) for w in at.warning)
++            estado["tela_texto"] += repr(at.main) + repr(at.sidebar)
++        por_run.append(estado)
++        apos = cfg.get("apos_run", {}).get(str(i))
++        if apos is not None:
++            with open(env_ficticio, "wb") as f:
++                f.write(bytes.fromhex(apos))
++except Exception as exc:  # erro do harness: aparece no JSON em vez de derrubar o filho
++    excecoes_harness.append(type(exc).__name__ + ": " + str(exc) + " | " + traceback.format_exc()[-400:])
++
++def _destino_log(nome):
++    modulo = sys.modules.get(nome)
++    try:
++        return None if modulo is None else str(modulo._caminho_log_efetivo(None))  # só resolve; nunca grava
++    except Exception as exc:
++        return "erro " + type(exc).__name__
++
++final = _estado([])
++print("\n" + json.dumps({
++    "sandbox": final["sandbox"],
++    "sentinela": final["sentinela"],
++    "sentinela_fase3": final["sentinela_fase3"],
++    "sentinela_tardia": final["sentinela_tardia"],
++    "por_run": por_run,
++    "oracle_dsn_do_shell": final["oracle_dsn_do_shell"],
++    "log_total": [m for n, m in capturados],
++    "eventos": eventos,
++    "gemini_key_igual": None if sys.modules.get("tools.gemini_router") is None
++        else sys.modules["tools.gemini_router"].GEMINI_API_KEY == "chave_ficticia_d63",  # só booleano
+     "avisos": [m for n, m in capturados if n == "WARNING"],
+     "chamadas": chamadas,
++    "chamadas_values": chamadas_values,
++    "leituras_reais": leituras_reais,
++    "excecoes_harness": excecoes_harness,
++    "destino_log": {"src": _destino_log("src.tools.oracle_dba"), "tools": _destino_log("tools.oracle_dba")},
+ }))
+ """
+ 
++MENSAGEM_FALHA_CARGA = "Carga do .env falhou"
++
++
++def _rodar(
++    entrada, tmp_path, conteudo_env, sandbox_shell=None, runs=1, sessoes=1, apos_run=None,
++    sem_log_dir=False, pre_importar_src=False, env_extra=None, raiz_em_error=False,
++):
++    """Roda a entrada em subprocesso. `conteudo_env` e os valores de `apos_run` ({índice_do_run: conteúdo})
++    aceitam str ou bytes; `apos_run` regrava o fictício depois do run indicado (alteração em disco).
++    `sem_log_dir` tira AGENTDBA_LOG_DIR do ambiente do filho; `pre_importar_src` importa
++    src.tools.oracle_dba antes da entrada; `env_extra` acrescenta variáveis ao ambiente do filho (depois do
++    filtro de prefixos); `raiz_em_error` chama logging.basicConfig(level=ERROR) antes da entrada."""
++    def _bytes(c):
++        return c if isinstance(c, bytes) else c.encode("utf-8")
+ 
+-def _rodar(entrada, tmp_path, conteudo_env, sandbox_shell=None):
+     env_ficticio = tmp_path / "ficticio.env"
+-    env_ficticio.write_text(conteudo_env, encoding="utf-8")
++    env_ficticio.write_bytes(_bytes(conteudo_env))
++    cfg = {
++        "runs": runs,
++        "sessoes": sessoes,
++        "pre_importar_src": pre_importar_src,
++        "raiz_em_error": raiz_em_error,
++        "apos_run": {str(i): _bytes(c).hex() for i, c in (apos_run or {}).items()},
++    }
+     env = {k: v for k, v in os.environ.items() if not k.startswith(_PREFIXOS)}
+-    env["AGENTDBA_LOG_DIR"] = str(tmp_path / "log")
++    if sem_log_dir:
++        env.pop("AGENTDBA_LOG_DIR", None)
++    else:
++        env["AGENTDBA_LOG_DIR"] = str(tmp_path / "log")
+     env["SCRIPTS_REGISTRY_PATH"] = str(RAIZ / "registry" / "test_scripts.yaml")
+     if sandbox_shell is not None:
+         env["ORACLE_SANDBOX"] = sandbox_shell
++    env.update(env_extra or {})
++    env["PYTHONIOENCODING"] = "utf-8"
+     res = subprocess.run(
+-        [sys.executable, "-c", _SCRIPT, str(RAIZ), entrada, str(env_ficticio)],
+-        capture_output=True, text=True, env=env, timeout=180, cwd=str(RAIZ),
++        [sys.executable, "-c", _SCRIPT, str(RAIZ), entrada, str(env_ficticio), json.dumps(cfg)],
++        capture_output=True, text=True, encoding="utf-8", env=env, timeout=180, cwd=str(RAIZ),
+     )
+     ultima = (res.stderr.strip().splitlines() or [""])[-1]
+     assert res.returncode == 0, f"subprocesso falhou (returncode={res.returncode}): {ultima}"
+-    return json.loads(res.stdout.strip().splitlines()[-1])
++    dados = json.loads(res.stdout.strip().splitlines()[-1])
++    assert dados["excecoes_harness"] == [], f"erro do harness: {dados['excecoes_harness']}"
++    dados["stderr"] = res.stderr
++    dados["stdout_resto"] = "\n".join(res.stdout.strip().splitlines()[:-1])  # tudo menos o JSON final
++    return dados
++
++
++def _falha_fixa(excecoes):
++    return any(MENSAGEM_FALHA_CARGA in e for e in excecoes)
+ 
+ 
+ @pytest.mark.parametrize("entrada", ["cli", "web"])
+@@ -95,6 +254,7 @@ def test_oracle_sandbox_do_env_descartada(entrada, tmp_path):
+     chamada = dados["chamadas"][0]
+     assert chamada["caminho"] is not None and Path(chamada["caminho"]) == RAIZ / ".env", resumo
+     assert chamada["override"] is False, resumo
++    assert dados["leituras_reais"] == []
+ 
+ 
+ @pytest.mark.parametrize("entrada", ["cli", "web"])
+@@ -103,3 +263,176 @@ def test_oracle_sandbox_do_shell_prevalece(entrada, tmp_path):
+     resumo = f"sandbox={dados['sandbox']}, avisos={dados['avisos']}"
+     assert dados["sandbox"] == "0", resumo
+     assert not [a for a in dados["avisos"] if "DESCARTADA" in a], resumo
++    assert dados["leituras_reais"] == []
++
++
++def test_b4_web_chave_nova_entre_reruns_nao_entra(tmp_path):
++    """B4: chave acrescentada ao .env entre dois reruns do AppTest não entra no processo."""
++    dados = _rodar(
++        "web", tmp_path, "SENTINELA_FASE3=1\n", runs=2,
++        apos_run={0: "SENTINELA_FASE3=1\nSENTINELA_TARDIA_FASE3=1\n"},
++    )
++    resumo = f"por_run={dados['por_run']}, chamadas={dados['chamadas']}"
++    assert dados["sentinela_tardia"] == "AUSENTE", resumo
++    assert len(dados["chamadas"]) == 1, resumo
++    assert dados["leituras_reais"] == []
++
++
++_ENV_COM_NUL = b"ORACLE_SANDBOX=1\nSENTINELA_FASE3=1\nVALOR_NUL_FICTICIO=a\x00b\n"
++
++
++@pytest.mark.parametrize("entrada", ["cli", "web"])
++def test_c1_nul_nao_deixa_oracle_sandbox(entrada, tmp_path):
++    """C1: .env com byte NUL: a carga aborta e ORACLE_SANDBOX do arquivo não fica no processo (2 tentativas)."""
++    dados = _rodar(entrada, tmp_path, _ENV_COM_NUL, runs=2)
++    resumo = f"por_run={dados['por_run']}, chamadas={dados['chamadas']}"
++    assert len(dados["por_run"]) == 2, resumo
++    assert [r["sandbox"] for r in dados["por_run"]] == ["AUSENTE", "AUSENTE"], resumo
++    assert all(_falha_fixa(r["excecoes"]) for r in dados["por_run"]), resumo
++    assert len(dados["chamadas"]) == 1, resumo
++    assert dados["leituras_reais"] == []
++
++
++@pytest.mark.parametrize("entrada", ["web", "cli"])
++def test_c2a_rerun_apos_falha_nao_promove_a_shell(entrada, tmp_path):
++    """C2a: depois de falha por NUL, tirar a linha NUL e repetir não promove ORACLE_SANDBOX a 'do shell'."""
++    dados = _rodar(
++        entrada, tmp_path, _ENV_COM_NUL, runs=2,
++        apos_run={0: b"ORACLE_SANDBOX=1\nSENTINELA_FASE3=1\n"},
++    )
++    resumo = f"por_run={dados['por_run']}, chamadas={dados['chamadas']}"
++    assert len(dados["por_run"]) == 2, resumo
++    assert dados["por_run"][1]["sandbox"] == "AUSENTE", resumo
++    assert _falha_fixa(dados["por_run"][1]["excecoes"]), resumo  # fail-closed: o run 2 mantém o erro fixo
++    assert len(dados["chamadas"]) == 1, resumo
++    assert dados["leituras_reais"] == []
++
++
++def test_r_f2_1_duas_sessoes_uma_carga(tmp_path):
++    """R-F2-1: duas instâncias de AppTest no mesmo processo carregam o .env uma única vez.
++
++    A intercalação entre threads não é testável de forma determinística; fica fechada por construção
++    (lock e retrato único) e isso é declarado no GOVERNANCA_LOG.
++    """
++    dados = _rodar("web", tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE3=1\n", sessoes=2)
++    resumo = f"sandbox={dados['sandbox']}, chamadas={dados['chamadas']}, por_run={dados['por_run']}"
++    assert len(dados["chamadas"]) == 1, resumo
++    assert dados["sandbox"] == "AUSENTE", resumo
++    assert dados["leituras_reais"] == []
++
++
++@pytest.mark.parametrize("entrada", ["cli", "web"])
++def test_a3_src_tools_antes_da_entrada_mesmo_destino(entrada, tmp_path):
++    """A3a: src.tools.oracle_dba importada antes da entrada resolve o mesmo destino de log que tools.oracle_dba.
++
++    O filho não tem AGENTDBA_LOG_DIR no ambiente; o fictício o define. Só resolve o destino, nunca grava o
++    log (em d05577e a cópia src aponta para C:/AgentDBA/logs e uma gravação criaria a pasta real).
++    """
++    dir_env = tmp_path / "dir_env"
++    esperado = dir_env / "kill_approval.log"
++    agentdba_existia = Path("C:/AgentDBA").exists()
++    dados = _rodar(
++        entrada, tmp_path, f"AGENTDBA_LOG_DIR={dir_env.as_posix()}\n",
++        sem_log_dir=True, pre_importar_src=True,
++    )
++    destinos = dados["destino_log"]
++    resumo = f"destino_log={destinos}, esperado={esperado}, chamadas={dados['chamadas']}"
++    assert destinos["src"] is not None and Path(destinos["src"]) == esperado, resumo
++    assert destinos["tools"] is not None and Path(destinos["tools"]) == esperado, resumo
++    assert [c["src_oracle_dba_importado"] for c in dados["chamadas"]] == [True], resumo  # cenário do A3a
++    assert not dir_env.exists()
++    assert Path("C:/AgentDBA").exists() == agentdba_existia
++    assert dados["leituras_reais"] == []
++
++
++# Contrato de produção (decisao_fase3.md, P1 e P3c). Textos fixos, sem valor do .env.
++_TEXTO_DESCARTE = (
++    "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell. "
++    "Remova a chave do .env."
++)
++_PREFIXO_SOMBREADAS = "Variáveis do .env ignoradas porque o ambiente já as define com outro valor: "
++_PREFIXO_CLI = "[Sistema]: AVISO: "
++
++
++@pytest.mark.parametrize("entrada", ["cli", "web"])
++def test_b3_nomes_sombreados_sem_valores(entrada, tmp_path):
++    """B3: chave do .env sombreada pelo ambiente com outro valor é avisada só pelo nome, nunca pelo valor."""
++    dados = _rodar(
++        entrada, tmp_path,
++        "ORACLE_DSN=dsn_arquivo_ficticio\nSENTINELA_IGUAL=igual\nSENTINELA_FASE3=1\n",
++        env_extra={"ORACLE_DSN": "dsn_shell_ficticio", "SENTINELA_IGUAL": "igual"},
++    )
++    resumo = f"avisos={dados['avisos']}, stderr={dados['stderr']!r}, por_run={dados['por_run']}"
++    sombreados = [a for a in dados["avisos"] if "ORACLE_DSN" in a]
++    assert len(sombreados) == 1, resumo
++    assert "SENTINELA_IGUAL" not in sombreados[0], resumo
++    assert _PREFIXO_SOMBREADAS in sombreados[0] and "DESCARTADA" not in sombreados[0], resumo
++    log_total = "\n".join(dados["log_total"])
++    tela = dados["por_run"][0]["tela_texto"]
++    assert "dsn_" not in log_total and "dsn_" not in dados["stdout_resto"], resumo
++    assert "dsn_" not in dados["stderr"] and "dsn_" not in tela, resumo
++    assert dados["oracle_dsn_do_shell"] is True, resumo  # o valor do shell prevaleceu
++    if entrada == "cli":
++        assert _PREFIXO_CLI + _PREFIXO_SOMBREADAS in dados["stderr"], resumo
++        assert "ORACLE_DSN" in dados["stderr"].split(_PREFIXO_SOMBREADAS, 1)[-1], resumo
++    else:
++        assert any("ORACLE_DSN" in w and _PREFIXO_SOMBREADAS in w for w in dados["por_run"][0]["warning_tela"]), resumo
++    assert len(dados["chamadas_values"]) == 1, resumo
++    assert Path(dados["chamadas_values"][0]["caminho"]) == RAIZ / ".env", resumo
++    assert dados["leituras_reais"] == []
++
++
++def test_c3_cli_aviso_em_stderr(tmp_path):
++    """C3: o descarte de ORACLE_SANDBOX aparece uma vez no stderr da CLI, além do log."""
++    dados = _rodar("cli", tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE3=1\n")
++    resumo = f"stderr={dados['stderr']!r}, avisos={dados['avisos']}"
++    assert dados["stderr"].count(_PREFIXO_CLI + _TEXTO_DESCARTE) == 1, resumo
++    assert dados["sandbox"] == "AUSENTE", resumo
++    assert dados["leituras_reais"] == []
++
++
++def test_c3_cli_aviso_com_raiz_em_error(tmp_path):
++    """C3: com o logger raiz em ERROR (WARNING suprimido) o aviso ainda chega ao stderr da CLI."""
++    dados = _rodar("cli", tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE3=1\n", raiz_em_error=True)
++    resumo = f"stderr={dados['stderr']!r}, avisos={dados['avisos']}"
++    assert _TEXTO_DESCARTE in dados["stderr"], resumo
++    assert dados["sandbox"] == "AUSENTE", resumo
++    assert dados["leituras_reais"] == []
++
++
++def test_c3_web_st_warning_em_todo_rerun(tmp_path):
++    """C3: na Web o aviso de descarte é um st.warning visível em todo rerun, não só no primeiro."""
++    dados = _rodar("web", tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE3=1\n", runs=2)
++    resumo = f"por_run={[r['warning_tela'] for r in dados['por_run']]}"
++    assert len(dados["por_run"]) == 2, resumo
++    for run in dados["por_run"]:
++        assert any(_TEXTO_DESCARTE in w for w in run["warning_tela"]), resumo
++    assert dados["sandbox"] == "AUSENTE", resumo
++    assert dados["leituras_reais"] == []
++
++
++@pytest.mark.parametrize("entrada", ["cli", "web"])
++def test_d63_valor_lido_no_import_prova_carga_antes_dos_imports(entrada, tmp_path):
++    """D6.3a (I1): a carga do .env vem antes dos imports de `tools.*`.
++
++    O fictício tem GEMINI_API_KEY; tools.gemini_router lê a chave no import. Só o booleano
++    (igual/diferente) é registrado: a chave nunca é impressa.
++    """
++    dados = _rodar(entrada, tmp_path, "GEMINI_API_KEY=chave_ficticia_d63\nSENTINELA_FASE3=1\n")
++    resumo = f"gemini_key_igual={dados['gemini_key_igual']}, sentinela_fase3={dados['sentinela_fase3']}"
++    assert dados["gemini_key_igual"] is True, resumo
++    assert dados["sentinela_fase3"] == "1", resumo  # o fictício foi carregado
++    assert dados["leituras_reais"] == []
++
++
++@pytest.mark.parametrize("entrada", ["cli", "web"])
++def test_d63_warning_de_descarte_depois_do_basicconfig(entrada, tmp_path):
++    """D6.3b (I3/D2): o WARNING de descarte de ORACLE_SANDBOX é emitido depois de logging.basicConfig."""
++    dados = _rodar(entrada, tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE3=1\n")
++    eventos = dados["eventos"]
++    resumo = f"eventos={eventos}"
++    idx_warn = [i for i, e in enumerate(eventos) if e[0] == "WARNING" and "DESCARTADA" in e[1]]
++    idx_basic = [i for i, e in enumerate(eventos) if e[0] == "basicConfig"]
++    assert len(idx_warn) == 1, resumo
++    assert idx_basic and idx_basic[0] < idx_warn[0], resumo
++    assert dados["leituras_reais"] == []
+diff --git a/IA/PERSONAL_AGENT/tests/test_conftest_sandbox_env.py b/IA/PERSONAL_AGENT/tests/test_conftest_sandbox_env.py
+index be2b028..dc5af40 100644
+--- a/IA/PERSONAL_AGENT/tests/test_conftest_sandbox_env.py
++++ b/IA/PERSONAL_AGENT/tests/test_conftest_sandbox_env.py
+@@ -1,7 +1,15 @@
+ """Testes (sem conexão) da carga controlada de credenciais de sandbox do conftest (D5)."""
+ 
++import json
+ import os
++import shutil
++import subprocess
++import sys
++from pathlib import Path
+ 
++import pytest
++
++import tests.conftest as conftest
+ from tests.conftest import CHAVES_ENV_SANDBOX, credenciais_sandbox_do_env
+ 
+ 
+@@ -34,3 +42,59 @@ def test_credenciais_sandbox_filtra_e_nao_sobrescreve(tmp_path):
+     resultado = credenciais_sandbox_do_env(arq, "1", {"ORACLE_DSN": "do_shell"})
+     assert resultado == {"ORACLE_USER_KILL": "kill_ficticio"}
+     assert dict(os.environ) == antes
++
++
++def test_credenciais_sandbox_valor_vazio_ou_sem_valor_nao_entra(tmp_path):
++    """D6.1: `KEY=` (vazio) e `KEY` (sem valor) nunca entram, mesmo com operador "1" passado como argumento."""
++    arq = tmp_path / ".env"
++    arq.write_text(
++        "ORACLE_DSN=\n"
++        "ORACLE_USER_DIAG\n"
++        "ORACLE_USER_KILL=kill_ficticio\n",
++        encoding="utf-8",
++    )
++    antes = dict(os.environ)
++    assert credenciais_sandbox_do_env(arq, "1", {}) == {"ORACLE_USER_KILL": "kill_ficticio"}
++    assert dict(os.environ) == antes
++
++
++_SCRIPT_LIGACAO = r"""
++import json, os, runpy, sys
++ns = runpy.run_path(sys.argv[1])
++procuradas = list(ns["CHAVES_ENV_SANDBOX"]) + ["SENTINELA_D61_A", "SENTINELA_D61_B"]
++print(json.dumps({
++    "presentes": [k for k in procuradas if k in os.environ],  # só nomes, nunca valores
++    "operador_visto": ns["ORACLE_SANDBOX_DO_OPERADOR"],
++}))
++"""
++
++
++@pytest.mark.parametrize("sandbox_shell", [None, "0"], ids=["ausente", "zero"])
++def test_ligacao_real_do_conftest_nao_carrega_env_sem_operador(tmp_path, sandbox_shell):
++    """D6.1: o módulo conftest (copiado para um projeto fictício) não põe nada do .env em os.environ.
++
++    O .env fictício só tem chaves de CHAVES_ENV_SANDBOX (valores fictícios) e nomes-sentinela. O filho não
++    tem credenciais e o ORACLE_SANDBOX do filho é ausente ou "0", nunca "1". O .env real não é lido.
++    """
++    proj = tmp_path / "proj"
++    (proj / "tests").mkdir(parents=True)
++    shutil.copyfile(conftest.__file__, proj / "tests" / "conftest.py")
++    linhas = [f"{k}=valor_ficticio_d61" for k in CHAVES_ENV_SANDBOX]
++    linhas += ["SENTINELA_D61_A=1", "SENTINELA_D61_B=2"]
++    (proj / ".env").write_text("\n".join(linhas) + "\n", encoding="utf-8")
++
++    env = {k: v for k, v in os.environ.items() if not k.startswith(("ORACLE_", "EMAIL_", "GEMINI_"))}
++    (tmp_path / "tmp").mkdir()
++    env["TEMP"] = env["TMP"] = str(tmp_path / "tmp")  # o mkdtemp do conftest cai em tmp_path
++    if sandbox_shell is not None:
++        assert sandbox_shell == "0"
++        env["ORACLE_SANDBOX"] = sandbox_shell
++    res = subprocess.run(
++        [sys.executable, "-c", _SCRIPT_LIGACAO, str(proj / "tests" / "conftest.py")],
++        capture_output=True, text=True, env=env, timeout=120, cwd=str(proj),
++    )
++    ultima = (res.stderr.strip().splitlines() or [""])[-1]
++    assert res.returncode == 0, f"subprocesso falhou (returncode={res.returncode}): {ultima}"
++    dados = json.loads(res.stdout.strip().splitlines()[-1])
++    assert dados["presentes"] == [], f"chaves do .env fictício entraram em os.environ: {dados['presentes']}"
++    assert dados["operador_visto"] == sandbox_shell
+diff --git a/IA/PERSONAL_AGENT/tests/test_env_em_execucao.py b/IA/PERSONAL_AGENT/tests/test_env_em_execucao.py
+index 962a6e2..889e1bf 100644
+--- a/IA/PERSONAL_AGENT/tests/test_env_em_execucao.py
++++ b/IA/PERSONAL_AGENT/tests/test_env_em_execucao.py
+@@ -1,10 +1,13 @@
+ """D4: o .env alterado em disco depois do start não pode mudar credenciais do processo em execução."""
++import json
+ import os
++import types
+ 
++import dotenv
+ import dotenv.main
+ import oracledb
+ 
+-from src.tools import notificador, oracle_dba
++from src.tools import gemini_router, notificador, oracle_dba
+ from src.tools.oracle_dba import conduzir_kill_hitl
+ from tests.fakes_oracle import USER_DIAG_FAKE, USER_KILL_FAKE, _OracleFake, _linha_alvo
+ 
+@@ -99,3 +102,76 @@ def test_kill_apos_alteracao_do_env_usa_valores_do_start(monkeypatch, tmp_path):
+     assert _SmtpFake.enviados == 2
+     for chave, valor in VALORES_START.items():
+         assert os.environ[chave] == valor
++
++
++def test_fluxo_nao_le_nem_recarrega_dotenv(monkeypatch, tmp_path):
++    """D6.2: nenhum leitor de .env é acionado durante o fluxo (kill, e-mail e análise Gemini).
++
++    O guarda em DotEnv.__init__ pega qualquer leitura, inclusive de nomes ligados no import
++    (`from dotenv import load_dotenv`) e de caminho explícito; load_dotenv e dotenv_values trocados por
++    funções que também registram. Uma leitura levantaria AssertionError (que o notificador captura), por
++    isso a lista de leituras é a asserção principal.
++    """
++    leituras = []
++
++    def _registrar(origem):
++        def _falha(*a, **k):
++            leituras.append(origem)
++            raise AssertionError(f"leitura de .env durante o fluxo: {origem}")
++        return _falha
++
++    def _guarda_init(self, *args, **kwargs):
++        leituras.append("DotEnv.__init__")
++        raise AssertionError("DotEnv construído durante o fluxo")
++
++    monkeypatch.setattr(dotenv.main.DotEnv, "__init__", _guarda_init)
++    monkeypatch.setattr(dotenv, "load_dotenv", _registrar("dotenv.load_dotenv"))
++    monkeypatch.setattr(dotenv, "dotenv_values", _registrar("dotenv.dotenv_values"))
++    monkeypatch.setattr(dotenv.main, "load_dotenv", _registrar("dotenv.main.load_dotenv"))
++    monkeypatch.setattr(dotenv.main, "dotenv_values", _registrar("dotenv.main.dotenv_values"))
++
++    for chave, valor in VALORES_START.items():
++        monkeypatch.setenv(chave, valor)
++    monkeypatch.setenv("GEMINI_API_KEY", "chave_ficticia_d62")
++
++    _SmtpFake.logins = []
++    _SmtpFake.enviados = 0
++    monkeypatch.setattr(notificador.smtplib, "SMTP", _SmtpFake)
++    monkeypatch.setattr(
++        oracle_dba,
++        "verificar_acessibilidade_host",
++        lambda dsn, timeout=3.0: {"acessivel": True, "host": "host-teste", "porta": 1521, "latencia_ms": 0.1},
++    )
++    fake = _OracleFakeValoresStart([_linha_alvo(), _linha_alvo()], status_pkg="ENCERRADA")
++    monkeypatch.setattr(oracledb, "connect", fake.connect)
++
++    # Gemini neutralizado: sem rede; só registra a chave recebida (booleano) e devolve texto fixo.
++    chaves_configuradas = []
++
++    class _ModeloFalso:
++        def __init__(self, nome):
++            self.nome = nome
++
++        def generate_content(self, prompt, **kwargs):
++            return types.SimpleNamespace(text="analise fictícia")
++
++    monkeypatch.setattr(gemini_router.genai, "configure", lambda **k: chaves_configuradas.append(k.get("api_key")))
++    monkeypatch.setattr(gemini_router.genai, "GenerativeModel", _ModeloFalso)
++
++    desfecho = None
++    try:
++        desfecho = conduzir_kill_hitl(
++            {"inst_id": 1, "sid": 101, "serial": 202},
++            solicitar_aprovacao=lambda prep: ("APROVADO", "dba_teste", None),
++            canal="TESTE",
++            caminho_log=tmp_path / "kill.log",
++        )
++        laudo = json.loads(gemini_router.analisar_log_complexo("dados fictícios", "contexto fictício"))
++    except AssertionError:
++        laudo = None  # a leitura já foi registrada em `leituras`
++
++    assert leituras == []
++    assert desfecho is not None and desfecho["decisao"] == "APROVADO" and desfecho["executado"] is True
++    assert _SmtpFake.logins == ["remetente_inicio@exemplo.invalid"]
++    assert laudo is not None and laudo["status"] == "sucesso"
++    assert chaves_configuradas == ["chave_ficticia_d62"]
+diff --git a/IA/PERSONAL_AGENT/tests/test_executor.py b/IA/PERSONAL_AGENT/tests/test_executor.py
+index 63cae61..a6f66f4 100644
+--- a/IA/PERSONAL_AGENT/tests/test_executor.py
++++ b/IA/PERSONAL_AGENT/tests/test_executor.py
+@@ -463,6 +463,13 @@ def test_t18_tipo_divergente_recusado_sem_conexao():
+ # =============================================================================
+ def test_t19_oracle_user_read_ausente_com_select(monkeypatch):
+     """T19: Ausência de ORACLE_USER_READ rejeita execução com ERRO_CONFIG sem conectar."""
++    def fail_connect(*args, **kwargs):
++        pytest.fail("oracledb.connect não deve ser chamado quando falta ORACLE_USER_READ")
++
++    monkeypatch.setattr(oracledb, "connect", fail_connect)
++    # D3: só o usuário falta; senha e DSN fictícios (sem o .env real, o teste não passa "por acaso")
++    monkeypatch.setenv("ORACLE_PASSWORD_READ", "senha-fake")
++    monkeypatch.setenv("ORACLE_DSN", "host-teste:1521/TESTE")
+     monkeypatch.delenv("ORACLE_USER_READ", raising=False)
+     saida_str = executar_script("verificar_dual", {})
+     resultado = json.loads(saida_str)
+diff --git a/IA/PERSONAL_AGENT/tests/test_fluxo_cli.py b/IA/PERSONAL_AGENT/tests/test_fluxo_cli.py
+index f4fed07..bfe4481 100644
+--- a/IA/PERSONAL_AGENT/tests/test_fluxo_cli.py
++++ b/IA/PERSONAL_AGENT/tests/test_fluxo_cli.py
+@@ -75,11 +75,40 @@ def _filehandlers_auditoria():
+     return encontrados
+ 
+ 
++def _instalar_guarda_dotenv(mp):
++    """dotenv_values vira stub (devolve {}); DotEnv recusa e registra qualquer leitura de RAIZ/.env.
++
++    Devolve a lista de leituras reais, que o teste afirma vazia (P3b; nenhum leitor chega ao .env real)."""
++    import dotenv
++    import dotenv.main
++
++    leituras = []
++    real = os.path.normcase(os.path.realpath(RAIZ / ".env"))
++    init_original = dotenv.main.DotEnv.__init__
++
++    def _guarda_init(self, *args, **kwargs):
++        caminho = kwargs["dotenv_path"] if "dotenv_path" in kwargs else (args[0] if args else None)
++        if caminho is not None and not hasattr(caminho, "read"):
++            try:
++                alvo = os.path.normcase(os.path.realpath(os.fspath(caminho)))
++            except Exception:
++                alvo = None
++            if alvo == real:
++                leituras.append(str(caminho))
++                raise AssertionError("leitura do .env real bloqueada pelo guarda do teste")
++        return init_original(self, *args, **kwargs)
++
++    mp.setattr(dotenv, "dotenv_values", lambda *a, **k: {})
++    mp.setattr(dotenv.main.DotEnv, "__init__", _guarda_init)
++    return leituras
++
++
+ @pytest.fixture(scope="module")
+ def main_cli():
+     mp = pytest.MonkeyPatch()
+     import dotenv
+     mp.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
++    leituras_env_reais = _instalar_guarda_dotenv(mp)
+     for caminho in (str(RAIZ / "src"), str(RAIZ)):
+         mp.syspath_prepend(caminho)
+     mp.setenv("ORACLE_USER_DIAG", USER_DIAG_FAKE)
+@@ -105,7 +134,9 @@ def main_cli():
+         import main
+         main.client = _LLMFalso()
+         assert not _filehandlers_auditoria(), "import de main não pode adicionar FileHandler de auditoria"
++        assert leituras_env_reais == []
+         yield main
++        assert leituras_env_reais == []
+     finally:
+         logging.getLogger().removeHandler(nulo)
+         if not ja_importado:
+diff --git a/IA/PERSONAL_AGENT/tests/test_fluxo_web.py b/IA/PERSONAL_AGENT/tests/test_fluxo_web.py
+index 4ad5274..a15022b 100644
+--- a/IA/PERSONAL_AGENT/tests/test_fluxo_web.py
++++ b/IA/PERSONAL_AGENT/tests/test_fluxo_web.py
+@@ -112,6 +112,34 @@ def snapshot_logs_reais():
+     assert _snapshot_logs_reais() == antes, "Log real alterado pelo teste Web"
+ 
+ 
++def _instalar_guarda_dotenv(mp):
++    """dotenv_values vira stub (devolve {}); DotEnv recusa e registra qualquer leitura de RAIZ/.env.
++
++    Devolve a lista de leituras reais, que o teste afirma vazia (P3b; nenhum leitor chega ao .env real)."""
++    import dotenv
++    import dotenv.main
++
++    leituras = []
++    real = os.path.normcase(os.path.realpath(RAIZ / ".env"))
++    init_original = dotenv.main.DotEnv.__init__
++
++    def _guarda_init(self, *args, **kwargs):
++        caminho = kwargs["dotenv_path"] if "dotenv_path" in kwargs else (args[0] if args else None)
++        if caminho is not None and not hasattr(caminho, "read"):
++            try:
++                alvo = os.path.normcase(os.path.realpath(os.fspath(caminho)))
++            except Exception:
++                alvo = None
++            if alvo == real:
++                leituras.append(str(caminho))
++                raise AssertionError("leitura do .env real bloqueada pelo guarda do teste")
++        return init_original(self, *args, **kwargs)
++
++    mp.setattr(dotenv, "dotenv_values", lambda *a, **k: {})
++    mp.setattr(dotenv.main.DotEnv, "__init__", _guarda_init)
++    return leituras
++
++
+ def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=True):
+     monkeypatch.syspath_prepend(str(RAIZ / "src"))
+     monkeypatch.syspath_prepend(str(RAIZ))
+@@ -127,6 +155,7 @@ def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=
+     import dotenv
+ 
+     monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
++    leituras_env_reais = _instalar_guarda_dotenv(monkeypatch)
+ 
+     # logging.basicConfig vira no-op (já existe handler na raiz) e não cria FileHandler real
+     raiz_log = logging.getLogger()
+@@ -183,6 +212,7 @@ def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=
+ 
+     amb.at = AppTest.from_file(str(APP), default_timeout=30)
+     amb.destinos_inesperados = destinos_inesperados
++    amb.leituras_env_reais = leituras_env_reais
+     amb._null = null
+     return amb
+ 
+@@ -201,6 +231,7 @@ def montar_web(monkeypatch, tmp_path, snapshot_logs_reais):
+     for amb in criados:
+         logging.getLogger().removeHandler(amb._null)
+         assert amb.destinos_inesperados == []
++        assert amb.leituras_env_reais == []
+ 
+ 
+ def _ate_painel_hitl(amb):
+diff --git a/IA/PERSONAL_AGENT/tests/test_guard_sessao_sandbox.py b/IA/PERSONAL_AGENT/tests/test_guard_sessao_sandbox.py
+new file mode 100644
+index 0000000..8bfb60f
+--- /dev/null
++++ b/IA/PERSONAL_AGENT/tests/test_guard_sessao_sandbox.py
+@@ -0,0 +1,161 @@
++"""Caracterização do guard existente `pytest_sessionfinish` de tests/conftest.py (ORACLE_SANDBOX).
++
++Não altera produção nem o conftest e não usa sandbox: ORACLE_SANDBOX só recebe "0" ou fica ausente
++(nunca "1"), sempre por monkeypatch restaurado no teardown, para o guard real do fim da sessão não disparar.
++"""
++import json
++import os
++import subprocess
++import sys
++import types
++
++import pytest
++
++import tests.conftest as conftest
++
++
++def _preparar(monkeypatch, tmp_path, operador, inicio, tomado, env):
++    assert sys.modules["tests.conftest"] is conftest
++    # Evita apagar o diretório de log da sessão real (shutil.rmtree no fim da função).
++    monkeypatch.setattr(conftest, "_DIR_LOG_TESTE", str(tmp_path / "dir_log_falso"))
++    # Neutraliza os checks de log real: só o guard de ORACLE_SANDBOX pode mudar o exitstatus.
++    monkeypatch.setattr(conftest, "SNAPSHOT_LOG_REAL_INICIO", conftest._snapshot_log_real())
++    monkeypatch.setattr(
++        conftest, "SNAPSHOT_LOG_PADRAO_INICIO", conftest._snapshot_arquivo(conftest.LOG_PADRAO_PRODUCAO)
++    )
++    monkeypatch.setattr(conftest, "PASTA_PADRAO_EXISTIA_NO_INICIO", conftest.PASTA_PADRAO_PRODUCAO.exists())
++    monkeypatch.setattr(conftest, "ORACLE_SANDBOX_DO_OPERADOR", operador)
++    monkeypatch.setattr(conftest, "ORACLE_SANDBOX_INICIO_SESSAO", inicio)
++    monkeypatch.setattr(conftest, "_SNAPSHOT_SESSAO_TOMADO", tomado)
++    if env is None:
++        monkeypatch.delenv("ORACLE_SANDBOX", raising=False)
++    else:
++        assert env == "0"
++        monkeypatch.setenv("ORACLE_SANDBOX", env)
++    sessao = types.SimpleNamespace(exitstatus=0)
++    conftest.pytest_sessionfinish(sessao, 0)
++    return sessao
++
++
++@pytest.mark.parametrize(
++    "operador, inicio, tomado, env",
++    [
++        (None, None, True, None),   # a) sem mudança
++        (None, None, False, None),  # e) snapshot não tomado
++    ],
++    ids=["sem_mudanca", "snapshot_nao_tomado"],
++)
++def test_guard_sem_mudanca_nao_falha(monkeypatch, tmp_path, capsys, operador, inicio, tomado, env):
++    sessao = _preparar(monkeypatch, tmp_path, operador, inicio, tomado, env)
++    assert sessao.exitstatus == 0
++    assert "ORACLE_SANDBOX" not in capsys.readouterr().out
++
++
++def test_guard_sandbox_aparece_durante_sessao(monkeypatch, tmp_path, capsys):
++    sessao = _preparar(monkeypatch, tmp_path, None, None, True, "0")
++    saida = capsys.readouterr().out
++    assert sessao.exitstatus == 1
++    assert "FALHA DE GOVERNANCA: ORACLE_SANDBOX mudou durante a sessão" in saida
++    assert "início: ausente" in saida
++    assert "fim: presente" in saida
++    assert "=0" not in saida and "'0'" not in saida
++
++
++def test_guard_sandbox_some_durante_sessao(monkeypatch, tmp_path, capsys):
++    sessao = _preparar(monkeypatch, tmp_path, "0", "0", True, None)
++    saida = capsys.readouterr().out
++    assert sessao.exitstatus == 1
++    assert "FALHA DE GOVERNANCA: ORACLE_SANDBOX mudou durante a sessão" in saida
++    assert "início: presente" in saida
++    assert "fim: ausente" in saida
++
++
++def test_guard_diverge_so_do_inicio_da_sessao(monkeypatch, tmp_path, capsys):
++    sessao = _preparar(monkeypatch, tmp_path, "0", None, True, "0")
++    assert sessao.exitstatus == 1
++    assert "FALHA DE GOVERNANCA: ORACLE_SANDBOX mudou durante a sessão" in capsys.readouterr().out
++
++
++# --- D6.4: a fixture guard_oracle_sandbox (aborta a sessão se ORACLE_SANDBOX mudou antes do início) ---
++
++def _corpo_da_fixture_guard():
++    """Função geradora subjacente à fixture (pytest 9: FixtureFunctionDefinition)."""
++    fixture = conftest.guard_oracle_sandbox
++    if hasattr(fixture, "_get_wrapped_function"):
++        return fixture._get_wrapped_function()
++    return fixture.__wrapped__
++
++
++def _isolar_globais_da_fixture(monkeypatch, operador):
++    # A fixture grava estes dois globais; o monkeypatch registra antes para o teardown restaurá-los.
++    monkeypatch.setattr(conftest, "ORACLE_SANDBOX_DO_OPERADOR", operador)
++    monkeypatch.setattr(conftest, "ORACLE_SANDBOX_INICIO_SESSAO", None)
++    monkeypatch.setattr(conftest, "_SNAPSHOT_SESSAO_TOMADO", False)
++
++
++def test_fixture_guard_sai_quando_operador_tinha_e_ambiente_nao_tem(monkeypatch):
++    _isolar_globais_da_fixture(monkeypatch, "0")
++    monkeypatch.delenv("ORACLE_SANDBOX", raising=False)
++    gen = _corpo_da_fixture_guard()()
++    with pytest.raises(pytest.exit.Exception) as exc:
++        next(gen)
++    assert exc.value.returncode == 3
++    assert "FALHA DE GOVERNANCA: ORACLE_SANDBOX alterado entre o início do processo e o início da sessão" in exc.value.msg
++    assert "operador: presente, atual: ausente" in exc.value.msg
++    assert "Nenhum teste executado" in exc.value.msg
++    assert conftest._SNAPSHOT_SESSAO_TOMADO is False  # não chegou a tomar o snapshot
++
++
++def test_fixture_guard_sai_quando_ambiente_tem_e_operador_nao_tinha(monkeypatch):
++    _isolar_globais_da_fixture(monkeypatch, None)
++    monkeypatch.setenv("ORACLE_SANDBOX", "0")
++    gen = _corpo_da_fixture_guard()()
++    with pytest.raises(pytest.exit.Exception) as exc:
++        next(gen)
++    assert exc.value.returncode == 3
++    assert "operador: ausente, atual: presente" in exc.value.msg
++    assert "'0'" not in exc.value.msg and "=0" not in exc.value.msg  # nunca o valor
++    assert conftest._SNAPSHOT_SESSAO_TOMADO is False
++
++
++@pytest.mark.parametrize("valor", [None, "0"], ids=["ausente", "zero"])
++def test_fixture_guard_sem_divergencia_nao_sai_e_toma_o_snapshot(monkeypatch, valor):
++    _isolar_globais_da_fixture(monkeypatch, valor)
++    if valor is None:
++        monkeypatch.delenv("ORACLE_SANDBOX", raising=False)
++    else:
++        monkeypatch.setenv("ORACLE_SANDBOX", valor)
++    gen = _corpo_da_fixture_guard()()
++    next(gen)  # chegou ao yield: não saiu
++    assert conftest._SNAPSHOT_SESSAO_TOMADO is True
++    assert conftest.ORACLE_SANDBOX_INICIO_SESSAO == valor
++    gen.close()
++
++
++_SCRIPT_OPERADOR = r"""
++import json, runpy, sys
++ns = runpy.run_path(sys.argv[1])
++print(json.dumps({"operador_visto": ns["ORACLE_SANDBOX_DO_OPERADOR"]}))
++"""
++
++
++@pytest.mark.parametrize("sandbox_shell", [None, "0"], ids=["ausente", "zero"])
++def test_operador_e_lido_do_ambiente_no_inicio_do_processo(tmp_path, sandbox_shell):
++    """ORACLE_SANDBOX_DO_OPERADOR reflete o ambiente do processo (não um valor fixo), em subprocesso.
++
++    O valor "1" nunca é usado. O mkdtemp do conftest do filho cai em tmp_path. Sem operador "1", o
++    conftest não lê nenhum .env.
++    """
++    env = {k: v for k, v in os.environ.items() if not k.startswith(("ORACLE_", "EMAIL_", "GEMINI_"))}
++    (tmp_path / "tmp").mkdir()
++    env["TEMP"] = env["TMP"] = str(tmp_path / "tmp")
++    if sandbox_shell is not None:
++        assert sandbox_shell == "0"
++        env["ORACLE_SANDBOX"] = sandbox_shell
++    res = subprocess.run(
++        [sys.executable, "-c", _SCRIPT_OPERADOR, conftest.__file__],
++        capture_output=True, text=True, env=env, timeout=120, cwd=str(tmp_path),
++    )
++    ultima = (res.stderr.strip().splitlines() or [""])[-1]
++    assert res.returncode == 0, f"subprocesso falhou (returncode={res.returncode}): {ultima}"
++    assert json.loads(res.stdout.strip().splitlines()[-1])["operador_visto"] == sandbox_shell
+diff --git a/IA/PERSONAL_AGENT/tests/test_isolamento_env.py b/IA/PERSONAL_AGENT/tests/test_isolamento_env.py
+index c65a263..5a7201d 100644
+--- a/IA/PERSONAL_AGENT/tests/test_isolamento_env.py
++++ b/IA/PERSONAL_AGENT/tests/test_isolamento_env.py
+@@ -21,7 +21,11 @@ sys.path.insert(0, raiz)
+ sys.path.insert(0, testes)
+ PREF = ("ORACLE_", "EMAIL_", "GEMINI_")
+ antes = dict(os.environ)
+-for nome in ("test_executor", "test_oracle_kill", "test_item1_intencao"):
++# D6.5: inclui src.config.settings e os dois testes de privilégio (carregavam o .env no import).
++for nome in (
++    "test_executor", "test_oracle_kill", "test_item1_intencao",
++    "src.config.settings", "test_privilegio_read", "test_privilegio_write_sandbox",
++):
+     importlib.import_module(nome)
+ depois = dict(os.environ)
+ add = sorted(set(depois) - set(antes))
+diff --git a/IA/PERSONAL_AGENT/tests/test_item1_intencao.py b/IA/PERSONAL_AGENT/tests/test_item1_intencao.py
+index fea1aaa..ada3822 100644
+--- a/IA/PERSONAL_AGENT/tests/test_item1_intencao.py
++++ b/IA/PERSONAL_AGENT/tests/test_item1_intencao.py
+@@ -998,9 +998,10 @@ sys.path.insert(0, raiz)
+ antes = os.path.exists(esperado_dir)
+ from src.tools import oracle_dba as od
+ assert os.path.exists(esperado_dir) == antes, "o import não pode criar nem remover a pasta"
+-print(str(od.DIRETORIO_LOG_APROVACAO))
+-print(str(od.CAMINHO_LOG_APROVACAO_PADRAO))
++print(str(od._diretorio_log_aprovacao()))
++print(str(od._caminho_log_efetivo(None)))
+ print(od.DIRETORIO_LOG_PADRAO)
++assert os.path.exists(esperado_dir) == antes, "resolver o destino não pode criar a pasta"
+ """
+ 
+ 
+@@ -1041,9 +1042,13 @@ def test_import_com_padrao_nao_cria_C_AgentDBA(tmp_path):
+ 
+ 
+ def test_conftest_define_diretorio_antes_do_import():
+-    """AGENTDBA_LOG_DIR (tmp, fora do OneDrive) já valia quando o módulo de produção foi importado."""
++    """AGENTDBA_LOG_DIR (tmp, fora do OneDrive) é o diretório que o módulo resolve."""
+     destino = Path(os.environ["AGENTDBA_LOG_DIR"])
+-    assert oracle_dba.DIRETORIO_LOG_APROVACAO == destino
++    assert oracle_dba._diretorio_log_aprovacao() == destino
++    for nome in ("src.tools.oracle_dba", "tools.oracle_dba"):
++        modulo = sys.modules.get(nome)
++        if modulo is not None:
++            assert modulo._diretorio_log_aprovacao() == destino
+     assert destino.name.startswith("agentdba_test_")
+     assert "onedrive" not in str(destino).lower()
+ 
+diff --git a/IA/PERSONAL_AGENT/tests/test_oracle_kill.py b/IA/PERSONAL_AGENT/tests/test_oracle_kill.py
+index 135b833..ef9762e 100644
+--- a/IA/PERSONAL_AGENT/tests/test_oracle_kill.py
++++ b/IA/PERSONAL_AGENT/tests/test_oracle_kill.py
+@@ -131,7 +131,14 @@ def test_ausencia_oracle_user_diag_sem_conexao(monkeypatch):
+     def fail_connect(*args, **kwargs):
+         pytest.fail("oracledb.connect não deve ser chamado quando faltam credenciais de DIAG")
+ 
++    def fail_host(*args, **kwargs):
++        pytest.fail("verificar_acessibilidade_host não deve ser chamado quando falta ORACLE_USER_DIAG")
++
+     monkeypatch.setattr(oracledb, "connect", fail_connect)
++    monkeypatch.setattr(oracle_dba, "verificar_acessibilidade_host", fail_host)
++    # D3: só o usuário falta; senha e DSN fictícios (sem o .env real, o teste não passa "por acaso")
++    monkeypatch.setenv("ORACLE_PASSWORD_DIAG", "senha-fake")
++    monkeypatch.setenv("ORACLE_DSN", "host-teste:1521/TESTE")
+     monkeypatch.delenv("ORACLE_USER_DIAG", raising=False)
+ 
+     res_sess = json.loads(coletar_sessoes_ativas())
+@@ -156,7 +163,14 @@ def test_ausencia_oracle_user_kill_sem_conexao(monkeypatch):
+     def fail_connect(*args, **kwargs):
+         pytest.fail("oracledb.connect não deve ser chamado quando faltam credenciais de KILL")
+ 
++    def fail_host(*args, **kwargs):
++        pytest.fail("verificar_acessibilidade_host não deve ser chamado quando falta ORACLE_USER_KILL")
++
+     monkeypatch.setattr(oracledb, "connect", fail_connect)
++    monkeypatch.setattr(oracle_dba, "verificar_acessibilidade_host", fail_host)
++    # D3: só o usuário falta; senha e DSN fictícios (sem o .env real, o teste não passa "por acaso")
++    monkeypatch.setenv("ORACLE_PASSWORD_KILL", "senha-fake")
++    monkeypatch.setenv("ORACLE_DSN", "host-teste:1521/TESTE")
+     monkeypatch.delenv("ORACLE_USER_KILL", raising=False)
+ 
+     res = json.loads(matar_sessao_oracle(sid=10, serial=20, inst_id=1))
+@@ -655,6 +669,7 @@ def test_caminho_padrao_redirecionado(isolar_log_aprovacao):
+     """registrar_log_aprovacao_kill sem caminho_log grava no tmp redirecionado, não no real."""
+     real = Path(__file__).resolve().parent.parent / "data" / "logs" / "kill_approval.log"
+     assert oracle_dba.CAMINHO_LOG_APROVACAO_PADRAO == isolar_log_aprovacao
++    assert oracle_dba._caminho_log_efetivo(None) == isolar_log_aprovacao
+     assert isolar_log_aprovacao != real
+     assert not isolar_log_aprovacao.exists()
+ 
