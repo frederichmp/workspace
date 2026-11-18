@@ -75,11 +75,40 @@ def _filehandlers_auditoria():
     return encontrados
 
 
+def _instalar_guarda_dotenv(mp):
+    """dotenv_values vira stub (devolve {}); DotEnv recusa e registra qualquer leitura de RAIZ/.env.
+
+    Devolve a lista de leituras reais, que o teste afirma vazia (P3b; nenhum leitor chega ao .env real)."""
+    import dotenv
+    import dotenv.main
+
+    leituras = []
+    real = os.path.normcase(os.path.realpath(RAIZ / ".env"))
+    init_original = dotenv.main.DotEnv.__init__
+
+    def _guarda_init(self, *args, **kwargs):
+        caminho = kwargs["dotenv_path"] if "dotenv_path" in kwargs else (args[0] if args else None)
+        if caminho is not None and not hasattr(caminho, "read"):
+            try:
+                alvo = os.path.normcase(os.path.realpath(os.fspath(caminho)))
+            except Exception:
+                alvo = None
+            if alvo == real:
+                leituras.append(str(caminho))
+                raise AssertionError("leitura do .env real bloqueada pelo guarda do teste")
+        return init_original(self, *args, **kwargs)
+
+    mp.setattr(dotenv, "dotenv_values", lambda *a, **k: {})
+    mp.setattr(dotenv.main.DotEnv, "__init__", _guarda_init)
+    return leituras
+
+
 @pytest.fixture(scope="module")
 def main_cli():
     mp = pytest.MonkeyPatch()
     import dotenv
     mp.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
+    leituras_env_reais = _instalar_guarda_dotenv(mp)
     for caminho in (str(RAIZ / "src"), str(RAIZ)):
         mp.syspath_prepend(caminho)
     mp.setenv("ORACLE_USER_DIAG", USER_DIAG_FAKE)
@@ -105,7 +134,9 @@ def main_cli():
         import main
         main.client = _LLMFalso()
         assert not _filehandlers_auditoria(), "import de main não pode adicionar FileHandler de auditoria"
+        assert leituras_env_reais == []
         yield main
+        assert leituras_env_reais == []
     finally:
         logging.getLogger().removeHandler(nulo)
         if not ja_importado:

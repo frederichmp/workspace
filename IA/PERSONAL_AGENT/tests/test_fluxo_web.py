@@ -112,6 +112,34 @@ def snapshot_logs_reais():
     assert _snapshot_logs_reais() == antes, "Log real alterado pelo teste Web"
 
 
+def _instalar_guarda_dotenv(mp):
+    """dotenv_values vira stub (devolve {}); DotEnv recusa e registra qualquer leitura de RAIZ/.env.
+
+    Devolve a lista de leituras reais, que o teste afirma vazia (P3b; nenhum leitor chega ao .env real)."""
+    import dotenv
+    import dotenv.main
+
+    leituras = []
+    real = os.path.normcase(os.path.realpath(RAIZ / ".env"))
+    init_original = dotenv.main.DotEnv.__init__
+
+    def _guarda_init(self, *args, **kwargs):
+        caminho = kwargs["dotenv_path"] if "dotenv_path" in kwargs else (args[0] if args else None)
+        if caminho is not None and not hasattr(caminho, "read"):
+            try:
+                alvo = os.path.normcase(os.path.realpath(os.fspath(caminho)))
+            except Exception:
+                alvo = None
+            if alvo == real:
+                leituras.append(str(caminho))
+                raise AssertionError("leitura do .env real bloqueada pelo guarda do teste")
+        return init_original(self, *args, **kwargs)
+
+    mp.setattr(dotenv, "dotenv_values", lambda *a, **k: {})
+    mp.setattr(dotenv.main.DotEnv, "__init__", _guarda_init)
+    return leituras
+
+
 def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=True):
     monkeypatch.syspath_prepend(str(RAIZ / "src"))
     monkeypatch.syspath_prepend(str(RAIZ))
@@ -127,6 +155,7 @@ def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=
     import dotenv
 
     monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
+    leituras_env_reais = _instalar_guarda_dotenv(monkeypatch)
 
     # logging.basicConfig vira no-op (já existe handler na raiz) e não cria FileHandler real
     raiz_log = logging.getLogger()
@@ -183,6 +212,7 @@ def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=
 
     amb.at = AppTest.from_file(str(APP), default_timeout=30)
     amb.destinos_inesperados = destinos_inesperados
+    amb.leituras_env_reais = leituras_env_reais
     amb._null = null
     return amb
 
@@ -201,6 +231,7 @@ def montar_web(monkeypatch, tmp_path, snapshot_logs_reais):
     for amb in criados:
         logging.getLogger().removeHandler(amb._null)
         assert amb.destinos_inesperados == []
+        assert amb.leituras_env_reais == []
 
 
 def _ate_painel_hitl(amb):

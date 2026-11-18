@@ -6,7 +6,7 @@ import socket
 import sys
 import threading
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from openai import OpenAI
 
 # Garante que os pacotes em src/ sejam resolvidos independentemente do diretório de execução
@@ -28,6 +28,17 @@ _AVISO_SANDBOX_DESCARTADA = (
     "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell. "
     "Remova a chave do .env."
 )
+_AVISO_SOMBREADAS = "Variáveis do .env ignoradas porque o ambiente já as define com outro valor: "
+
+
+def _nomes_sombreados(caminho):
+    """B3: nomes das chaves do .env que o ambiente já define com outro valor. Os valores não saem daqui."""
+    return tuple(sorted(
+        nome for nome, valor in dotenv_values(caminho).items()
+        if valor is not None and nome in os.environ and os.environ[nome] != valor
+    ))
+
+
 _ESTADO_ENV = vars(sys).setdefault(
     "_personal_agent_estado_env",
     {"lock": threading.Lock(), "estado": None, "falha": None, "sandbox_descartada": False, "sombreadas": ()},
@@ -39,6 +50,7 @@ with _ESTADO_ENV["lock"]:
         _ESTADO_ENV["estado"] = "falhou"
         _sandbox_do_shell = "ORACLE_SANDBOX" in os.environ
         try:
+            _ESTADO_ENV["sombreadas"] = _nomes_sombreados(ROOT_DIR / ".env")  # antes da carga: ambiente ainda intacto
             load_dotenv(ROOT_DIR / ".env", override=False)
             _ESTADO_ENV["estado"] = "ok"
         except Exception as exc:
@@ -74,6 +86,11 @@ if _CARREGOU_AGORA:  # avisos da carga: uma vez por processo, depois do basicCon
     _log_carga = logging.getLogger(__name__)
     if _ESTADO_ENV["sandbox_descartada"]:
         _log_carga.warning(_AVISO_SANDBOX_DESCARTADA)
+        # C3: visível ao operador mesmo com o logging suprimido (texto fixo, sem valores)
+        print(f"[Sistema]: AVISO: {_AVISO_SANDBOX_DESCARTADA}", file=sys.stderr)
+    if _ESTADO_ENV["sombreadas"]:  # B3: só nomes
+        _log_carga.warning(_AVISO_SOMBREADAS + ", ".join(_ESTADO_ENV["sombreadas"]))
+        print(f"[Sistema]: AVISO: {_AVISO_SOMBREADAS}{', '.join(_ESTADO_ENV['sombreadas'])}", file=sys.stderr)
 
 # 1. Importando as Ferramentas de SO
 from tools.os_tools import (

@@ -84,9 +84,13 @@ if cfg.get("pre_importar_src"):
     # Cenário A3a: a cópia src.tools.oracle_dba é importada antes da entrada (e antes da carga do .env).
     import src.tools.oracle_dba  # noqa: F401
 
+if cfg.get("raiz_em_error"):
+    # C3: a raiz já configurada em ERROR antes da entrada (o log de WARNING fica suprimido).
+    logging.basicConfig(level=logging.ERROR)
 raiz_log = logging.getLogger()
 raiz_log.addHandler(_Captura())
-raiz_log.setLevel(logging.INFO)  # handlers existentes: basicConfig vira no-op, sem FileHandler novo
+if not cfg.get("raiz_em_error"):
+    raiz_log.setLevel(logging.INFO)  # handlers existentes: basicConfig vira no-op, sem FileHandler novo
 
 
 def _sem_rede(*a, **k):
@@ -105,7 +109,10 @@ def _estado(excecoes):
         "sentinela": os.environ.get("SENTINELA_FASE2", "AUSENTE"),
         "sentinela_fase3": os.environ.get("SENTINELA_FASE3", "AUSENTE"),
         "sentinela_tardia": os.environ.get("SENTINELA_TARDIA_FASE3", "AUSENTE"),
+        "oracle_dsn_do_shell": os.environ.get("ORACLE_DSN") == "dsn_shell_ficticio",  # nunca imprime o valor
         "excecoes": excecoes,
+        "warning_tela": [],
+        "tela_texto": "",
     }
 
 
@@ -130,7 +137,11 @@ try:
                 except Exception as exc:
                     excecoes.append("harness " + type(exc).__name__ + ": " + str(exc))
                 excecoes.extend(type(e).__name__ + ": " + str(e.value) for e in at.exception)
-        por_run.append(_estado(excecoes))
+        estado = _estado(excecoes)
+        for at in ats:
+            estado["warning_tela"].extend(str(w.value) for w in at.warning)
+            estado["tela_texto"] += repr(at.main) + repr(at.sidebar)
+        por_run.append(estado)
         apos = cfg.get("apos_run", {}).get(str(i))
         if apos is not None:
             with open(env_ficticio, "wb") as f:
@@ -152,6 +163,8 @@ print("\n" + json.dumps({
     "sentinela_fase3": final["sentinela_fase3"],
     "sentinela_tardia": final["sentinela_tardia"],
     "por_run": por_run,
+    "oracle_dsn_do_shell": final["oracle_dsn_do_shell"],
+    "log_total": [m for n, m in capturados],
     "avisos": [m for n, m in capturados if n == "WARNING"],
     "chamadas": chamadas,
     "chamadas_values": chamadas_values,
@@ -166,12 +179,13 @@ MENSAGEM_FALHA_CARGA = "Carga do .env falhou"
 
 def _rodar(
     entrada, tmp_path, conteudo_env, sandbox_shell=None, runs=1, sessoes=1, apos_run=None,
-    sem_log_dir=False, pre_importar_src=False,
+    sem_log_dir=False, pre_importar_src=False, env_extra=None, raiz_em_error=False,
 ):
     """Roda a entrada em subprocesso. `conteudo_env` e os valores de `apos_run` ({índice_do_run: conteúdo})
     aceitam str ou bytes; `apos_run` regrava o fictício depois do run indicado (alteração em disco).
     `sem_log_dir` tira AGENTDBA_LOG_DIR do ambiente do filho; `pre_importar_src` importa
-    src.tools.oracle_dba antes da entrada."""
+    src.tools.oracle_dba antes da entrada; `env_extra` acrescenta variáveis ao ambiente do filho (depois do
+    filtro de prefixos); `raiz_em_error` chama logging.basicConfig(level=ERROR) antes da entrada."""
     def _bytes(c):
         return c if isinstance(c, bytes) else c.encode("utf-8")
 
@@ -181,6 +195,7 @@ def _rodar(
         "runs": runs,
         "sessoes": sessoes,
         "pre_importar_src": pre_importar_src,
+        "raiz_em_error": raiz_em_error,
         "apos_run": {str(i): _bytes(c).hex() for i, c in (apos_run or {}).items()},
     }
     env = {k: v for k, v in os.environ.items() if not k.startswith(_PREFIXOS)}
@@ -191,14 +206,18 @@ def _rodar(
     env["SCRIPTS_REGISTRY_PATH"] = str(RAIZ / "registry" / "test_scripts.yaml")
     if sandbox_shell is not None:
         env["ORACLE_SANDBOX"] = sandbox_shell
+    env.update(env_extra or {})
+    env["PYTHONIOENCODING"] = "utf-8"
     res = subprocess.run(
         [sys.executable, "-c", _SCRIPT, str(RAIZ), entrada, str(env_ficticio), json.dumps(cfg)],
-        capture_output=True, text=True, env=env, timeout=180, cwd=str(RAIZ),
+        capture_output=True, text=True, encoding="utf-8", env=env, timeout=180, cwd=str(RAIZ),
     )
     ultima = (res.stderr.strip().splitlines() or [""])[-1]
     assert res.returncode == 0, f"subprocesso falhou (returncode={res.returncode}): {ultima}"
     dados = json.loads(res.stdout.strip().splitlines()[-1])
     assert dados["excecoes_harness"] == [], f"erro do harness: {dados['excecoes_harness']}"
+    dados["stderr"] = res.stderr
+    dados["stdout_resto"] = "\n".join(res.stdout.strip().splitlines()[:-1])  # tudo menos o JSON final
     return dados
 
 
@@ -306,4 +325,70 @@ def test_a3_src_tools_antes_da_entrada_mesmo_destino(entrada, tmp_path):
     assert [c["src_oracle_dba_importado"] for c in dados["chamadas"]] == [True], resumo  # cenário do A3a
     assert not dir_env.exists()
     assert Path("C:/AgentDBA").exists() == agentdba_existia
+    assert dados["leituras_reais"] == []
+
+
+# Contrato de produção (decisao_fase3.md, P1 e P3c). Textos fixos, sem valor do .env.
+_TEXTO_DESCARTE = (
+    "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell. "
+    "Remova a chave do .env."
+)
+_PREFIXO_SOMBREADAS = "Variáveis do .env ignoradas porque o ambiente já as define com outro valor: "
+_PREFIXO_CLI = "[Sistema]: AVISO: "
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_b3_nomes_sombreados_sem_valores(entrada, tmp_path):
+    """B3: chave do .env sombreada pelo ambiente com outro valor é avisada só pelo nome, nunca pelo valor."""
+    dados = _rodar(
+        entrada, tmp_path,
+        "ORACLE_DSN=dsn_arquivo_ficticio\nSENTINELA_IGUAL=igual\nSENTINELA_FASE3=1\n",
+        env_extra={"ORACLE_DSN": "dsn_shell_ficticio", "SENTINELA_IGUAL": "igual"},
+    )
+    resumo = f"avisos={dados['avisos']}, stderr={dados['stderr']!r}, por_run={dados['por_run']}"
+    sombreados = [a for a in dados["avisos"] if "ORACLE_DSN" in a]
+    assert len(sombreados) == 1, resumo
+    assert "SENTINELA_IGUAL" not in sombreados[0], resumo
+    assert _PREFIXO_SOMBREADAS in sombreados[0] and "DESCARTADA" not in sombreados[0], resumo
+    log_total = "\n".join(dados["log_total"])
+    tela = dados["por_run"][0]["tela_texto"]
+    assert "dsn_" not in log_total and "dsn_" not in dados["stdout_resto"], resumo
+    assert "dsn_" not in dados["stderr"] and "dsn_" not in tela, resumo
+    assert dados["oracle_dsn_do_shell"] is True, resumo  # o valor do shell prevaleceu
+    if entrada == "cli":
+        assert _PREFIXO_CLI + _PREFIXO_SOMBREADAS in dados["stderr"], resumo
+        assert "ORACLE_DSN" in dados["stderr"].split(_PREFIXO_SOMBREADAS, 1)[-1], resumo
+    else:
+        assert any("ORACLE_DSN" in w and _PREFIXO_SOMBREADAS in w for w in dados["por_run"][0]["warning_tela"]), resumo
+    assert len(dados["chamadas_values"]) == 1, resumo
+    assert Path(dados["chamadas_values"][0]["caminho"]) == RAIZ / ".env", resumo
+    assert dados["leituras_reais"] == []
+
+
+def test_c3_cli_aviso_em_stderr(tmp_path):
+    """C3: o descarte de ORACLE_SANDBOX aparece uma vez no stderr da CLI, além do log."""
+    dados = _rodar("cli", tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE3=1\n")
+    resumo = f"stderr={dados['stderr']!r}, avisos={dados['avisos']}"
+    assert dados["stderr"].count(_PREFIXO_CLI + _TEXTO_DESCARTE) == 1, resumo
+    assert dados["sandbox"] == "AUSENTE", resumo
+    assert dados["leituras_reais"] == []
+
+
+def test_c3_cli_aviso_com_raiz_em_error(tmp_path):
+    """C3: com o logger raiz em ERROR (WARNING suprimido) o aviso ainda chega ao stderr da CLI."""
+    dados = _rodar("cli", tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE3=1\n", raiz_em_error=True)
+    resumo = f"stderr={dados['stderr']!r}, avisos={dados['avisos']}"
+    assert _TEXTO_DESCARTE in dados["stderr"], resumo
+    assert dados["sandbox"] == "AUSENTE", resumo
+    assert dados["leituras_reais"] == []
+
+
+def test_c3_web_st_warning_em_todo_rerun(tmp_path):
+    """C3: na Web o aviso de descarte é um st.warning visível em todo rerun, não só no primeiro."""
+    dados = _rodar("web", tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE3=1\n", runs=2)
+    resumo = f"por_run={[r['warning_tela'] for r in dados['por_run']]}"
+    assert len(dados["por_run"]) == 2, resumo
+    for run in dados["por_run"]:
+        assert any(_TEXTO_DESCARTE in w for w in run["warning_tela"]), resumo
+    assert dados["sandbox"] == "AUSENTE", resumo
     assert dados["leituras_reais"] == []

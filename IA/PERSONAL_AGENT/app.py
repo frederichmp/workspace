@@ -17,7 +17,7 @@ from typing import Any, Dict, Generator, List
 
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from openai import OpenAI
 
 # ==============================================================================
@@ -43,6 +43,17 @@ _AVISO_SANDBOX_DESCARTADA = (
     "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell. "
     "Remova a chave do .env."
 )
+_AVISO_SOMBREADAS = "Variáveis do .env ignoradas porque o ambiente já as define com outro valor: "
+
+
+def _nomes_sombreados(caminho):
+    """B3: nomes das chaves do .env que o ambiente já define com outro valor. Os valores não saem daqui."""
+    return tuple(sorted(
+        nome for nome, valor in dotenv_values(caminho).items()
+        if valor is not None and nome in os.environ and os.environ[nome] != valor
+    ))
+
+
 _ESTADO_ENV = vars(sys).setdefault(
     "_personal_agent_estado_env",
     {"lock": threading.Lock(), "estado": None, "falha": None, "sandbox_descartada": False, "sombreadas": ()},
@@ -54,6 +65,7 @@ with _ESTADO_ENV["lock"]:
         _ESTADO_ENV["estado"] = "falhou"
         _sandbox_do_shell = "ORACLE_SANDBOX" in os.environ
         try:
+            _ESTADO_ENV["sombreadas"] = _nomes_sombreados(ROOT_DIR / ".env")  # antes da carga: ambiente ainda intacto
             load_dotenv(ROOT_DIR / ".env", override=False)
             _ESTADO_ENV["estado"] = "ok"
         except Exception as exc:
@@ -87,6 +99,8 @@ if _CARREGOU_AGORA:  # avisos da carga: uma vez por processo, depois do basicCon
     _log_carga = logging.getLogger(__name__)
     if _ESTADO_ENV["sandbox_descartada"]:
         _log_carga.warning(_AVISO_SANDBOX_DESCARTADA)
+    if _ESTADO_ENV["sombreadas"]:  # B3: só nomes
+        _log_carga.warning(_AVISO_SOMBREADAS + ", ".join(_ESTADO_ENV["sombreadas"]))
 
 # Importação das Ferramentas do Agente
 from tools.os_tools import (
@@ -541,6 +555,12 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Avisos da carga do .env (C3/B3): em todo rerun, enquanto valerem neste processo; texto fixo e só nomes.
+if _ESTADO_ENV["sandbox_descartada"]:
+    st.warning(_AVISO_SANDBOX_DESCARTADA)
+if _ESTADO_ENV["sombreadas"]:
+    st.warning(_AVISO_SOMBREADAS + ", ".join(_ESTADO_ENV["sombreadas"]))
 
 # Inicialização de estados persistentes no st.session_state
 if "messages" not in st.session_state:

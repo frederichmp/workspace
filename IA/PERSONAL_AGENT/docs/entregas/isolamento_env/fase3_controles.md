@@ -151,3 +151,84 @@ tests\test_carga_env_entrada.py:304: AssertionError
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
 2 failed, 10 deselected, 13 warnings in 8.64s
 ```
+
+## Passo 3
+
+Modelo: Sonnet 5.5 (claude-sonnet-5-5), subagente `mecanico`. Arquivos: `tests/test_fluxo_cli.py`, `tests/test_fluxo_web.py`, `tests/test_carga_env_entrada.py`. Produção não tocada (ainda sem `dotenv_values`).
+
+### Fixtures de fluxo (feitas primeiro, P3b), no working tree
+
+`env -u ORACLE_SANDBOX PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -rs -p no:cacheprovider tests/test_fluxo_cli.py tests/test_fluxo_web.py`
+
+```text
+23 passed, 13 warnings in 33.57s
+```
+
+### Testes novos do passo 3: NÃO rodados no working tree (produção ainda sem o passo 3)
+
+### Controle negativo em d05577e
+
+Cópia por `git archive --format=tar d05577e IA/PERSONAL_AGENT` + `tar --force-local` em pasta nova de %TEMP% (sem `.env`; `app.py`, `src/main.py` e `src/tools/oracle_dba.py` iguais a d05577e). Teste da cópia sobrescrito pela versão do working tree (diff de 368 linhas, não vazio, L3). Verificação extra na cópia: nenhum valor fictício `dsn_` aparece em tela, log, stdout nem stderr nas duas entradas em d05577e (o harness não vaza). Pasta removida depois.
+Resultado: 5 failed, todos com AssertionError na asserção principal (sem erro de harness). Saída bruta, truncada a 700 colunas por linha:
+
+```text
+FFFFF                                                                    [100%]
+================================== FAILURES ===================================
+__________________ test_b3_nomes_sombreados_sem_valores[cli] __________________
+
+entrada = 'cli'
+tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-118/test_b3_nomes_sombreados_sem_v0')
+
+>       assert len(sombreados) == 1, resumo
+E       AssertionError: avisos=[], stderr='', por_run=[{'sandbox': 'AUSENTE', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'oracle_dsn_do_shell': True, 'excecoes': [], 'warning_tela': [], 'tela_texto': ''}]
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_carga_env_entrada.py:350: AssertionError
+__________________ test_b3_nomes_sombreados_sem_valores[web] __________________
+
+entrada = 'web'
+tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-118/test_b3_nomes_sombreados_sem_v1')
+
+>       assert len(sombreados) == 1, resumo
+E       AssertionError: avisos=[], stderr="2026-11-18 14:09:11.909 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n", por_run=[{'sandbox': 'AUSENTE', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'oracle_dsn_do_shell': True, 'excecoes': [], 'warning_tela': ['Conecte a VPN para visualizar o Top SQL da instância Oracle.', '**Ollama Local (11434):** Offline\n\n⚡ *Failover Ativo:* `gemini-3.1-flash-lite-preview`'], 'tela_texto': 'SpecialBlock(\n    type=\'main\',\n    children={\n        0: Markdown(),\n        1: Block(\n            type=\'f
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_carga_env_entrada.py:350: AssertionError
+_________________________ test_c3_cli_aviso_em_stderr _________________________
+
+tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-118/test_c3_cli_aviso_em_stderr0')
+
+>       assert dados["stderr"].count(_PREFIXO_CLI + _TEXTO_DESCARTE) == 1, resumo
+E       AssertionError: stderr='', avisos=['ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell.']
+E       assert 0 == 1
+E        +  where 0 = <built-in method count of str object at 0x00007FFF08EB5828>(('[Sistema]: AVISO: ' + 'ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell. Remova a chave do .env.'))
+E        +    where <built-in method count of str object at 0x00007FFF08EB5828> = ''.count
+
+tests\test_carga_env_entrada.py:372: AssertionError
+_____________________ test_c3_cli_aviso_com_raiz_em_error _____________________
+
+tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-118/test_c3_cli_aviso_com_raiz_em_0')
+
+>       assert _TEXTO_DESCARTE in dados["stderr"], resumo
+E       AssertionError: stderr='', avisos=[]
+E       assert 'ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell. Remova a chave do .env.' in ''
+
+tests\test_carga_env_entrada.py:381: AssertionError
+____________________ test_c3_web_st_warning_em_todo_rerun _____________________
+
+tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-118/test_c3_web_st_warning_em_todo0')
+
+>           assert any(_TEXTO_DESCARTE in w for w in run["warning_tela"]), resumo
+E           AssertionError: por_run=[['Conecte a VPN para visualizar o Top SQL da instância Oracle.', '**Ollama Local (11434):** Offline\n\n⚡ *Failover Ativo:* `gemini-3.1-flash-lite-preview`'], ['Conecte a VPN para visualizar o Top SQL da instância Oracle.', '**Ollama Local (11434):** Offline\n\n⚡ *Failover Ativo:* `gemini-3.1-flash-lite-preview`']]
+E           assert False
+E            +  where False = any(<generator object test_c3_web_st_warning_em_todo_rerun.<locals>.<genexpr> at 0x00000199433CEA40>)
+
+tests\test_carga_env_entrada.py:392: AssertionError
+============================== warnings summary ===============================
+..\..\..\..\..\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+5 failed, 12 deselected, 13 warnings in 19.23s
+```
