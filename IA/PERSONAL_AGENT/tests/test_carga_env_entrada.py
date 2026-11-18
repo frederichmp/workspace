@@ -2,9 +2,10 @@
 
 REGRA DE SEGURANÇA (incidente 01:27): o .env fictício com ORACLE_SANDBOX=1 só é lido DENTRO DE SUBPROCESSO
 sem credenciais (nenhuma chave ORACLE_/EMAIL_/GEMINI_ herdada). O processo do pytest nunca tem
-ORACLE_SANDBOX alterada. O .env real nunca é lido: no filho, load_dotenv e dotenv_values são
-redirecionados para o arquivo fictício e um guarda em dotenv.main.DotEnv.__init__ registra (e recusa com
-AssertionError) qualquer leitura que resolva para RAIZ/.env; todo teste afirma `leituras_reais == []`.
+ORACLE_SANDBOX alterada. O .env real nunca é lido: no filho, o helper tests/_guarda_env.py redireciona
+open/io.open/os.stat de RAIZ/.env para o arquivo fictício e recusa (LeituraEnvRealBloqueada) qualquer DotEnv do
+real; load_dotenv e dotenv_values chamados com caminho (b0ce169) também vão ao fictício, e com stream (fase 4)
+passam intactos. Todo teste afirma `leituras_reais == []`.
 O filho sempre imprime o JSON, mesmo quando a entrada levanta exceção. Nenhum teste lê ou grava o estado
 privado das entradas (`_personal_agent_estado_env`): tudo é observado de fora, em subprocesso.
 """
@@ -33,29 +34,88 @@ import dotenv.main
 chamadas = []          # load_dotenv: (caminho recebido, override)
 chamadas_values = []   # dotenv_values: (caminho recebido)
 
-from tests._guarda_env import instalar, LeituraEnvRealBloqueada  # noqa: F401  (raiz está no sys.path)
+import builtins
+import io as _io
+
+from tests._guarda_env import instalar, mesmo_arquivo, LeituraEnvRealBloqueada  # noqa: F401  (raiz no sys.path)
 
 _original = dotenv.load_dotenv
 _original_values = dotenv.dotenv_values
 
 
 def _wrapper(dotenv_path=None, *args, **kwargs):
+    # H1 (fase 4): com stream, os argumentos passam intactos (a produção já leu o fictício pelo open
+    # redirecionado); sem stream (b0ce169), o caminho continua trocado pelo fictício.
+    com_stream = kwargs.get("stream") is not None
     chamadas.append({
         "caminho": None if dotenv_path is None else str(dotenv_path),
+        "stream": com_stream,
         "override": kwargs["override"] if "override" in kwargs else "AUSENTE",
         "src_oracle_dba_importado": "src.tools.oracle_dba" in sys.modules,
     })
     kwargs.setdefault("override", False)
-    return _original(env_ficticio, *args, **kwargs)
+    return _original(dotenv_path if com_stream else env_ficticio, *args, **kwargs)
 
 
 def _wrapper_values(dotenv_path=None, *args, **kwargs):
-    chamadas_values.append({"caminho": None if dotenv_path is None else str(dotenv_path)})
-    return _original_values(env_ficticio, *args, **kwargs)
+    com_stream = kwargs.get("stream") is not None
+    chamadas_values.append({"caminho": None if dotenv_path is None else str(dotenv_path), "stream": com_stream})
+    return _original_values(dotenv_path if com_stream else env_ficticio, *args, **kwargs)
 
 
 dotenv.load_dotenv = _wrapper
 dotenv.dotenv_values = _wrapper_values
+
+# H2/H3 (fase 4): contagem das leituras efetivas do fictício (toda abertura cujo alvo final é o fictício,
+# redirecionada pelo helper ou direta) e injeções de falha configuráveis, uma vez cada. Instalado ANTES do
+# helper, para que as aberturas redirecionadas também passem por aqui. Só caminho e contagem; nunca conteúdo.
+class InterrupcaoSimulada(BaseException):
+    pass
+
+
+injecoes = cfg.get("injecoes", {})
+disparos = {}
+run_atual = [0]
+leituras_efetivas = []  # índice do run de cada leitura efetiva do fictício
+_open_base = builtins.open
+
+
+def _open_contado(file, *args, **kwargs):
+    if mesmo_arquivo(file, env_ficticio):
+        leituras_efetivas.append(run_atual[0])
+        falha = injecoes.get("leitura")
+        if falha and not disparos.get("leitura"):
+            disparos["leitura"] = True
+            if falha == "BaseException":
+                raise InterrupcaoSimulada("interrupção simulada na leitura")
+            raise PermissionError(13, "lock simulado na leitura")
+    return _open_base(file, *args, **kwargs)
+
+
+builtins.open = _open_contado
+_io.open = _open_contado
+
+if injecoes.get("putenv"):
+    _putenv_base = os.putenv
+
+    def _putenv(chave, valor):
+        if not disparos.get("putenv") and str(chave).upper() == injecoes["putenv"].upper():
+            disparos["putenv"] = True
+            raise OSError("putenv simulado")
+        return _putenv_base(chave, valor)
+
+    os.putenv = _putenv
+
+if injecoes.get("unsetenv"):
+    _unsetenv_base = os.unsetenv
+
+    def _unsetenv(chave):
+        if not disparos.get("unsetenv") and str(chave).upper() == injecoes["unsetenv"].upper():
+            disparos["unsetenv"] = True
+            raise OSError("unsetenv simulado")
+        return _unsetenv_base(chave)
+
+    os.unsetenv = _unsetenv
 # Guarda do .env real (open/io.open/os.stat redirecionados ao fictício; DotEnv do real bloqueado). Os wrappers
 # acima ainda redirecionam load_dotenv/dotenv_values; setattr simples basta (o processo é descartável).
 registro = instalar(setattr, os.path.join(raiz, ".env"), env_ficticio)
@@ -107,7 +167,9 @@ excecoes_harness = []
 
 
 aberturas_por_run = []  # por run: aberturas redirecionadas de open/io.open (só caminho original e tipo)
+stats_por_run = []      # por run: quantos os.stat do .env real foram redirecionados ao fictício
 _aberturas_vistas = 0
+_stats_vistos = 0
 
 
 def _aberturas_do_run():
@@ -115,6 +177,13 @@ def _aberturas_do_run():
     novas = [a for a in registro.aberturas_redirecionadas if a["tipo"] in ("open", "io.open")][_aberturas_vistas:]
     _aberturas_vistas += len(novas)
     return novas
+
+
+def _stats_do_run():
+    global _stats_vistos
+    novos = [a for a in registro.aberturas_redirecionadas if a["tipo"] == "stat"][_stats_vistos:]
+    _stats_vistos += len(novos)
+    return len(novos)
 
 
 def _estado(excecoes):
@@ -137,12 +206,15 @@ try:
         for _ in range(cfg.get("sessoes", 1)):
             ats.append(AppTest.from_file(os.path.join(raiz, "app.py"), default_timeout=30))
     for i in range(cfg.get("runs", 1)):
+        run_atual[0] = i
         excecoes = []
         if entrada == "cli":
             sys.modules.pop("main", None)  # reimport: simula nova subida da entrada no mesmo processo
             try:
                 import main  # noqa: F401
             except Exception as exc:
+                excecoes.append(type(exc).__name__ + ": " + str(exc))
+            except InterrupcaoSimulada as exc:  # só nas configurações com injeção BaseException
                 excecoes.append(type(exc).__name__ + ": " + str(exc))
         else:
             for at in ats:
@@ -157,9 +229,10 @@ try:
             estado["tela_texto"] += repr(at.main) + repr(at.sidebar)
         por_run.append(estado)
         aberturas_por_run.append(_aberturas_do_run())
+        stats_por_run.append(_stats_do_run())
         apos = cfg.get("apos_run", {}).get(str(i))
         if apos is not None:
-            with open(env_ficticio, "wb") as f:
+            with _open_base(env_ficticio, "wb") as f:  # gravação do harness: não conta como leitura
                 f.write(bytes.fromhex(apos))
 except Exception as exc:  # erro do harness: aparece no JSON em vez de derrubar o filho
     excecoes_harness.append(type(exc).__name__ + ": " + str(exc) + " | " + traceback.format_exc()[-400:])
@@ -188,6 +261,9 @@ print("\n" + json.dumps({
     "chamadas_values": chamadas_values,
     "leituras_reais": leituras_reais,
     "aberturas_por_run": aberturas_por_run,
+    "stats_por_run": stats_por_run,
+    "leituras_efetivas_por_run": [leituras_efetivas.count(i) for i in range(cfg.get("runs", 1))],
+    "disparos": disparos,
     "excecoes_harness": excecoes_harness,
     "destino_log": {"src": _destino_log("src.tools.oracle_dba"), "tools": _destino_log("tools.oracle_dba")},
 }))
@@ -199,6 +275,7 @@ MENSAGEM_FALHA_CARGA = "Carga do .env falhou"
 def _rodar(
     entrada, tmp_path, conteudo_env, sandbox_shell=None, runs=1, sessoes=1, apos_run=None,
     sem_log_dir=False, pre_importar_src=False, env_extra=None, raiz_em_error=False,
+    ficticio_tipo="arquivo", injecoes=None,
 ):
     """Roda a entrada em subprocesso. `conteudo_env` e os valores de `apos_run` ({índice_do_run: conteúdo})
     aceitam str ou bytes; `apos_run` regrava o fictício depois do run indicado (alteração em disco).
@@ -209,8 +286,14 @@ def _rodar(
         return c if isinstance(c, bytes) else c.encode("utf-8")
 
     env_ficticio = tmp_path / "ficticio.env"
-    env_ficticio.write_bytes(_bytes(conteudo_env))
+    if ficticio_tipo == "arquivo":
+        env_ficticio.write_bytes(_bytes(conteudo_env))
+    elif ficticio_tipo == "diretorio":  # fase 4, Achado 3: .env que não é arquivo regular
+        env_ficticio.mkdir()
+    else:
+        assert ficticio_tipo == "ausente", ficticio_tipo  # fase 4, P1: .env ausente
     cfg = {
+        "injecoes": injecoes or {},  # fase 4 (H3): {"leitura": "PermissionError"|"BaseException", "putenv": nome, "unsetenv": nome}
         "runs": runs,
         "sessoes": sessoes,
         "pre_importar_src": pre_importar_src,
@@ -244,6 +327,25 @@ def _falha_fixa(excecoes):
     return any(MENSAGEM_FALHA_CARGA in e for e in excecoes)
 
 
+# Fase 4 (decisao_fase4.md §1): as duas mensagens começam com MENSAGEM_FALHA_CARGA.
+MENSAGEM_NOVA_TENTATIVA = "Nova tentativa na próxima subida"
+MENSAGEM_REINICIE = "reinicie o processo"
+
+
+def _unica_abertura_e_do_env_real(dados):
+    """D3: em todo o processo, uma única abertura (open/io.open) do .env, e ela é de RAIZ/.env."""
+    aberturas = [a for run in dados["aberturas_por_run"] for a in run]
+    return (
+        len(aberturas) == 1
+        and Path(aberturas[0]["caminho"]) == RAIZ / ".env"
+        and sum(dados["leituras_efetivas_por_run"]) == 1
+    )
+
+
+def _com(excecoes, *trechos):
+    return any(all(t in e for t in trechos) for e in excecoes)
+
+
 @pytest.mark.parametrize("entrada", ["cli", "web"])
 def test_oracle_sandbox_do_env_descartada(entrada, tmp_path):
     dados = _rodar(entrada, tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE2=1\n")
@@ -254,7 +356,9 @@ def test_oracle_sandbox_do_env_descartada(entrada, tmp_path):
     assert len(descartes) == 1, resumo
     assert len(dados["chamadas"]) == 1, resumo
     chamada = dados["chamadas"][0]
-    assert chamada["caminho"] is not None and Path(chamada["caminho"]) == RAIZ / ".env", resumo
+    # D3 (fase 4): a carga recebe o texto por stream; o caminho lido é provado pela única abertura registrada.
+    assert chamada["caminho"] is None and chamada["stream"] is True, resumo
+    assert _unica_abertura_e_do_env_real(dados), resumo
     assert chamada["override"] is False, resumo
     assert dados["leituras_reais"] == []
 
@@ -380,7 +484,9 @@ def test_b3_nomes_sombreados_sem_valores(entrada, tmp_path):
     else:
         assert any("ORACLE_DSN" in w and _PREFIXO_SOMBREADAS in w for w in dados["por_run"][0]["warning_tela"]), resumo
     assert len(dados["chamadas_values"]) == 1, resumo
-    assert Path(dados["chamadas_values"][0]["caminho"]) == RAIZ / ".env", resumo
+    # D3 (fase 4): dotenv_values recebe o texto por stream; o caminho lido é provado pela única abertura.
+    assert dados["chamadas_values"][0]["caminho"] is None and dados["chamadas_values"][0]["stream"] is True, resumo
+    assert _unica_abertura_e_do_env_real(dados), resumo
     assert dados["leituras_reais"] == []
 
 
@@ -437,4 +543,144 @@ def test_d63_warning_de_descarte_depois_do_basicconfig(entrada, tmp_path):
     idx_basic = [i for i, e in enumerate(eventos) if e[0] == "basicConfig"]
     assert len(idx_warn) == 1, resumo
     assert idx_basic and idx_basic[0] < idx_warn[0], resumo
+    assert dados["leituras_reais"] == []
+
+
+# --- Fase 4 (docs/entregas/isolamento_env/fase4/decisao_fase4.md §4; Achados 1 e 3; P1 = B) ---------------------
+# Toda injeção é conferida antes da asserção principal (H4). ORACLE_SANDBOX=1 só no fictício, lido pelo filho
+# sem credenciais. Os valores fictícios de "segredo" só existem para provar que não vazam.
+
+_PREFIXO_MALFORMADAS = "Linhas do .env com erro de sintaxe foram ignoradas. Quantidade: "
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_f4a_oserror_antes_da_escrita_permite_nova_tentativa(entrada, tmp_path):
+    """(a) Achado 1: PermissionError na 1ª leitura não trava o processo; a subida seguinte carrega o .env."""
+    dados = _rodar(
+        entrada, tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE2=1\n", runs=2,
+        injecoes={"leitura": "PermissionError"},
+    )
+    runs = dados["por_run"]
+    resumo = f"por_run={[r['excecoes'] for r in runs]}, disparos={dados['disparos']}, chamadas={dados['chamadas']}"
+    assert dados["disparos"].get("leitura") is True, resumo  # H4
+    assert _com(runs[0]["excecoes"], MENSAGEM_FALHA_CARGA, "PermissionError", MENSAGEM_NOVA_TENTATIVA), resumo
+    assert runs[1]["excecoes"] == [], resumo  # nova tentativa bem-sucedida
+    assert runs[1]["sentinela"] == "1", resumo
+    assert [r["sandbox"] for r in runs] == ["AUSENTE", "AUSENTE"], resumo
+    descartes = [a for a in dados["avisos"] if "DESCARTADA" in a]
+    assert len(descartes) == 1, resumo  # aviso uma vez, na tentativa que deu certo
+    if entrada == "cli":
+        assert dados["stderr"].count(_PREFIXO_CLI + _TEXTO_DESCARTE) == 1, resumo
+    else:
+        assert any(_TEXTO_DESCARTE in w for w in runs[1]["warning_tela"]), resumo
+    assert len(dados["chamadas"]) == 1, resumo
+    assert dados["leituras_efetivas_por_run"] == [1, 1], resumo
+    assert dados["leituras_reais"] == []
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_f4b_uma_unica_leitura_do_env(entrada, tmp_path):
+    """(b) Achado 1: o .env é lido uma vez por processo (B3 e carga usam o mesmo texto)."""
+    dados = _rodar(entrada, tmp_path, "SENTINELA_FASE3=1\n", runs=2)
+    resumo = f"leituras={dados['leituras_efetivas_por_run']}, chamadas={dados['chamadas']}"
+    assert dados["sentinela_fase3"] == "1", resumo
+    assert dados["leituras_efetivas_por_run"] == [1, 0], resumo
+    assert [(c["caminho"], c["stream"]) for c in dados["chamadas"]] == [(None, True)], resumo
+    assert dados["leituras_reais"] == []
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_f4c_env_diretorio_fail_closed(entrada, tmp_path):
+    """(c) Achado 3: .env que não é arquivo regular aborta até reiniciar (sem nova tentativa)."""
+    dados = _rodar(entrada, tmp_path, "", runs=2, ficticio_tipo="diretorio")
+    runs = dados["por_run"]
+    resumo = f"por_run={[r['excecoes'] for r in runs]}, stats={dados['stats_por_run']}"
+    for run in runs:
+        assert _com(run["excecoes"], MENSAGEM_FALHA_CARGA, "NaoEArquivoRegular", MENSAGEM_REINICIE), resumo
+    assert dados["stats_por_run"][1] == 0, resumo  # o run 2 não tenta de novo
+    assert dados["chamadas"] == [] and dados["leituras_efetivas_por_run"] == [0, 0], resumo
+    assert dados["leituras_reais"] == []
+
+
+def test_f4c2_env_ausente_nova_tentativa(tmp_path):
+    """(c') P1 = B: .env ausente não sobe sem chaves; cada subida tenta de novo."""
+    dados = _rodar("cli", tmp_path, "", runs=2, ficticio_tipo="ausente")
+    runs = dados["por_run"]
+    resumo = f"por_run={[r['excecoes'] for r in runs]}, stats={dados['stats_por_run']}"
+    for run in runs:
+        assert _com(run["excecoes"], MENSAGEM_FALHA_CARGA, "FileNotFoundError", MENSAGEM_NOVA_TENTATIVA), resumo
+    assert dados["stats_por_run"][1] >= 1, resumo  # o run 2 tentou de novo
+    assert dados["chamadas"] == [] and dados["leituras_efetivas_por_run"] == [0, 0], resumo
+    assert dados["leituras_reais"] == []
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_f4d_linhas_malformadas_so_contagem(entrada, tmp_path):
+    """(d) Achado 3: linhas malformadas não abortam; aviso só com a contagem, sem o conteúdo."""
+    dados = _rodar(
+        entrada, tmp_path,
+        "SENTINELA_FASE3=1\nLINHA MALFORMADA_FICTICIA texto_secreto_ficticio\n"
+        'CHAVE_ABERTA="segredo_ficticio_aberto\n',
+        runs=2,
+    )
+    runs = dados["por_run"]
+    resumo = f"avisos={dados['avisos']}, stderr={dados['stderr']!r}, por_run={[r['excecoes'] for r in runs]}"
+    assert [r["excecoes"] for r in runs] == [[], []], resumo
+    assert dados["sentinela_fase3"] == "1", resumo
+    malformadas = [a for a in dados["avisos"] if _PREFIXO_MALFORMADAS in a]
+    assert malformadas == [_PREFIXO_MALFORMADAS + "2"], resumo
+    tela = "".join(r["tela_texto"] + "".join(r["warning_tela"]) for r in runs)
+    saidas = "\n".join(dados["log_total"]) + dados["stderr"] + dados["stdout_resto"] + tela
+    assert "secreto" not in saidas and "segredo" not in saidas, "conteúdo de linha malformada vazou"
+    if entrada == "cli":
+        assert dados["stderr"].count(_PREFIXO_CLI + _PREFIXO_MALFORMADAS + "2") == 1, resumo
+    else:
+        for run in runs:
+            assert _PREFIXO_MALFORMADAS + "2" in run["warning_tela"], resumo
+    assert dados["leituras_reais"] == []
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_f4e_escrita_parcial_fail_closed(entrada, tmp_path):
+    """(e) Achado 1: OSError depois de começar a escrever em os.environ trava até reiniciar."""
+    dados = _rodar(
+        entrada, tmp_path, "SENTINELA_FASE2=1\nSENTINELA_FASE3=1\n", runs=2,
+        injecoes={"putenv": "SENTINELA_FASE3"},
+    )
+    runs = dados["por_run"]
+    resumo = f"por_run={[r['excecoes'] for r in runs]}, disparos={dados['disparos']}"
+    assert dados["disparos"].get("putenv") is True, resumo  # H4
+    assert runs[0]["sentinela"] == "1", resumo  # a 1ª chave já tinha sido escrita (escrita parcial)
+    assert _com(runs[1]["excecoes"], MENSAGEM_FALHA_CARGA, MENSAGEM_REINICIE), resumo
+    assert runs[1]["sentinela_fase3"] == "AUSENTE", resumo  # o run 2 não recarregou
+    assert dados["leituras_efetivas_por_run"] == [1, 0], resumo
+    assert len(dados["chamadas"]) == 1, resumo
+    assert dados["leituras_reais"] == []
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_f4g_ok_so_depois_do_descarte(entrada, tmp_path):
+    """(g) R2: falha ao remover ORACLE_SANDBOX do arquivo não deixa o estado "ok"; o run 2 continua recusado."""
+    dados = _rodar(
+        entrada, tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE2=1\n", runs=2,
+        injecoes={"unsetenv": "ORACLE_SANDBOX"},
+    )
+    runs = dados["por_run"]
+    resumo = f"por_run={[r['excecoes'] for r in runs]}, disparos={dados['disparos']}"
+    assert dados["disparos"].get("unsetenv") is True, resumo  # H4
+    assert runs[0]["excecoes"], resumo  # o run 1 falhou no descarte
+    assert _com(runs[1]["excecoes"], MENSAGEM_FALHA_CARGA, MENSAGEM_REINICIE), resumo
+    assert dados["leituras_reais"] == []
+
+
+def test_f4h_interrupcao_fica_fail_closed(tmp_path):
+    """(h) BaseException durante a leitura deixa "falhou" (interrompida), sem nova tentativa."""
+    dados = _rodar("cli", tmp_path, "SENTINELA_FASE3=1\n", runs=2, injecoes={"leitura": "BaseException"})
+    runs = dados["por_run"]
+    resumo = f"por_run={[r['excecoes'] for r in runs]}, disparos={dados['disparos']}"
+    assert dados["disparos"].get("leitura") is True, resumo  # H4
+    assert _com(runs[0]["excecoes"], "InterrupcaoSimulada"), resumo
+    assert _com(runs[1]["excecoes"], MENSAGEM_FALHA_CARGA, "interrompida", MENSAGEM_REINICIE), resumo
+    assert dados["sentinela_fase3"] == "AUSENTE", resumo
+    assert dados["leituras_efetivas_por_run"] == [1, 0], resumo
     assert dados["leituras_reais"] == []

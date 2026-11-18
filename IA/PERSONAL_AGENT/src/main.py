@@ -1,12 +1,15 @@
 """Orquestrador Central do Personal Agent (Windows + Oracle DBA + Gemini Cloud Router + Barreira HITL & Notificador) com Auditoria Completa."""
+import io
 import json
 import logging
 import os
 import socket
+import stat
 import sys
 import threading
 from pathlib import Path
 from dotenv import dotenv_values, load_dotenv
+from dotenv.parser import parse_stream
 from openai import OpenAI
 
 # Garante que os pacotes em src/ sejam resolvidos independentemente do diretório de execução
@@ -16,51 +19,81 @@ for path_str in (str(ROOT_DIR), str(SRC_DIR)):
     if path_str not in sys.path:
         sys.path.insert(0, path_str)
 
-# >>> carga-env (texto idêntico em app.py e src/main.py; isolamento do .env, decisão em
-# docs/entregas/isolamento_env/decisao_fase3.md, P1)
+# >>> carga-env (texto idêntico em app.py e src/main.py; isolamento do .env, decisões em
+# docs/entregas/isolamento_env/decisao_fase3.md, P1, e docs/entregas/isolamento_env/fase4/decisao_fase4.md)
 # - Uma carga por processo, antes de qualquer import do projeto. O estado fica em sys (um por processo; sobrevive
-#   aos reruns do Streamlit) e a carga roda sob lock. Alterar o .env exige reiniciar a CLI ou a Web.
+#   aos reruns do Streamlit); toda transição e a leitura da decisão rodam sob o lock. Alterar o .env exige
+#   reiniciar a CLI ou a Web.
+# - Uma leitura do arquivo (os.stat + open), sob o lock; texto e valores só dentro de _carregar_env.
 # - override=False: o ambiente (shell ou perfil) vence o arquivo.
-# - ORACLE_SANDBOX só vale se já estava no ambiente antes da primeira carga (incidente 01:27). Se vier do arquivo,
-#   o finally a remove, inclusive quando a carga falha (C1).
-# - Falha na carga: fail-closed até reiniciar o processo, sem nova tentativa (mensagem fixa, sem valores).
+# - ORACLE_SANDBOX só vale se já estava no ambiente antes da carga (incidente 01:27). Se vier do arquivo, o finally
+#   a remove, inclusive quando a carga falha (C1); "ok" só é gravado depois disso.
+# - OSError antes de qualquer escrita em os.environ (inclusive .env ausente): nada entrou, nova tentativa na
+#   próxima subida. Qualquer outra falha (escrita parcial, .env que não é arquivo regular, decodificação, NUL,
+#   interrupção): fail-closed até reiniciar o processo. Mensagens fixas, sem valores.
 _AVISO_SANDBOX_DESCARTADA = (
     "ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell. "
     "Remova a chave do .env."
 )
 _AVISO_SOMBREADAS = "Variáveis do .env ignoradas porque o ambiente já as define com outro valor: "
+_AVISO_MALFORMADAS = "Linhas do .env com erro de sintaxe foram ignoradas. Quantidade: "
 
 
-def _nomes_sombreados(caminho):
-    """B3: nomes das chaves do .env que o ambiente já define com outro valor. Os valores não saem daqui."""
-    return tuple(sorted(
-        nome for nome, valor in dotenv_values(caminho).items()
-        if valor is not None and nome in os.environ and os.environ[nome] != valor
-    ))
+def _carregar_env(caminho):
+    """Uma leitura do .env (sob o lock de quem chama). Texto e valores só aqui dentro.
+
+    Devolve (estado, falha, sombreadas, malformadas). estado None: nada foi escrito em os.environ e a próxima
+    subida tenta de novo. Escrita parcial seguida de OSError: a exceção sobe e quem chama marca "falhou"."""
+    retrato = dict(os.environ)  # antes de qualquer escrita
+    try:
+        if not stat.S_ISREG(os.stat(caminho).st_mode):  # só os.stat: no Windows isfile/isdir usam atalhos fora dele
+            return "falhou", "NaoEArquivoRegular", (), 0  # Achado 3: diretório, FIFO, dispositivo
+        with open(caminho, encoding="utf-8") as arquivo:  # a única abertura do .env
+            texto = arquivo.read()
+        sombreadas = tuple(sorted(  # B3: só nomes, calculados antes da carga (ambiente ainda intacto)
+            nome for nome, valor in dotenv_values(stream=io.StringIO(texto)).items()
+            if valor is not None and nome in os.environ and os.environ[nome] != valor
+        ))
+        malformadas = sum(1 for linha in parse_stream(io.StringIO(texto)) if linha.error)  # só a contagem
+        load_dotenv(stream=io.StringIO(texto), override=False)
+    except OSError as exc:
+        if dict(os.environ) != retrato:
+            raise  # escrita parcial: fail-closed
+        return None, type(exc).__name__, (), 0
+    return "ok", None, sombreadas, malformadas
 
 
 _ESTADO_ENV = vars(sys).setdefault(
     "_personal_agent_estado_env",
-    {"lock": threading.Lock(), "estado": None, "falha": None, "sandbox_descartada": False, "sombreadas": ()},
+    {"lock": threading.Lock(), "estado": None, "falha": None, "sandbox_descartada": False, "sombreadas": (),
+     "malformadas": 0},
 )
 _CARREGOU_AGORA = False
 with _ESTADO_ENV["lock"]:
     if _ESTADO_ENV["estado"] is None:
-        _CARREGOU_AGORA = True
-        _ESTADO_ENV["estado"] = "falhou"
+        _ESTADO_ENV.update(estado="falhou", falha=None, sandbox_descartada=False, sombreadas=(), malformadas=0)
         _sandbox_do_shell = "ORACLE_SANDBOX" in os.environ
+        _proximo = "falhou"
         try:
-            _ESTADO_ENV["sombreadas"] = _nomes_sombreados(ROOT_DIR / ".env")  # antes da carga: ambiente ainda intacto
-            load_dotenv(ROOT_DIR / ".env", override=False)
-            _ESTADO_ENV["estado"] = "ok"
+            _proximo, _ESTADO_ENV["falha"], _ESTADO_ENV["sombreadas"], _ESTADO_ENV["malformadas"] = (
+                _carregar_env(ROOT_DIR / ".env")
+            )
         except Exception as exc:
             _ESTADO_ENV["falha"] = type(exc).__name__
         finally:
             if not _sandbox_do_shell and os.environ.pop("ORACLE_SANDBOX", None) is not None:
                 _ESTADO_ENV["sandbox_descartada"] = True
-if _ESTADO_ENV["estado"] != "ok":
+        _ESTADO_ENV["estado"] = _proximo  # só depois do descarte de ORACLE_SANDBOX
+        _CARREGOU_AGORA = _proximo == "ok"
+    _ESTADO_DESTA_SUBIDA, _FALHA_DESTA_SUBIDA = _ESTADO_ENV["estado"], _ESTADO_ENV["falha"]  # lidos sob o lock
+if _ESTADO_DESTA_SUBIDA is None:
     raise RuntimeError(
-        f"Carga do .env falhou nesta subida ({_ESTADO_ENV['falha'] or 'interrompida'}); "
+        f"Carga do .env falhou nesta subida ({_FALHA_DESTA_SUBIDA}); nada do agente foi carregado e nada do .env "
+        "entrou no ambiente. Nova tentativa na próxima subida (Web: recarregue a página; CLI: rode de novo)."
+    )
+if _ESTADO_DESTA_SUBIDA != "ok":
+    raise RuntimeError(
+        f"Carga do .env falhou nesta subida ({_FALHA_DESTA_SUBIDA or 'interrompida'}); "
         "nada do agente foi carregado. Corrija o .env e reinicie o processo."
     )
 # <<< carga-env
@@ -91,6 +124,9 @@ if _CARREGOU_AGORA:  # avisos da carga: uma vez por processo, depois do basicCon
     if _ESTADO_ENV["sombreadas"]:  # B3: só nomes
         _log_carga.warning(_AVISO_SOMBREADAS + ", ".join(_ESTADO_ENV["sombreadas"]))
         print(f"[Sistema]: AVISO: {_AVISO_SOMBREADAS}{', '.join(_ESTADO_ENV['sombreadas'])}", file=sys.stderr)
+    if _ESTADO_ENV["malformadas"]:  # Achado 3: só a contagem
+        _log_carga.warning(_AVISO_MALFORMADAS + str(_ESTADO_ENV["malformadas"]))
+        print(f"[Sistema]: AVISO: {_AVISO_MALFORMADAS}{_ESTADO_ENV['malformadas']}", file=sys.stderr)
 
 # 1. Importando as Ferramentas de SO
 from tools.os_tools import (
