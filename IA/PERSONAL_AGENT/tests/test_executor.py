@@ -463,6 +463,13 @@ def test_t18_tipo_divergente_recusado_sem_conexao():
 # =============================================================================
 def test_t19_oracle_user_read_ausente_com_select(monkeypatch):
     """T19: Ausência de ORACLE_USER_READ rejeita execução com ERRO_CONFIG sem conectar."""
+    def fail_connect(*args, **kwargs):
+        pytest.fail("oracledb.connect não deve ser chamado quando falta ORACLE_USER_READ")
+
+    monkeypatch.setattr(oracledb, "connect", fail_connect)
+    # D3: só o usuário falta; senha e DSN fictícios (sem o .env real, o teste não passa "por acaso")
+    monkeypatch.setenv("ORACLE_PASSWORD_READ", "senha-fake")
+    monkeypatch.setenv("ORACLE_DSN", "host-teste:1521/TESTE")
     monkeypatch.delenv("ORACLE_USER_READ", raising=False)
     saida_str = executar_script("verificar_dual", {})
     resultado = json.loads(saida_str)

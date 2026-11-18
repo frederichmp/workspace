@@ -21,7 +21,11 @@ sys.path.insert(0, raiz)
 sys.path.insert(0, testes)
 PREF = ("ORACLE_", "EMAIL_", "GEMINI_")
 antes = dict(os.environ)
-for nome in ("test_executor", "test_oracle_kill", "test_item1_intencao"):
+# D6.5: inclui src.config.settings e os dois testes de privilégio (carregavam o .env no import).
+for nome in (
+    "test_executor", "test_oracle_kill", "test_item1_intencao",
+    "src.config.settings", "test_privilegio_read", "test_privilegio_write_sandbox",
+):
     importlib.import_module(nome)
 depois = dict(os.environ)
 add = sorted(set(depois) - set(antes))

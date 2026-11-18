@@ -75,9 +75,14 @@ dotenv.main.DotEnv.__init__ = _guarda_init
 capturados = []
 
 
+eventos = []  # ordem de basicConfig e dos WARNINGs (D6.3b)
+
+
 class _Captura(logging.Handler):
     def emit(self, record):
         capturados.append((record.levelname, record.getMessage()))
+        if record.levelname == "WARNING":
+            eventos.append(["WARNING", record.getMessage()])
 
 
 if cfg.get("pre_importar_src"):
@@ -87,6 +92,15 @@ if cfg.get("pre_importar_src"):
 if cfg.get("raiz_em_error"):
     # C3: a raiz já configurada em ERROR antes da entrada (o log de WARNING fica suprimido).
     logging.basicConfig(level=logging.ERROR)
+_basic_original = logging.basicConfig
+
+
+def _basic_wrapper(*a, **k):
+    eventos.append(["basicConfig"])
+    return _basic_original(*a, **k)
+
+
+logging.basicConfig = _basic_wrapper
 raiz_log = logging.getLogger()
 raiz_log.addHandler(_Captura())
 if not cfg.get("raiz_em_error"):
@@ -165,6 +179,9 @@ print("\n" + json.dumps({
     "por_run": por_run,
     "oracle_dsn_do_shell": final["oracle_dsn_do_shell"],
     "log_total": [m for n, m in capturados],
+    "eventos": eventos,
+    "gemini_key_igual": None if sys.modules.get("tools.gemini_router") is None
+        else sys.modules["tools.gemini_router"].GEMINI_API_KEY == "chave_ficticia_d63",  # só booleano
     "avisos": [m for n, m in capturados if n == "WARNING"],
     "chamadas": chamadas,
     "chamadas_values": chamadas_values,
@@ -391,4 +408,31 @@ def test_c3_web_st_warning_em_todo_rerun(tmp_path):
     for run in dados["por_run"]:
         assert any(_TEXTO_DESCARTE in w for w in run["warning_tela"]), resumo
     assert dados["sandbox"] == "AUSENTE", resumo
+    assert dados["leituras_reais"] == []
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_d63_valor_lido_no_import_prova_carga_antes_dos_imports(entrada, tmp_path):
+    """D6.3a (I1): a carga do .env vem antes dos imports de `tools.*`.
+
+    O fictício tem GEMINI_API_KEY; tools.gemini_router lê a chave no import. Só o booleano
+    (igual/diferente) é registrado: a chave nunca é impressa.
+    """
+    dados = _rodar(entrada, tmp_path, "GEMINI_API_KEY=chave_ficticia_d63\nSENTINELA_FASE3=1\n")
+    resumo = f"gemini_key_igual={dados['gemini_key_igual']}, sentinela_fase3={dados['sentinela_fase3']}"
+    assert dados["gemini_key_igual"] is True, resumo
+    assert dados["sentinela_fase3"] == "1", resumo  # o fictício foi carregado
+    assert dados["leituras_reais"] == []
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_d63_warning_de_descarte_depois_do_basicconfig(entrada, tmp_path):
+    """D6.3b (I3/D2): o WARNING de descarte de ORACLE_SANDBOX é emitido depois de logging.basicConfig."""
+    dados = _rodar(entrada, tmp_path, "ORACLE_SANDBOX=1\nSENTINELA_FASE3=1\n")
+    eventos = dados["eventos"]
+    resumo = f"eventos={eventos}"
+    idx_warn = [i for i, e in enumerate(eventos) if e[0] == "WARNING" and "DESCARTADA" in e[1]]
+    idx_basic = [i for i, e in enumerate(eventos) if e[0] == "basicConfig"]
+    assert len(idx_warn) == 1, resumo
+    assert idx_basic and idx_basic[0] < idx_warn[0], resumo
     assert dados["leituras_reais"] == []

@@ -131,7 +131,14 @@ def test_ausencia_oracle_user_diag_sem_conexao(monkeypatch):
     def fail_connect(*args, **kwargs):
         pytest.fail("oracledb.connect não deve ser chamado quando faltam credenciais de DIAG")
 
+    def fail_host(*args, **kwargs):
+        pytest.fail("verificar_acessibilidade_host não deve ser chamado quando falta ORACLE_USER_DIAG")
+
     monkeypatch.setattr(oracledb, "connect", fail_connect)
+    monkeypatch.setattr(oracle_dba, "verificar_acessibilidade_host", fail_host)
+    # D3: só o usuário falta; senha e DSN fictícios (sem o .env real, o teste não passa "por acaso")
+    monkeypatch.setenv("ORACLE_PASSWORD_DIAG", "senha-fake")
+    monkeypatch.setenv("ORACLE_DSN", "host-teste:1521/TESTE")
     monkeypatch.delenv("ORACLE_USER_DIAG", raising=False)
 
     res_sess = json.loads(coletar_sessoes_ativas())
@@ -156,7 +163,14 @@ def test_ausencia_oracle_user_kill_sem_conexao(monkeypatch):
     def fail_connect(*args, **kwargs):
         pytest.fail("oracledb.connect não deve ser chamado quando faltam credenciais de KILL")
 
+    def fail_host(*args, **kwargs):
+        pytest.fail("verificar_acessibilidade_host não deve ser chamado quando falta ORACLE_USER_KILL")
+
     monkeypatch.setattr(oracledb, "connect", fail_connect)
+    monkeypatch.setattr(oracle_dba, "verificar_acessibilidade_host", fail_host)
+    # D3: só o usuário falta; senha e DSN fictícios (sem o .env real, o teste não passa "por acaso")
+    monkeypatch.setenv("ORACLE_PASSWORD_KILL", "senha-fake")
+    monkeypatch.setenv("ORACLE_DSN", "host-teste:1521/TESTE")
     monkeypatch.delenv("ORACLE_USER_KILL", raising=False)
 
     res = json.loads(matar_sessao_oracle(sid=10, serial=20, inst_id=1))
