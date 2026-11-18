@@ -1,9 +1,6 @@
 """Módulo de configurações do Personal Agent."""
 import os
 from pathlib import Path
-from dotenv import load_dotenv
-
-load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"

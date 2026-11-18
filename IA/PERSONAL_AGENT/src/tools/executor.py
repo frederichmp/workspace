@@ -19,10 +19,8 @@ import os
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 import oracledb
-from dotenv import load_dotenv
 
 from src.tools.registry import (
     ScriptRegistryEntry,
@@ -30,12 +28,6 @@ from src.tools.registry import (
     obter_caminho_scripts_dir,
     obter_script,
 )
-
-# Carrega variáveis de ambiente
-load_dotenv()
-env_personal_agent = Path(__file__).resolve().parent.parent.parent / ".env"
-if env_personal_agent.is_file():
-    load_dotenv(dotenv_path=env_personal_agent, override=False)
 
 # Constantes e Diretivas SQL*Plus a recusar terminantemente
 SQLPLUS_DIRECTIVES = {

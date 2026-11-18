@@ -9,8 +9,6 @@ from email.mime.text import MIMEText
 from typing import Tuple
 from dotenv import load_dotenv
 
-load_dotenv()
-
 
 def enviar_alerta_email(assunto: str, corpo: str) -> Tuple[bool, str]:
     """Envia um e-mail de alerta utilizando SMTP do Gmail (TLS na porta 587)."""

@@ -19,7 +19,6 @@ import uuid
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import oracledb
-from dotenv import load_dotenv
 
 from .notificador import enviar_alerta_email
 
@@ -27,10 +26,6 @@ if os.name == "nt":
     import msvcrt
 else:
     import fcntl
-
-# Carrega as variáveis de ambiente do arquivo .env na raiz de IA/PERSONAL_AGENT
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-load_dotenv(ROOT_DIR / ".env")
 
 # Diretório do log de aprovações de kill: AGENTDBA_LOG_DIR ou o padrão local, fora de pasta sincronizada.
 # A pasta só é criada na primeira gravação (os.makedirs, exist_ok); falha na criação = falha de registro.

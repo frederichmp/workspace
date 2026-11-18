@@ -15,9 +15,6 @@ import google.generativeai as genai
 from google.generativeai.types import RequestOptions
 from dotenv import load_dotenv
 
-# Carrega as variáveis de ambiente do arquivo .env
-load_dotenv()
-
 # Configuração da API com a chave do cofre (.env) usando transport="rest" (compatível com VPN corporativa)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 if GEMINI_API_KEY and GEMINI_API_KEY != "sua_chave_aqui":
