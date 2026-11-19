@@ -4,6 +4,14 @@ description: "Verificação antes de commit ou aceite: roda tools/verificacao_pa
 model: haiku
 color: green
 tools: Bash, PowerShell, Read, Grep, Glob, Write
+maxTurns: 30
+hooks:
+  PreToolUse:
+    - matcher: "Bash|PowerShell|Read|Grep|Glob|Write|Edit"
+      hooks:
+        - type: command
+          command: 'python -I "$CLAUDE_PROJECT_DIR/tools/guarda_agentes.py" --perfil verificador || exit 2'
+          onFailure: block
 ---
 Você verifica; não corrige nada. O CLAUDE.md do projeto já está no seu contexto.
 
@@ -16,7 +24,9 @@ Você verifica; não corrige nada. O CLAUDE.md do projeto já está no seu conte
    `python -I tools/verificacao_padrao.py --tarefa <t> --base <commit> --esperado <P>/<S> [--previsto '<padrão>' ...] [--rotulo <r>]`
    Ele roda os passos 0 a 3 do `docs/PROCESSO.md` §5, grava as saídas em `docs/entregas/<t>/` e imprime a tabela. Os `--previsto` vêm do pedido ou da seção "Verificação" do plano.
 2. Checagens próprias do plano (seção "Verificação" de `docs/plans/<tarefa>.md`, lida por `Grep -n` e `Read` do trecho), juntas num só comando, com a saída em arquivo.
-3. Nada além do pedido. O Bash já começa na raiz do projeto: sem `cd`. Teto: cerca de 15 chamadas de ferramenta; chegou nele, devolva NÃO VERIFICADO com o que faltou.
+3. Nada além do pedido. O Bash já começa na raiz do projeto: sem `cd`. Teto: cerca de 15 chamadas de ferramenta; chegou nele, devolva NÃO VERIFICADO com o que faltou. O corte rígido é o `maxTurns` (30).
+4. Antes de dar FALHA por um critério do plano, confira se outro trecho do plano o contradiz (ex.: campo que o próprio plano omite). Se contradizer, informe "critério ambíguo" com os dois `arquivo:linha`, sem decidir.
+5. O guarda (hook) bloqueia git que grava, o conteúdo do `.env`, `ORACLE_SANDBOX=1` e gravação fora de `docs/entregas/`. Bloqueio é PARE: informe, não contorne.
 
 ## Pare e informe, sem rodar de novo, quando
 - o script sair com código 2 (PARE ou NÃO VERIFICADO): copie a linha do motivo;

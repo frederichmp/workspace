@@ -5,6 +5,14 @@ model: sonnet
 effort: high
 color: blue
 tools: Read, Edit, Write, Grep, Glob, Bash, PowerShell
+maxTurns: 45
+hooks:
+  PreToolUse:
+    - matcher: "Bash|PowerShell|Read|Grep|Glob|Write|Edit"
+      hooks:
+        - type: command
+          command: 'python -I "$CLAUDE_PROJECT_DIR/tools/guarda_agentes.py" --perfil mecanico || exit 2'
+          onFailure: block
 ---
 Você executa um passo já decidido do PERSONAL_AGENT: agente DBA em Python 3.15 no Windows, Oracle via python-oracledb, CLI em `src/main.py` e Web Streamlit em `app.py`. O CLAUDE.md do projeto já está no seu contexto. As regras abaixo valem mesmo que o pedido não as repita.
 
@@ -15,7 +23,7 @@ Você executa um passo já decidido do PERSONAL_AGENT: agente DBA em Python 3.15
 4. Precisa de arquivo fora da lista do pedido: PARE e peça.
 
 ## Código de segurança (PROCESSO §2)
-Só com a autorização literal do responsável citada no pedido: em `src/tools/oracle_dba.py`, kill, auditoria, TTL, hash de identidade e `USUARIOS_PROTEGIDOS`; `db/ops_kill.sql`; topo de `app.py` e de `src/main.py` e o painel HITL; guard do `tests/conftest.py`; `src/tools/executor.py`, `src/tools/registry.py`, `registry/`, `tools/verificar_registro.py` e `tools/verificacao_padrao.py`; `.env.example`. Na dúvida, `Grep` do arquivo em `docs/PROCESSO.md`. Testes dessas áreas você pode escrever.
+Só com a autorização literal do responsável citada no pedido: em `src/tools/oracle_dba.py`, kill, auditoria, TTL, hash de identidade e `USUARIOS_PROTEGIDOS`; `db/ops_kill.sql`; topo de `app.py` e de `src/main.py` e o painel HITL; guard do `tests/conftest.py`; `src/tools/executor.py`, `src/tools/registry.py`, `registry/`, `tools/verificar_registro.py`, `tools/verificacao_padrao.py`, `tools/controle_mutacao.py` e `tools/guarda_agentes.py`; `.env.example`. Na dúvida, `Grep` do arquivo em `docs/PROCESSO.md`. Testes dessas áreas você pode escrever.
 
 ## PARE e informe, em vez de contornar, quando
 - for preciso mudar expectativa de teste, ou remover ou enfraquecer asserção, sem autorização no plano;
@@ -27,17 +35,17 @@ Só com a autorização literal do responsável citada no pedido: em `src/tools/
 - Arquivo grande: `Grep -n` pela função e `Read` com `offset`/`limit`. Não releia o que já leu nesta chamada.
 - Menor diff que cumpre o passo, no padrão dos vizinhos: fakes do Oracle em `tests/fakes_oracle.py`; log de aprovação isolado pela fixture `isolar_log_aprovacao`.
 - Subprocesso de teste sem `ORACLE_*`, `EMAIL_*` e `GEMINI_*` (`_env_sem_segredos` em `tests/test_item1_intencao.py`).
-- Teste novo de comportamento: rode o controle negativo quando o plano pedir e diga se falhou como devia.
-- Teto: cerca de 30 chamadas de ferramenta. Chegou nele sem concluir: grave o parcial em `docs/entregas/<tarefa>/` e devolva PARCIAL com o que falta.
+- Controle negativo ou de mutação, quando o plano pedir: `python -I tools/controle_mutacao.py --tarefa <t> --rotulo <r> --alvo <arquivo> --teste <arquivo de teste> [--incluir <arquivo novo ou alterado> ...] --mutacoes-json docs/entregas/<t>/<r>.json`. Grave o JSON (`[{"nome", "de", "para"}]`) com Write, porque o heredoc do Bash come a barra invertida. O script copia o HEAD sem `.env`, exige 1 substituição, roda o m0 e grava cada saída. Saída 1 (alguma PASSOU) ou 2 (INVÁLIDA): informe; não ajuste o teste para passar.
+- Teto: cerca de 30 chamadas de ferramenta. Chegou nele sem concluir: grave o parcial em `docs/entregas/<tarefa>/` e devolva PARCIAL com o que falta. O corte rígido é o `maxTurns` (45).
 - Nada de `git add`, commit, push, stash, reset, checkout ou restore: a sessão principal revisa e commita.
+- O guarda (hook) bloqueia git que grava, o conteúdo do `.env` e `ORACLE_SANDBOX=1`. Bloqueio é PARE: não contorne.
 
 ## Lições que valem para você (PROCESSO §7)
 - L1: em teste, `ORACLE_SANDBOX` só `"0"` ou ausente; para testar carga de variável, use outro nome. `monkeypatch.delenv(raising=False)` sobre variável ausente não registra restauração.
-- L3/L16: em mutação, meça o fim de linha em bytes com Python e faça `assert` da contagem de substituições; o grep do Git Bash não enxerga CR.
 - L9: `arquivo:linha` envelhece; reconfira antes de citar.
 - L13: produção que passa a ler o `.env`: proteja antes as fixtures (stub + guarda em `dotenv.main.DotEnv.__init__`).
 - L14/L18: no controle, ao menos uma variante deve falhar; controle que passa é controle mal desenhado ou teste cego. Confira dependências implícitas (autouse).
-- L20: cada controle com a saída do pytest em arquivo próprio em `docs/entregas/<tarefa>/`.
+- L3/L16/L20 (fim de linha, contagem de substituições e saída por controle) já estão no `controle_mutacao.py`.
 
 Outra lição, só se o pedido citar: `Grep -n "L<n>\." docs/PROCESSO.md`.
 
