@@ -63,6 +63,10 @@ GREP_LOAD_DOTENV = ["-n", "-E", "load_dotenv\\(", "--", "src/*.py", "app.py"]
 
 RE_CONTAGEM = re.compile(r"(\d+) (failed|passed|skipped|deselected|xfailed|xpassed|errors?|warnings?)\b")
 RE_SKIP = re.compile(r"^SKIPPED \[(\d+)\] (.+?:\d+): (.*)$")
+# Só as 2 formas que o tests/conftest.py produz (medidas em 2026-11-19): o print do pytest_sessionfinish,
+# no início da linha, e o pytest.exit ("! _pytest.outcomes.Exit: ..."). O mesmo texto citado na fonte ou
+# no repr de um teste que falhou fica indentado e não conta.
+RE_GOVERNANCA = re.compile(r"^(?:FALHA DE GOVERNANCA:|!+ _pytest\.outcomes\.Exit: FALHA DE GOVERNANCA:)", re.MULTILINE)
 
 
 # ---------- funções puras (testadas em tests/test_verificacao_padrao.py) ----------
@@ -153,7 +157,7 @@ def analisar_pytest(saida, codigo, esperado_p, esperado_s):
     """Classifica a saída do pytest -q -rs. Falha fechado: OK só com tudo conferido."""
     if codigo is None:
         return NAO_VERIFICADO, "pytest excedeu o tempo limite", {}
-    if "FALHA DE GOVERNANCA" in saida:
+    if RE_GOVERNANCA.search(saida):
         return PARE, "o conftest acusou FALHA DE GOVERNANCA; não rode de novo", {}
     resumo = next((l for l in reversed(saida.splitlines()) if RE_CONTAGEM.search(l) and " in " in l), None)
     if codigo not in (0, 1) or resumo is None:

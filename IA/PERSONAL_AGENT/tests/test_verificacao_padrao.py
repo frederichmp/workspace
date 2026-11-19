@@ -52,6 +52,20 @@ def test_pytest_falha_de_governanca_para_mesmo_com_contagem_certa():
     assert st == vp.PARE
 
 
+def test_pytest_exit_de_governanca_para():
+    saida = "! _pytest.outcomes.Exit: FALHA DE GOVERNANCA: ORACLE_SANDBOX alterado. Nenhum teste executado. !\r\n"
+    st, _, _ = vp.analisar_pytest(saida, 3, 272, 16)
+    assert st == vp.PARE
+
+
+def test_pytest_texto_de_governanca_citado_por_teste_que_falhou_e_falha():
+    saida = ('        (0, "FALHA DE GOVERNANCA: x", vp.PARE),\n'
+             "E   assert 'FALHA DE GOVERNANCA: x' == 'y'\n"
+             + _saida("1 failed, 271 passed, 16 skipped in 270.00s"))
+    st, _, _ = vp.analisar_pytest(saida, 1, 272, 16)
+    assert st == vp.FALHA
+
+
 def test_pytest_erro_de_import_do_oracledb_nao_verificado():
     saida = ("ImportError while loading conftest\n"
              "  File \"site-packages/oracledb/__init__.py\", line 40\n"
