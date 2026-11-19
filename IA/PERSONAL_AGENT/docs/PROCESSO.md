@@ -88,7 +88,12 @@ O pedido tem no máximo 1.000 caracteres: o que não couber vai no plano, citado
 - **Paralelismo:** só com conjuntos de arquivos disjuntos; nunca dois agentes em `oracle_dba.py`, `main.py` ou `app.py`.
 - **Conferência do retorno:** o ID do modelo veio; as contagens batem com o baseline; o diff inteiro foi lido; a classificação das mudanças em testes confere com o diff. O que o subagente afirma é afirmação a conferir; o modelo que ele informa se confirma na transcrição.
 - **Retorno com PARE:** resolver com o responsável. Não redelegar a mesma coisa sem mudar o pedido.
-- **Definições novas:** valem para o agente lançado depois da gravação. Em 2026-11-18, o 1º `verificador` depois da lista fechada de ferramentas teve 1º turno de 14,1 mil tokens, contra 34 a 35 mil antes. A lista de agentes da sessão principal só se atualiza no próximo chat; confirme lá, com `/agents`, modelo, effort, cor e ferramentas. Meça o 1º turno com `docs/entregas/revisao-subagentes-v2/medir_subagentes.py --desde <hora UTC>`.
+- **Definições novas:** valem para o agente lançado depois da gravação. Em 2026-11-18, o 1º `verificador` depois da lista fechada de ferramentas teve 1º turno de 14,1 mil tokens, contra 34 a 35 mil antes. O `/agents` foi removido do Claude Code (2.1.327, 2026-11-19), e a confirmação passa a ser por evidência:
+  1. YAML validado;
+  2. modelo e 1º turno na transcrição, com `docs/entregas/revisao-subagentes-v2/medir_subagentes.py --desde <hora UTC>`;
+  3. sonda do guarda, com um comando liberado e um bloqueado em chamadas separadas (L37).
+
+  Para o `maxTurns`, use um agente temporário com limite baixo, como em `docs/entregas/aceite-subagentes/`.
 
 ## 4. Modelo de plano (`docs/plans/<tarefa>.md`)
 
