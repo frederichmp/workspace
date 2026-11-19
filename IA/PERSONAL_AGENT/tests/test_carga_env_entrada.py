@@ -613,6 +613,7 @@ def test_f4c2_env_ausente_nova_tentativa(tmp_path):
     assert dados["chamadas"] == [] and dados["leituras_efetivas_por_run"] == [0, 0], resumo
     assert dados["leituras_reais"] == []
 
+
 @pytest.mark.parametrize("entrada", ["cli", "web"])
 def test_f4c2b_env_ausente_preserva_sandbox_do_shell(entrada, tmp_path):
     """(c'') T2 (registro_pos_merge): com .env ausente, a ORACLE_SANDBOX herdada do shell não é removida (o valor
