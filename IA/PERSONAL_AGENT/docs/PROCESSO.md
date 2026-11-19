@@ -33,7 +33,7 @@ Produção nestas áreas só é escrita por Opus (sessão principal), que confer
 | Pontos de entrada | topo de `app.py` e de `src/main.py` (carga única do `.env`, descarte de `ORACLE_SANDBOX`); painel e decisão HITL nas duas interfaces (`processar_decisao_hitl` na Web) |
 | Guard dos testes | `tests/conftest.py`: `ORACLE_SANDBOX_DO_OPERADOR`, `CHAVES_ENV_SANDBOX`, `guard_oracle_sandbox`, `pytest_sessionfinish`, `isolar_log_aprovacao` |
 | Execução de scripts | `src/tools/executor.py` (tokenização, tipo real do SQL, hash, conta READ ou MUT), `src/tools/registry.py`, `registry/*.yaml`, `tools/verificar_registro.py` |
-| Verificação padrão | `tools/verificacao_padrao.py` (passos 0 a 3 do §5) |
+| Verificação, controle e guarda | `tools/verificacao_padrao.py` (passos 0 a 3 do §5), `tools/controle_mutacao.py` (controle de mutação) e `tools/guarda_agentes.py` (hook dos subagentes) |
 | Contas e chaves | `.env.example` (só nomes, nunca valores) |
 
 Mudou o mapa? Atualize também a lista do `.claude/agents/mecanico.md`.
@@ -70,6 +70,19 @@ O pedido tem no máximo 1.000 caracteres: o que não couber vai no plano, citado
   | `mecanico` | `OK`, `PARE`, `ERRO`, `PARCIAL` | 1.200 caracteres |
   | `seguranca` | `CONFORME`, `NÃO CONFORME`, `PENDENTE`, `PARCIAL` | 1.500 caracteres |
   | `verificador` | `OK`, `FALHA`, `PARE`, `NÃO VERIFICADO` | 1.500 caracteres |
+- **Travas no frontmatter:** o `maxTurns` (45 no `mecanico`, 60 no `seguranca`, 30 no `verificador`) corta a chamada e devolve a saída parcial; o que faltou vira chamada nova. O hook `tools/guarda_agentes.py` bloqueia, em todo agente:
+  - git que grava (R1);
+  - conteúdo do `.env` (R2);
+  - `ORACLE_SANDBOX=1` (R3);
+  - gravação fora da pasta do perfil (R4): `docs/entregas/` no `verificador`; só `decisao*.md` e `conferencia*.md` no `seguranca`.
+
+  Bloqueio volta como PARE. É guarda contra acidente, não sandbox.
+
+  Testado ao vivo em 2026-11-19 (`docs/entregas/ajuste-fino-subagentes/sondas.md`):
+  - R1, R2 e R4 bloquearam, e o `git status` rodou;
+  - hook que falha com código 1 bloqueia tanto com `onFailure: block` quanto com `|| exit 2`, cada um sozinho; os dois ficam no comando.
+
+  Experimento com git que grava, ou que cite o `.env` ou o `dotenv`, também é bloqueado, mesmo num repositório de rascunho: o agente o descreve, e a sessão principal o roda.
 - **SendMessage:** só para complemento curto do mesmo passo, com o agente abaixo do teto. Outra tarefa, outro passo ou agente perto do teto: agente novo.
 - **`cd` na sessão principal:** no Bash da sessão principal, o `cd` persiste e muda o diretório de trabalho da sessão. Use caminho relativo à raiz ou `git -C`.
 - **Paralelismo:** só com conjuntos de arquivos disjuntos; nunca dois agentes em `oracle_dba.py`, `main.py` ou `app.py`.
@@ -84,7 +97,7 @@ O pedido tem no máximo 1.000 caracteres: o que não couber vai no plano, citado
 3. **Arquivos:** por passo, com agente e modelo; disjuntos quando em paralelo.
 4. **Passos:** o que muda, o teste que prova e o controle negativo (o teste novo deve falhar no código atual).
 5. **Decisões do responsável:** pendentes e aprovadas, com data.
-6. **Verificação:** comandos exatos, greps e contagem esperada. O `verificador` usa esta seção.
+6. **Verificação:** comandos exatos, greps e contagem esperada. O `verificador` usa esta seção. Critério de campo opcional diz "quando presente", e o pedido ao `verificador` traz o valor esperado exato.
 7. **GOVERNANCA_LOG:** linha prevista.
 8. **Fora de escopo:** o que fica para item próprio.
 
@@ -105,6 +118,18 @@ python -I tools/verificacao_padrao.py --tarefa <t> --base <commit> --esperado <P
 - **`--registry-pendente`:** aceita mudança em `registry/` ou `db/` só se ela estiver commitada e todo commit trouxer "PENDENTE APROVAÇÃO".
 
 Os comandos abaixo são a referência do script: mudou um, mude também o script e o `tests/test_verificacao_padrao.py`.
+
+**Controle de mutação.** Um comando roda todas as mutações:
+
+```bash
+python -I tools/controle_mutacao.py --tarefa <t> --rotulo <r> --alvo <arquivo> --teste <arquivo de teste> \
+  [--incluir <arquivo novo ou alterado> ...] --mutacoes-json docs/entregas/<t>/<r>.json
+```
+
+- **Como roda:** numa cópia `git archive HEAD` sem `.env`, mais os `--incluir`. O m0 (sem mutação) roda antes e precisa passar.
+- **Cada mutação:** exatamente 1 substituição, com o fim de linha registrado; a saída vai para um arquivo próprio.
+- **Código de saída:** 0 todas DETECTADAS, 1 alguma PASSOU (teste cego ou controle mal desenhado), 2 INVÁLIDA ou erro.
+- **JSON de mutações:** grave com Write, porque o heredoc do Bash come a barra invertida.
 
 **0. Perfil do Windows, só nomes** (PowerShell). Esperado: nenhuma linha. Com `override=False`, variável do perfil vence o `.env`.
 
