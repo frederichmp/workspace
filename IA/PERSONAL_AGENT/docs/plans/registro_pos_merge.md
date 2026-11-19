@@ -1,7 +1,7 @@
 # Plano — registro pós-merge (protocolo, refs, .gitignore, testes T1/T2, aceite da fase 4)
 
 Destino no repositório: `docs/plans/registro_pos_merge.md` (cópia literal deste arquivo; entra no commit do **P1**, por decisão do responsável em 2026-11-18).
-Estado (revisão 2, 2026-11-18): **P0, P1 e P3 aprovados**; P0 em execução, **pausado antes do `--continue`** (conflitos resolvidos e preparados, aguardando OK). **T1 e T2 propostos nesta revisão** (aguardam aprovação). **P2 bloqueado.**
+Estado (revisão 4, 2026-11-18): **executados** P0 `a3362f2` (+ tag `ref/docs-protocolo-27d135d`), P1 `8cc3773`, P3 `fa9e390`, T1 `e692788`, T2 `66a15d7`, suíte (272 passed, 16 skipped, 0 failed em `66a15d7`) e S1 `3ca8f98`. **P2 autorizado** pelo responsável depois da comprovação do momento da suíte 269/16 (F13) e da correção do desvio e da L21; sem push. Fora de commit: pendente.
 
 ## 1. Contexto
 
@@ -24,10 +24,11 @@ Fatos levantados (só leitura):
   2. Blocos `>>> carga-env`/`<<< carga-env` (`app.py:37-114`, `src/main.py:22-99`): idênticos (78 linhas, md5 `3819fb24…`); **nenhum teste** de igualdade. COMPROVADO.
   3. chromadb `Settings` (pydantic-settings) **só lê**: `dotenv_values` (`pydantic_settings/sources/providers/dotenv.py:92`) devolve dicionário (`dotenv/main.py:465-472`); escrita em `os.environ` só em `dotenv/main.py:108` via `load_dotenv` (`:435`). COMPROVADO por código e execução (cwd fictício: `os.environ` inalterado). **7 leituras** de `cwd/.env` no `import chromadb`, todas `Settings()` avaliadas no import: `api/shared_system_client.py:22`, `api/client.py:67`, `api/client.py:669`, `api/async_client.py:65`, `api/async_client.py:526`, `__init__.py:112`, `__init__.py:465`. Versões: chromadb 1.5.9, pydantic-settings 2.16.3, python-dotenv 1.2.4. Momento: 1ª busca RAG (import tardio em `src/tools/rag_search.py:37`), CORRELAÇÃO; import via `langchain_community.vectorstores` (`rag_search.py:14`): HIPÓTESE.
 - **F12. `"1"` × `"0"` no bloco `carga-env`:** nenhum ramo distingue o valor. `_sandbox_do_shell` e o descarte testam só presença (`app.py:90`, `:99`; `src/main.py:75`, `:84`); o aviso DESCARTADA depende só de `sandbox_descartada` (`app.py:100`, `:133-134`, `:595-596`; `src/main.py:85`, `:120-123`); as sombreadas comparam com o valor do arquivo, não com `"1"` (`app.py:70`), e não existem com `.env` ausente. Nenhuma outra leitura de `ORACLE_SANDBOX` em `src/`, `app.py` ou `tools/`. O único ponto que compara com `"1"` é o portão de testes `tests/conftest.py:187`, fora do bloco. **Conclusão:** o T2 com `"0"` exercita o mesmo ramo que `"1"` exercitaria. COMPROVADO por leitura (não executado com `"1"`, proibido pelo CLAUDE.md).
+- **F13. Momento da suíte 269/16 (2026-11-18, horário -03:00): COMPROVADO antes do FF.** Reflog: commit `8810b6e` às 19:16:42 (`HEAD@{2026-11-18T19:16:42-03:00}`); FF `19f19f2 → 8810b6e` às 20:10:37 (`main@{2026-11-18T20:10:37-03:00}: merge isolamento-env: Fast-forward`). Transcrição da sessão `4a6117d2`: às 19:16:42, `git status --short -- .` sem modificação rastreada; às 19:16:50, `ORACLE_SANDBOX no shell: 0`, `git log -1` = `8810b6e` e pytest com resultado às 19:22:29: **269 passed, 16 skipped** (os 16 skips com o motivo padrão). Antes, o `verificador` obteve 269/16 às 19:14:15 no working tree `ede678a` + testes do passo 4 (`docs/entregas/isolamento_env/fase4/verificacao_passo4.md:11`). Sem Edit nem Write na sessão entre 19:16:42 e o FF; o FF foi comando do responsável às 20:10:29. O FF não cria árvore: a integrada é a testada. Os itens 1–3 aparecem pela primeira vez às 20:48:42 e foram respondidos pela F11 às 21:51–21:54, depois do FF. A execução em `8810b6e` só consta da transcrição (sem arquivo em `docs/entregas/`).
 
 ## 2. Base
 
-`main` = `8810b6e`; tag `pre-merge-isolamento` → `19f19f2`. Último pytest: 269 passed, 16 skipped em `8810b6e` (antes do merge; árvore idêntica). Sem push.
+`main` = `8810b6e`; tag `pre-merge-isolamento` → `19f19f2`. Último pytest antes do merge: 269 passed, 16 skipped em `8810b6e` (19:16:50–19:22:29; FF às 20:10:37), COMPROVADO (F13). Sem push.
 
 ## 3. Arquivos por passo (todos pela sessão principal, claude-opus-5-5; sem subagente que escreva)
 
@@ -39,7 +40,8 @@ Fatos levantados (só leitura):
 | 4 | T1 | `tests/test_carga_env_entrada.py` | `test:` |
 | 5 | T2 | `tests/test_carga_env_entrada.py` | `test:` |
 | 6 | Suíte | nenhum (saídas em `docs/entregas/registro_pos_merge/`, não rastreado) | — |
-| 7 | P2 | `docs/GOVERNANCA_LOG.md`, `docs/PROCESSO.md` §7 (L21) | `docs:` (bloqueado) |
+| 6b | S1 | `tests/test_carga_env_entrada.py` (2 linhas em branco antes do decorador do T2, PEP 8) | `style:` |
+| 7 | P2 | `docs/GOVERNANCA_LOG.md`, `docs/PROCESSO.md` §7 (L21 a L23), `docs/plans/registro_pos_merge.md` (sincronizado por hash) | `docs:` (PARE antes do commit) |
 
 `CLAUDE.md`, `.gitignore` e os testes não são produção do §2; `app.py`, `src/main.py`, `conftest.py` e `db/` não são tocados. Testes da área "Pontos de entrada" escritos pela sessão principal (Opus).
 
@@ -76,14 +78,17 @@ Fatos levantados (só leitura):
 
 **Suíte (após o T2).** `verificador` (Haiku), PROCESSO §5 passos 0 a 3, sem `ORACLE_SANDBOX`. Esperado: **272 passed (269 + 1 do T1 + 2 do T2), 16 skipped**, todo skip com o motivo padrão; skipped abaixo de 16: parar e avisar, sem rodar de novo. G7: `git diff --stat 8810b6e -- registry/ db/` vazio. Contagem registrada no P2.
 
-**P2 — Aceite da fase 4 e registro (BLOQUEADO).** Não executar sem liberação do responsável. Rascunho:
+**S1 — Estilo do T2** (aprovado em 2026-11-18). Só `tests/test_carga_env_entrada.py`: a linha em branco que faltava antes do decorador do T2. Prova de ausência de `ORACLE_SANDBOX` antes; só o arquivo afetado: 38 passed. Commit `3ca8f98`.
+
+**P2 — Aceite da fase 4 e registro** (aprovado em 2026-11-18; executar até o `git add` e PARAR antes do commit, mostrando o `git diff --cached`). Requisitos do responsável: cópia do plano sincronizada (hash); log com T1/T2/S1, suíte 272/16/0 com a prova de ausência, controles negativos (1 linha cada) e o caminho `docs/entregas/registro_pos_merge/` (não rastreado); risco aberto vinculado ao R-F2-2 com status "cobertura a confirmar pelo responsável"; linha antiga do I3 (`:122`) preservada, a nova a complementa. Conteúdo:
 - Linha de **aceite da fase 4** (`216a6fd`, `f5692f0`, `ede678a`, `b293706`, `8810b6e`), sem reescrever linhas existentes.
-- Linha de **desvio: merge antes das verificações** (fast-forward `19f19f2 → 8810b6e` sem pytest pós-merge e antes do aceite; tag `pre-merge-isolamento`).
+- Linha de **desvio: merge antes das 3 verificações do aceite condicional e antes do registro do aceite; árvore integrada idêntica à testada (FF)** (texto do responsável, com a evidência da F13). Sequência correta: verificações do aceite → registro do aceite → merge → pytest pós-merge. Tag `pre-merge-isolamento`.
 - **Decisões P1/P2 da fase 4**, com data; comportamento de F11.1 (valor do shell preservado com `.env` ausente) como esperado por desenho.
-- **T1 e T2:** commits, asserções novas, "nenhuma asserção removida ou enfraquecida", controles negativos e resultados.
+- **T1 e T2:** commits, asserções novas, "nenhuma asserção removida ou enfraquecida", controles negativos e resultados. Executados em 2026-11-18: T1 `e692788` (controle: 1 caractere no bloco de `src/main.py` → FALHA; marcador `<<<` removido de `app.py` → FALHA); T2 `66a15d7` (controle: descarte sem a condição `_sandbox_do_shell` em `app.py` e `src/main.py` → as 2 variantes FALHAM em `tests/test_carga_env_entrada.py:627`). Saídas em `docs/entregas/registro_pos_merge/`. A linha em branco que faltava antes do decorador do T2 foi corrigida no S1.
+- **Risco aberto (acréscimo do responsável):** o valor de `ORACLE_SANDBOX` presente no ambiente antes da carga prevalece (`app.py:90`, `:99`; `src/main.py:75`, `:84`; agora coberto pelo T2), e o portão dos testes `tests/conftest.py:187` depende só do ambiente do processo (`os.getenv("ORACLE_SANDBOX") != "1"`). Nada distingue "definida pelo operador no shell" de "injetada no ambiente por outra via antes do processo" (ex.: `python.envFile` do VS Code, residual **R-F2-2**, L5; perfil do Windows, L6). Vinculado ao R-F2-2; **cobertura a confirmar pelo responsável** (hoje: regra de rodar pytest só pelo terminal com `env -u ORACLE_SANDBOX` e o passo 0 do PROCESSO §5).
 - **Resultado da suíte** (passed/skipped contra 269/16).
-- **I3 detalhado** (substitui o texto de `GOVERNANCA_LOG.md:122` por linha nova, sem apagar a antiga): 7 pontos de chamada, versões, "só lê" COMPROVADO, momento = 1ª busca RAG (CORRELAÇÃO), import via langchain = HIPÓTESE.
-- **L21 (rascunho):** "Merge antes da verificação (2026-11-18; pós-fase 4). → Verificação no commit a integrar, registro do aceite, merge, pytest pós-merge. → `main` à frente sem linha de aceite no GOVERNANCA_LOG."
+- **I3 detalhado** (linha nova que complementa a de `GOVERNANCA_LOG.md:122`, preservada): 7 pontos de chamada, versões, "só lê" COMPROVADO, momento = 1ª busca RAG (CORRELAÇÃO), import via langchain = HIPÓTESE.
+- **L21:** merge antes das verificações do aceite condicional e do registro do aceite (árvore integrada = testada, F13). **L22:** caminho de falha da carga testado sem a variável do operador (T2). **L23:** promessa de igualdade só em comentário (T1).
 
 **Fora de commit (depois do aceite deste plano executado, com autorização explícita):**
 1. `git tag ref/item1-v1-nao-aceito stash@{0}` → conferir = `8fd6678`; então `git stash drop stash@{0}`.
@@ -95,9 +100,9 @@ Fatos levantados (só leitura):
 
 Aprovadas (2026-11-18): P2 pendente; `CLAUDE.md` literal + registro; execução de P0, P1 e P3 nesta ordem; cópia do plano no P1; D1 (ordem cronológica no log); D2 (divergência só registrada, precedência do §3 no `CLAUDE.md`, reconciliação pendente); D3 = tag `ref/docs-protocolo-27d135d`; reutilização via SendMessage = FATO; `*.sqlbkp` no `.gitignore` do projeto; T1 e T2 após P3 e antes de P2.
 
-Pendentes:
-- **D4.** Aprovar T1 e T2 como descritos (arquivo, asserções, controles).
-- **D5.** Confirmar se a investigação F11 substitui os "itens 1–3" do P2.
+Aprovadas depois (2026-11-18): **D4** = sim (T1 e T2 como descritos); **D5** = sim (F11 substitui os itens 1–3); acréscimo (a): prova de ausência de `ORACLE_SANDBOX` antes do pytest da suíte; acréscimo (b): risco aberto no P2, vinculado ao R-F2-2; S1; P2 até o `git add`, PARE antes do commit. Em seguida: aceite da fase 4 confirmado pelo responsável ("Fase 4 aceita pelo responsável em 2026-11-18."); risco aberto mantido, não bloqueante; desvio e L21 corrigidos conforme F13; commit do P2 autorizado, sem push.
+
+Pendentes: fora de commit (stash e branches); cobertura do risco aberto (R-F2-2), não bloqueante.
 
 ## 6. Verificação
 
