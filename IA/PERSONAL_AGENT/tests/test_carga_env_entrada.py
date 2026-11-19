@@ -684,3 +684,30 @@ def test_f4h_interrupcao_fica_fail_closed(tmp_path):
     assert dados["sentinela_fase3"] == "AUSENTE", resumo
     assert dados["leituras_efetivas_por_run"] == [1, 0], resumo
     assert dados["leituras_reais"] == []
+
+
+_MARCA_INICIO = b"# >>> carga-env"
+_MARCA_FIM = b"# <<< carga-env"
+
+
+def _bloco_carga_env(caminho):
+    """Bytes do bloco carga-env, marcadores incluídos. Exige exatamente um par, na ordem, com conteúdo."""
+    linhas = caminho.read_bytes().splitlines(keepends=True)
+    inicios = [i for i, linha in enumerate(linhas) if linha.startswith(_MARCA_INICIO)]
+    fins = [i for i, linha in enumerate(linhas) if linha.startswith(_MARCA_FIM)]
+    assert len(inicios) == 1 and len(fins) == 1, f"{caminho.name}: marcadores >>> {len(inicios)}, <<< {len(fins)}"
+    assert inicios[0] + 1 < fins[0], f"{caminho.name}: bloco carga-env vazio ou fora de ordem"
+    return b"".join(linhas[inicios[0]:fins[0] + 1])
+
+
+def test_t1_bloco_carga_env_identico_nas_entradas():
+    """T1 (registro_pos_merge): o bloco carga-env é idêntico, byte a byte (fim de linha incluído), em app.py e
+    src/main.py, como o comentário do próprio bloco afirma. Só lê os dois arquivos: sem subprocesso, sem .env e
+    sem ORACLE_SANDBOX."""
+    bloco_app = _bloco_carga_env(RAIZ / "app.py")
+    bloco_main = _bloco_carga_env(RAIZ / "src" / "main.py")
+    if bloco_app != bloco_main:
+        a, m = bloco_app.splitlines(keepends=True), bloco_main.splitlines(keepends=True)
+        i = next((k for k, (x, y) in enumerate(zip(a, m)) if x != y), min(len(a), len(m)))
+        pytest.fail(f"bloco carga-env divergente: primeira diferença na linha {i + 1} do bloco "
+                    f"(app.py {len(a)} linhas, src/main.py {len(m)} linhas)")
