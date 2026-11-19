@@ -159,7 +159,7 @@ git grep -n -E 'ORACLE_USER\b' -- 'src/*.py' app.py 'tools/*.py'                
 git grep -n -i -E 'alter[[:space:]]+(system|session)' -- '*.py'                  # SQL de sessão no Python
 git grep -n 'override=True' -- 'src/*.py' app.py 'tools/*.py'                    # recarga do .env
 git grep -n -E 'load_dotenv\(' -- 'src/*.py' app.py                              # 2 linhas: app.py e src/main.py, override=False
-git grep -n -E "setenv\(['\"]ORACLE_SANDBOX['\"], *['\"]1|environ\[['\"]ORACLE_SANDBOX['\"]\] *= *['\"]1" -- 'tests/*.py'   # teste que liga o sandbox
+git grep -n -E "setenv\(['\"]ORACLE_SANDBOX['\"], *['\"]1|environ\[['\"]ORACLE_SANDBOX['\"]\] *= *['\"]1" -- '*.py'         # código que liga o sandbox
 git grep -n -i -E '(print|logger\.\w+)\(.*(passw|senha|pwd|secret|token|api_key)' -- '*.py'                                  # credencial em print ou log
 git diff --stat <base> -- registry/ db/                                          # vazio, salvo plano com "PENDENTE APROVAÇÃO"
 git ls-files | grep -E '(^|/)\.env$'                                             # .env versionado

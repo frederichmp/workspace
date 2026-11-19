@@ -53,9 +53,9 @@ GREPS = (
     ("3.1", "conta Oracle legada", ["-n", "-E", "ORACLE_" "USER\\b", "--", "src/*.py", "app.py", "tools/*.py"]),
     ("3.2", "SQL de sessão no Python", ["-n", "-i", "-E", "alter" "[[:space:]]+(system|session)", "--", "*.py"]),
     ("3.3", "recarga do .env", ["-n", "override" "=True", "--", "src/*.py", "app.py", "tools/*.py"]),
-    ("3.5", "teste que liga o sandbox",
+    ("3.5", "código que liga o sandbox",
      ["-n", "-E", "setenv\\(['\"]ORACLE_SANDBOX['\"], *['\"]1|environ\\[['\"]ORACLE_SANDBOX['\"]\\] *= *['\"]1",
-      "--", "tests/*.py"]),
+      "--", "*.py"]),
     ("3.6", "credencial em print ou log",
      ["-n", "-i", "-E", "(print|logger\\.\\w+)\\(.*(passw|senha|pwd|secret|token|api_key)", "--", "*.py"]),
 )
