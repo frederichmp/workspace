@@ -262,15 +262,39 @@ def _ler_perfil():
     return interpretar_perfil(r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace"))
 
 
+def _matar_arvore(pid, run=subprocess.run, windows=None):
+    """No Windows, o kill do subprocess mata só o processo de cima e a espera segue até o fim dos filhos;
+    taskkill /T leva a árvore inteira (medido em 2026-11-19: um estouro de 560 s esperou 43 min)."""
+    if (os.name == "nt") if windows is None else windows:
+        run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=30)
+    else:
+        try:
+            os.killpg(os.getpgid(pid), 9)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def _executar(cmd, cwd, env, timeout, popen=subprocess.Popen):
+    """(código, saída). No estouro do tempo, mata a árvore de processos e devolve (None, saída parcial)."""
+    p = popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+              start_new_session=(os.name != "nt"))
+    try:
+        saida, _ = p.communicate(timeout=timeout)
+        return p.returncode, saida.decode("utf-8", "replace")
+    except subprocess.TimeoutExpired:
+        _matar_arvore(p.pid)
+        try:
+            saida, _ = p.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            saida = b""
+        return None, (saida or b"").decode("utf-8", "replace")
+
+
 def _rodar_pytest():
     env = {k: v for k, v in os.environ.items() if k.upper() != "ORACLE_SANDBOX"}
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    try:
-        r = subprocess.run([sys.executable, *ARGS_PYTEST], cwd=RAIZ, env=env, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, timeout=TIMEOUT_PYTEST)
-    except subprocess.TimeoutExpired as e:
-        return None, (e.output or b"").decode("utf-8", "replace")
-    return r.returncode, r.stdout.decode("utf-8", "replace")
+    return _executar([sys.executable, *ARGS_PYTEST], RAIZ, env, TIMEOUT_PYTEST)
 
 
 def _local(linha):

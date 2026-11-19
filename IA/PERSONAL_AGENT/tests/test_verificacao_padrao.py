@@ -366,6 +366,36 @@ def test_main_nao_sobrescreve_saida(fakes, tmp_path):
     assert (tmp_path / "docs" / "entregas" / "t1" / "padrao.md").read_text(encoding="utf-8") == "anterior"
 
 
+class _PopenQueEstoura:
+    pid = 4242
+    returncode = None
+
+    def __init__(self, *args, **kwargs):
+        self.chamadas = 0
+
+    def communicate(self, timeout=None):
+        self.chamadas += 1
+        if self.chamadas == 1:
+            raise vp.subprocess.TimeoutExpired("cmd", timeout)
+        return b"parcial", None
+
+    def kill(self):
+        pass
+
+
+def test_estouro_de_tempo_mata_a_arvore_de_processos(monkeypatch):
+    mortos = []
+    monkeypatch.setattr(vp, "_matar_arvore", mortos.append)
+    codigo, saida = vp._executar(["x"], ".", {}, 1, popen=_PopenQueEstoura)
+    assert (codigo, saida, mortos) == (None, "parcial", [4242])
+
+
+def test_matar_arvore_usa_taskkill_com_a_arvore():
+    chamadas = []
+    vp._matar_arvore(4242, run=lambda argv, **kw: chamadas.append(argv), windows=True)
+    assert chamadas == [["taskkill", "/F", "/T", "/PID", "4242"]]
+
+
 def test_gravar_nao_sobrescreve(tmp_path):
     alvo = tmp_path / "saida.md"
     alvo.write_text("anterior", encoding="utf-8")
