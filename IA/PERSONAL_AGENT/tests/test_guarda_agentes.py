@@ -463,3 +463,235 @@ def test_main_entrada_invalida_bloqueia(bruto):
 
 def test_main_perfil_invalido_bloqueia():
     assert gs.main(["--perfil", "outro"], entrada="{}") == 2
+
+
+# ---------- R4 e R5 no shell (guarda-r4-r5, decisao.md §5, escopo reduzido) ----------
+
+T = gs.tempfile.gettempdir()
+# Na cópia do controle de mutação a raiz fica dentro da pasta temporária, que então não vale (B58): os testes
+# usam uma pasta fora da raiz.
+if gs.os.path.realpath(str(_RAIZ)).lower().startswith(gs.os.path.realpath(T).lower().rstrip("\\/") + gs.os.sep):
+    T = str(Path(_RAIZ.anchor) / "guarda_temp_teste")
+TL = gs.os.path.realpath(T)
+E = "docs/entregas/t"
+AMB = {"TEMP": T, "TMP": T}
+
+
+def _sh(perfil, comando, ferramenta="Bash", **kw):
+    return gs.decidir(perfil, ferramenta, {"command": comando}, CWD, temp=kw.get("temp", T), ambiente=AMB)
+
+
+SHELL_LIBERADOS = [
+    ("verificador", "Bash", f"echo x > {E}/a.txt"),                                         # L1
+    ("verificador", "Bash", f"cmd >> {E}/a.txt 2>&1"),                                      # L2
+    ("verificador", "Bash", "python -m pytest -q > /dev/null 2>&1"),                        # L3
+    ("verificador", "Bash", "ls >&2"),                                                      # L4
+    ("verificador", "Bash", f"mkdir -p {E}"),                                               # L5
+    ("verificador", "Bash", f"S=\"{T}/sonda\"; mkdir -p \"$S\" && cat > \"$S/x.py\" <<'EOF'\n"
+                            "if a > 0:\n    print(\"it's\")\nEOF"),                         # L6
+    ("verificador", "Bash", f"O={E}/out.txt; git status > $O"),                             # L7
+    ("verificador", "Bash", f"cd \"{CWD}\" && env -u ORACLE_SANDBOX python -m pytest -q > {E}/p.txt 2>&1"),  # L8
+    ("verificador", "Bash", f"cd \"{CWD}\"; python -m pytest -q > {E}/p.txt 2>&1"),         # L8b
+    ("verificador", "Bash", f"rm -rf \"{T}/iso\""),                                         # L9
+    ("verificador", "Bash", f"git diff | tee {E}/d.diff"),                                  # L10
+    ("verificador", "Bash", f"sed -i 's/a/b/' {E}/v.md"),                                   # L11
+    ("verificador", "Bash", f"cd \"{T}\" && echo x > rel.txt"),                             # L12
+    ("verificador", "Bash", "echo \"a > src/x.py\""),                                       # L13
+    ("verificador", "Bash", f"cp src/x.py {E}/"),                                           # L15
+    ("verificador", "Bash", f"echo x > \"{RAIZ_GIT_BASH}/{E}/a.txt\""),                     # L16
+    ("verificador", "Bash", f"echo x > \"{TL}/a.txt\""),                                    # L17
+    ("verificador", "Bash", f"grep -n R5 .claude/agents/x.md > {E}/g.txt"),                 # L31
+    ("verificador", "Bash", f"python -I tools/guarda_agentes.py --perfil mecanico < {E}/e.json"),  # L33
+    ("verificador", "Bash", f"R=\"$(git rev-parse --show-toplevel 2>/dev/null)\"; echo $R > {E}/r.txt"),
+    ("verificador", "Bash", f"{{ echo a; echo b; }} > {E}/a.txt"),
+    ("verificador", "PowerShell", f"Set-Content -Path {E}/a.txt -Value x"),                 # L18
+    ("verificador", "PowerShell", "'x' | Out-File docs\\entregas\\t\\a.txt"),               # L19
+    ("verificador", "PowerShell", "$out = Join-Path $env:TEMP 'sentinela'; "
+                                  "New-Item -ItemType Directory -Force -Path $out"),        # L20
+    ("verificador", "PowerShell", "Remove-Item -LiteralPath \"$env:TEMP\\iso\" -Recurse -Force"),  # L21
+    ("verificador", "PowerShell", "git status *> $null"),                                   # L22
+    ("verificador", "PowerShell", "python x 2>&1 | Out-Null"),                              # L22
+    ("verificador", "PowerShell", "Remove-Item Env:ORACLE_SANDBOX -ErrorAction SilentlyContinue; "
+                                  "$env:PYTHONDONTWRITEBYTECODE = '1'"),                    # L23
+    ("verificador", "PowerShell", f"$s = @'\nit's\n'@\n$s | Set-Content {E}/a.txt"),        # L24
+    ("verificador", "PowerShell", "Get-Date | Tee-Object -Variable v"),                     # L25
+    ("verificador", "PowerShell", f"<# comentario #> Set-Content {E}/a.txt x"),
+    ("seguranca", "Bash", f"git diff > \"{T}/x.diff\""),                                    # L26
+    ("seguranca", "Bash", f"echo x > {E}/decisao_y.md"),                                    # L27
+    ("seguranca", "Bash", f"mkdir -p {E}"),                                                 # L28
+    ("seguranca", "Bash", f"cp tools/guarda_agentes.py \"{T}/g.py\""),                      # L34
+    ("mecanico", "Bash", "echo x > src/x.py"),                                              # L29
+    ("mecanico", "Bash", "cp a.py tools/b.py"),                                             # L30
+    ("mecanico", "Bash", f"cp .claude/agents/x.md {E}/"),                                   # L35
+    ("mecanico", "Bash", "X=$(printf a); echo x > \"$X/y.txt\""),                           # N6, residual aceito
+    # Regras de segmento e de cd (não regressão: formas reais do verificador, levantamento.md e nao_regressao.md).
+    ("verificador", "Bash", f"cd \"{CWD}\" && mkdir -p {E} && O={E} && {{ echo a; git status; }} > $O/01.txt 2>&1"),
+    ("verificador", "Bash", f"P=\"{CWD}\"; cd \"$P\" && OUT=\"$P/{E}/v.txt\" && {{\necho a\n}} > \"$OUT\""),
+    ("verificador", "Bash", f"diff <(sed -n 1p a.txt) <(sed -n 1p b.txt) > {E}/d.txt"),
+    ("verificador", "Bash", f"bash -c \"echo x > {E}/a.txt\""),
+    ("verificador", "Bash", "powershell -NoProfile -Command \"Test-Path 'C:\\AgentDBA'\""),
+    ("verificador", "PowerShell", f"Set-Location -LiteralPath '{CWD}'\n$out = '{E}/p.txt'\n"
+                                  f"python -m pytest 2>&1 | Out-File -FilePath $out -Encoding utf8"),
+    ("verificador", "PowerShell", "\"n: $((@($(@((Get-Item 'HKCU:\\Environment').Property)))).Count)\""),
+]
+
+
+@pytest.mark.parametrize("perfil, ferramenta, comando", SHELL_LIBERADOS)
+def test_shell_liberado(perfil, ferramenta, comando):
+    assert _sh(perfil, comando, ferramenta) == (False, "")
+
+
+SHELL_R4 = [
+    ("Bash", "echo x > src/x.py"),                                       # B1
+    ("Bash", "echo x>src/x.py"),                                         # B2
+    ("Bash", ">src/x.py echo x"),                                        # B3
+    ("Bash", "echo x > s\"r\"c/x.py"),                                   # B4
+    ("Bash", "echo x | tee -a src/x.py"),                                # B5
+    ("Bash", f"cp {E}/a src/x.py"),                                      # B6
+    ("Bash", f"mv src/x.py {E}/"),                                       # B7
+    ("Bash", "rm -f app.py"),                                            # B8
+    ("Bash", "touch x.txt"),                                             # B9
+    ("Bash", "sed -i 's/a/b/' src/x.py"),                                # B10
+    ("Bash", "dd if=/dev/zero of=src/x.py"),                             # B11
+    ("Bash", "truncate -s 0 src/x.py"),                                  # B12
+    ("Bash", f"echo x > {E}/$X"),                                        # B13
+    ("Bash", "echo x > docs/entregas/../src/x.py"),                      # B14
+    ("Bash", f"cd {E}/nao_existe; echo x > app.py"),                     # B15
+    ("Bash", f"S=src; false && S={E}; echo x > $S/a"),                   # B16
+    ("Bash", f"(S={E}); echo x > $S/a"),                                 # B17
+    ("Bash", "cd \"$X\" && echo x > a.txt"),                             # B18
+    ("Bash", f"cat > {E}/a.md <<'EOF'\nx'\nEOF\necho y > src/x.py\ncat > {E}/b.md <<'EOF'\n'\nEOF"),  # B19
+    ("Bash", "echo \"<<EOF\"\necho y > src/x.py\nEOF"),                  # B20
+    ("Bash", "bash -c \"echo x > src/x.py\""),                           # B21
+    ("Bash", "sh -c 'echo x > src/x.py'"),                               # B22
+    ("Bash", "cmd /c \"echo x > src\\x.py\""),                           # B23
+    ("Bash", "powershell -NoProfile -Command \"Set-Content src/x.py x\""),  # B24
+    ("Bash", "pwsh -EncodedCommand ZQBjAGgAbwA="),                       # B25
+    ("Bash", "eval \"echo x > src/x.py\""),                              # B26
+    ("Bash", "echo x > >(cat > src/x.py)"),                              # B27
+    ("Bash", "echo 'x > src/x.py"),                                      # B28
+    ("Bash", f"find {E} -name '*.tmp' | xargs rm"),                      # B29
+    ("Bash", "find src -name '*.pyc' -delete"),                          # B30
+    ("Bash", f"ln -s \"{CWD}/src\" {E}/l"),                              # B31
+    ("Bash", "echo x > \"$HOME/x\""),                                    # B33
+    ("Bash", "echo x > ~/x"),                                            # B33
+    ("Bash", "{ echo x; } > src/x.py"),                                  # B34
+    ("Bash", "echo x > /tmp/x"),                                         # B35 (falso positivo documentado)
+    ("Bash", f"(cd src && echo x > a.py); echo y > {E}/a.txt"),
+    ("Bash", f"echo $(echo x > src/x.py) > {E}/a.txt"),
+    ("PowerShell", "Set-Content src/x.py x"),                            # B36
+    ("PowerShell", "Set-Content -Value x src/x.py"),                     # B37
+    ("PowerShell", "Set-Content -Path:src/x.py -Value x"),               # B38
+    ("PowerShell", "'x' | Out-File -FilePath src\\x.py"),                # B39
+    ("PowerShell", "Add-Content -LiteralPath src/x.py x"),               # B40
+    ("PowerShell", "Set-Content -Force src/x.py x"),                     # B40
+    ("PowerShell", "New-Item -Path src -Name x.py -ItemType File"),      # B41
+    ("PowerShell", f"Copy-Item {E}/a src/x.py"),                         # B42
+    ("PowerShell", f"Move-Item src/x.py {E}/"),                          # B43
+    ("PowerShell", f"Remove-Item {E}/a,src/x.py"),                       # B44
+    ("PowerShell", "Rename-Item src/x.py y.py"),                         # B45
+    ("PowerShell", "ni src/x.py"), ("PowerShell", "del src/x.py"), ("PowerShell", "sc src/x.py x"),     # B46
+    ("PowerShell", "ac src/x.py x"), ("PowerShell", "cpi a src/x.py"), ("PowerShell", "mi src/x.py b"),
+    ("PowerShell", "ri src/x.py"), ("PowerShell", "'x' | tee src/x.py"), ("PowerShell", "rni src/x.py y"),
+    ("PowerShell", "clc src/x.py"),
+    ("PowerShell", "[IO.File]::WriteAllText('src/x.py','x')"),           # B47
+    ("PowerShell", "echo x > src\\x.py"),                                # B48
+    ("PowerShell", "Set-Content docs/entregas/t\\..\\..\\..\\src\\x.py x"),  # B49
+    ("PowerShell", "Write-Output a\\\nSet-Content src/x.py x"),          # B50
+    ("PowerShell", f"$p = '{E}'; $P = 'src'; Set-Content \"$p/x.py\" x"),  # B51
+    ("PowerShell", "Set-Alias w Set-Content; w src/x.py x"),             # B52
+    ("PowerShell", f"@\"\n$(Set-Content src/x.py x)\n\"@ | Out-File {E}/a.txt"),  # B54
+    ("PowerShell", f"Get-ChildItem {E} | Remove-Item"),                  # B55 (falso positivo por desenho)
+    ("PowerShell", "Start-Process python -RedirectStandardOutput src/x.txt"),  # B56
+    ("PowerShell", "<# x\n#> Set-Content src/x.py x"),
+    ("PowerShell", "Set-Content HKCU:\\Software\\x x"),
+    ("PowerShell", f"$a = @(1); Set-Content @a"),
+    # Segmento e cd condicional.
+    ("Bash", f"false && cd docs/entregas; echo x > t/a"),                # cd pulado: o destino real é <raiz>/t/a
+    ("Bash", f"X=$(false) && Y={E}; echo x > $Y/a"),                     # atribuição com $( ) pode falhar
+    ("Bash", f"mkdir -p {E} && O={E}; echo x > $O/a"),                   # condicional usada em outro segmento
+    ("Bash", f"O={E}; for O in src; do echo x > $O/a; done"),            # palavra-chave e for O
+    ("Bash", f"O={E}; read O; echo x > $O/a"),                           # palavra solta
+    ("Bash", f"if true; then O={E}; fi; echo x > $O/a"),
+    ("Bash", f"O=src; if c; then\nO={E}\nfi\necho x > $O/a"),           # palavra-chave encerra as atribuições
+    ("PowerShell", f"$o = '{E}'; foreach ($o in @('src')) {{ Set-Content \"$o/x.py\" x }}"),
+    ("Bash", "pwsh -Command \"Set-Content src/x.py x\""),
+    ("Bash", "bash -c \"$X\""),
+]
+
+
+@pytest.mark.parametrize("perfil", ("verificador", "seguranca"))
+@pytest.mark.parametrize("ferramenta, comando", SHELL_R4)
+def test_shell_r4_bloqueado(perfil, ferramenta, comando):
+    bloqueia, motivo = _sh(perfil, comando, ferramenta)
+    assert bloqueia and "(R4," in motivo and "PARE" in motivo
+
+
+def test_shell_r4_seguranca_so_grava_decisao_e_conferencia():  # B57
+    bloqueia, motivo = _sh("seguranca", f"echo x > {E}/notas.md")
+    assert bloqueia and "(R4," in motivo
+    assert _sh("verificador", f"echo x > {E}/notas.md") == (False, "")
+
+
+def test_shell_r4_temp_que_se_sobrepoe_a_raiz_nao_vale():  # B58
+    assert _sh("verificador", "echo x > src/x.py", temp=CWD)[0]
+    assert _sh("verificador", f"echo x > \"{CWD}/src/x.py\"", temp=str(_RAIZ.parent))[0]
+
+
+SHELL_R5 = [
+    ("Bash", "echo x > .claude/settings.local.json"),                    # F14
+    ("Bash", "sed -i s/a/b/ .claude/agents/mecanico.md"),                # F15
+    ("Bash", "cp \"$S/g.py\" tools/guarda_agentes.py"),                  # F16
+    ("Bash", "cp \"$S/guarda_agentes.py\" tools/"),                      # F17
+    ("Bash", f"mv .claude/settings.local.json \"{T}/x\""),               # F18
+    ("Bash", "rm -rf .claude"),                                          # F19
+    ("Bash", "rm -rf tools"),                                            # F20
+    ("Bash", "rm -rf ."), ("Bash", f"rm -rf \"{CWD}\""),                 # F21
+    ("Bash", f"cp -r \"{T}/evil/.\" ."),                                 # F22
+    ("Bash", "echo x > \"$X/.claude/settings.json\""),                   # F23
+    ("Bash", f"ln tools/guarda_agentes.py \"{T}/g.py\""),                # F24
+    ("PowerShell", f"New-Item -ItemType HardLink -Path \"{T}\\g.py\" -Target tools\\guarda_agentes.py"),  # F25
+    ("PowerShell", "Set-Content ‘tools/guarda_agentes.py’ x"),  # F26
+    ("PowerShell", f"Set-Content \"{CWD}\\tools\\guarda_agentes.py\" x"),  # F27 (\ não é escape no PowerShell)
+    ("Bash", "bash -c \"echo x > .claude/settings.json\""),              # F28
+    ("Bash", "cmd /c \"copy x .claude\\settings.json\""),                # F29
+    ("Bash", "cd .claude && echo {} > settings.local.json"),             # F30
+    ("Bash", "cd tools; echo x > guarda_agentes.py"),                    # F31
+    ("Bash", "echo x > ~/.claude/settings.json"),                        # F32
+    ("Bash", f"tar -xf \"{T}/a.tar\""),                                  # F33
+    ("PowerShell", f"Expand-Archive \"{T}\\a.zip\" -DestinationPath ."),  # F34
+    ("Bash", "rm tools/*.py"),                                           # F35
+    ("Bash", "rm .cl*/agents/x.md"),                                     # F36
+    ("Bash", "echo x > \"$(echo .claude)/settings.json\""),              # F37
+    ("Bash", f"echo x > \"{_PREFIXO_PY}/Lib/site-packages/x.pth\""),     # N8
+    ("PowerShell", f"Copy-Item \"{T}\\s.py\" \"{_PREFIXO_PY}\\Lib\\site-packages\\sitecustomize.py\""),  # N8
+    ("PowerShell", "Copy-Item \"$S\\guarda_agentes.py\" tools\\"),     # dest/basename(fonte) no Copy-Item
+]
+
+
+@pytest.mark.parametrize("perfil", gs.PERFIS)
+@pytest.mark.parametrize("ferramenta, comando", SHELL_R5)
+def test_shell_r5_bloqueado(perfil, ferramenta, comando):
+    bloqueia, motivo = _sh(perfil, comando, ferramenta)
+    assert bloqueia and "(R5," in motivo and "PARE" in motivo
+
+
+@pytest.mark.parametrize("ferramenta, comando", [
+    ("Bash", "printf a\\\ngit status"),
+    ("PowerShell", "$x = 'a'\n# comentário com 'aspas'\nSet-Content src/x.py x"),
+])
+def test_shell_r4_comentario_e_continuacao_nao_escondem_comando(ferramenta, comando):
+    bloqueia, motivo = _sh("verificador", comando, ferramenta)
+    assert ("(R4," in motivo) is ("Set-Content" in comando)
+
+
+def test_analisar_gravacao_resolve_variavel_e_cd():
+    destinos, falha = gs.analisar_gravacao(f"O={E}/o.txt; cd src && echo x > $O", "bash", CWD)
+    assert not falha
+    assert [sorted(d["valores"]) for d in destinos] == [[gs._abs(f"src/{E}/o.txt", CWD)]]
+    # cd que pode falhar (pasta inexistente) seguido de ;: o destino vale nos dois diretórios.
+    destinos, _ = gs.analisar_gravacao("cd nao_existe; echo x > a", "bash", CWD)
+    assert sorted(destinos[0]["valores"]) == sorted({gs._abs("a", CWD), gs._abs("nao_existe/a", CWD)})
+    # cd para pasta que existe, no prefixo: não falha e não encerra o prefixo de atribuições.
+    destinos, falha = gs.analisar_gravacao(f"cd \"{CWD}\" && O={E}/o.txt\ngit status > $O", "bash", CWD)
+    assert not falha and sorted(destinos[0]["valores"]) == [gs._abs(f"{E}/o.txt", CWD)]
