@@ -89,6 +89,11 @@ def e_env(caminho):
     return bool(NOME_ENV.match(nome)) and nome.lower() != ".env.example"
 
 
+def e_documentacao(caminho):
+    """Documentação (.md, .txt) pode citar código que liga o sandbox; o R3 não vale para ela."""
+    return _nome(caminho).lower().endswith((".md", ".txt"))
+
+
 def glob_cobre_env(padrao):
     if not padrao:
         return False
@@ -328,9 +333,10 @@ def decidir(perfil, ferramenta, entrada, cwd, raiz=None):
     if ferramenta in ("Write", "Edit"):
         caminho = str(entrada.get("file_path", ""))
         texto = str(entrada.get("content", "")) if ferramenta == "Write" else texto_depois_do_edit(caminho, entrada, cwd)
-        if dentro_de(caminho, raiz / "tests", cwd) and liga_sandbox_teste(texto):
-            return bloqueio("R3", f"{ferramenta} em teste com ORACLE_SANDBOX=1 (forma do grep 3.5)",
-                            "Teste nunca define ORACLE_SANDBOX=1 no processo (só \"0\" ou ausente).")
+        if not e_documentacao(caminho) and liga_sandbox_teste(texto):
+            return bloqueio("R3", f"{ferramenta} com ORACLE_SANDBOX=1 (forma do grep 3.5) em {caminho}",
+                            "Código nunca define ORACLE_SANDBOX=1 no processo (só \"0\" ou ausente); só a "
+                            "documentação (.md, .txt) pode citar.")
         if perfil in ("verificador", "seguranca"):
             if not dentro_de(caminho, raiz / "docs" / "entregas", cwd):
                 return bloqueio("R4", f"{ferramenta} em {caminho}", f"O {perfil} só grava em docs/entregas/<tarefa>/.")

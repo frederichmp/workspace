@@ -264,6 +264,21 @@ def test_edit_que_troca_0_por_1_com_contexto_e_bloqueado(tmp_path):
     assert bloqueia and "(R3," in motivo
 
 
+@pytest.mark.parametrize("caminho, conteudo, bloqueia", [
+    ("src/conftest.py", ENV1, True),
+    ("tools/x.py", SET1, True),
+    ("C:/Users/x/scratch/sonda.py", SET1, True),
+    ("docs/x.md", SET1, False),
+    ("docs/notas.txt", ENV1, False),
+    ("tests/test_x.py", '_rodar(e, t, "ORACLE_SANDBOX=1\\n")\n', False),
+])
+def test_r3_vale_em_todo_codigo_salvo_documentacao(caminho, conteudo, bloqueia):
+    resultado = gs.decidir("mecanico", "Write", {"file_path": caminho, "content": conteudo}, CWD)
+    assert resultado[0] is bloqueia
+    if bloqueia:
+        assert "(R3," in resultado[1]
+
+
 def test_env_ficticio_com_sandbox_1_em_teste_e_permitido():
     conteudo = '_rodar(entrada, tmp, "ORACLE_SANDBOX=1\\n")\n'
     assert gs.decidir("mecanico", "Write", {"file_path": "tests/test_x.py", "content": conteudo}, CWD) == (False, "")
