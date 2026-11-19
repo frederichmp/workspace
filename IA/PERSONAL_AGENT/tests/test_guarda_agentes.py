@@ -333,6 +333,112 @@ def test_onde_cada_perfil_grava(perfil, caminho, bloqueia):
         assert "(R4," in resultado[1]
 
 
+# ---------- R5: fiação do guarda (guarda-r4-r5, decisao.md §3) ----------
+
+_PREFIXO_PY = Path(gs.sys.prefix)
+_WORKSPACE = str(_RAIZ.parent.parent)
+CAMINHOS_FIACAO = [
+    ".claude/agents/x.md",                                        # F1
+    ".claude/settings.json",                                      # F2
+    str(_RAIZ / ".claude" / "settings.local.json"),               # F5
+    RAIZ_GIT_BASH + "/.claude/x",                                 # F6
+    ".CLAUDE/Settings.json",                                      # F8
+    ".claude./x.md",
+    "tools/guarda_agentes.py",                                    # F4
+    "tools/guarda_agentes.py.",                                   # F9
+    "tools/guarda_agentes.py::$DATA",                             # F9
+    "\\\\?\\" + str(_RAIZ / "tools" / "guarda_agentes.py"),       # F12
+    str(Path.home() / ".claude" / "settings.json"),               # F10
+    str(_PREFIXO_PY / "Lib" / "site-packages" / "x.pth"),         # N8
+    str(_PREFIXO_PY / "Lib" / "site-packages" / "sitecustomize.py"),
+    "docs/entregas/t/usercustomize.py",
+    "docs/entregas/t/python.bat",
+    str(_PREFIXO_PY / "python.exe"),
+    str(_PREFIXO_PY / "Lib" / "os.py"),
+    "$X/tools/guarda_agentes.py",                                 # caminho não resolvido: vale o nome
+    "C:/outro/venv/Lib/site-packages/x.pth",                      # .pth fora do prefixo do hook
+]
+
+
+@pytest.mark.parametrize("perfil", gs.PERFIS)
+@pytest.mark.parametrize("caminho", CAMINHOS_FIACAO)
+def test_r5_write_na_fiacao_bloqueado_em_todo_perfil(perfil, caminho):
+    bloqueia, motivo = gs.decidir(perfil, "Write", {"file_path": caminho, "content": "x"}, CWD)
+    assert bloqueia and "(R5," in motivo and "PARE" in motivo
+
+
+@pytest.mark.parametrize("perfil", gs.PERFIS)
+def test_r5_edit_do_settings_local_tem_rotulo_r5(perfil):  # F3 e F38
+    entrada = {"file_path": ".claude/settings.local.json", "old_string": "a", "new_string": "b"}
+    bloqueia, motivo = gs.decidir(perfil, "Edit", entrada, CWD)
+    assert bloqueia and "(R5," in motivo
+
+
+def test_r5_com_cwd_no_workspace():  # F7
+    entrada = {"file_path": "IA/PERSONAL_AGENT/.claude/x", "content": "x"}
+    assert "(R5," in gs.decidir("mecanico", "Write", entrada, _WORKSPACE)[1]
+
+
+@pytest.mark.parametrize("perfil", gs.PERFIS)
+@pytest.mark.parametrize("ferramenta, entrada", [
+    ("MultiEdit", {"file_path": ".claude/agents/x.md", "edits": []}),   # F11
+    ("NotebookEdit", {"notebook_path": ".claude/x.ipynb"}),
+    ("NotebookEdit", {"notebook_path": "tools/guarda_agentes.py"}),
+    ("MultiEdit", {"edits": []}),                                       # sem caminho conhecido
+])
+def test_r5_ferramenta_de_escrita_desconhecida(perfil, ferramenta, entrada):
+    bloqueia, motivo = gs.decidir(perfil, ferramenta, entrada, CWD)
+    assert bloqueia and "(R5," in motivo
+
+
+def test_r5_resolve_nome_curto_pelo_resolver():  # F13: o resolver vê o 8.3 que o texto não mostra
+    alvo = str(_RAIZ / "tools" / "guarda_agentes.py")
+
+    def falso(caminho):
+        return alvo if caminho.upper().endswith("ABCDEF~1.PY") else caminho
+
+    assert gs.e_fiacao("tools/ABCDEF~1.PY", CWD, resolver=falso)
+    assert not gs.e_fiacao("tools/ABCDEF~1.PY", CWD, resolver=lambda c: c)
+    assert gs.e_fiacao("tools/GUARDA~1.PY", CWD, resolver=lambda c: c)   # nome curto da fiação, pelo texto
+    assert gs.e_fiacao(".cl*/agents/x.md", CWD, resolver=lambda c: c)    # glob que casa com .claude
+    # Fluxo alternativo sem realpath que o normalize: só o corte do :fluxo revela o nome.
+    assert gs.e_fiacao("docs/entregas/t/guarda_agentes.py::$DATA", CWD, resolver=lambda c: c)
+    assert gs.e_fiacao("docs/entregas/t/sitecustomize.py:x", CWD, resolver=lambda c: c)
+
+
+@pytest.mark.parametrize("perfil", gs.PERFIS)
+@pytest.mark.parametrize("ferramenta, entrada", [
+    ("Read", {"file_path": ".claude/settings.local.json"}),
+    ("Read", {"file_path": "tools/guarda_agentes.py"}),
+    ("Grep", {"pattern": "R5", "path": ".claude"}),
+    ("Glob", {"pattern": ".claude/**"}),
+])
+def test_r5_leitura_da_fiacao_liberada(perfil, ferramenta, entrada):  # L32
+    assert gs.decidir(perfil, ferramenta, entrada, CWD) == (False, "")
+
+
+def test_componentes_normaliza_como_o_windows_abre():
+    # O abspath do Windows já tira ponto e espaço finais (F5); aqui a forma crua, sem ele.
+    assert gs._componentes("\\\\?\\C:\\a\\.Claude. \\x.py::$DATA") == ["c:", "a", ".claude", "x.py"]
+
+
+def test_r4_dentro_de_confere_tambem_o_realpath():  # junção em docs/entregas apontando para fora
+    pasta = _RAIZ / "docs" / "entregas"
+
+    def falso(caminho):
+        return str(_RAIZ / "src" / "x.py") if "juncao" in caminho else caminho
+
+    assert gs.dentro_de("docs/entregas/t/x.md", pasta, CWD, resolver=lambda c: c)
+    assert not gs.dentro_de("docs/entregas/juncao/x.py", pasta, CWD, resolver=falso)
+
+
+@pytest.mark.parametrize("caminho", [
+    "tests/test_guarda_agentes.py", "docs/claude_notas.md", "src/tools/x.py", "docs/entregas/t/python_notas.md",
+])
+def test_r5_nao_pega_o_que_nao_e_fiacao(caminho):
+    assert gs.decidir("mecanico", "Write", {"file_path": caminho, "content": "x"}, CWD) == (False, "")
+
+
 # ---------- main ----------
 
 def _main(perfil, dados):

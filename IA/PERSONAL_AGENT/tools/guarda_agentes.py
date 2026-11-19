@@ -7,7 +7,8 @@ com o motivo no stderr, que o agente recebe e deve devolver como PARE, sem conto
 inválida ou erro interno também saem com 2. No frontmatter, `onFailure: block` e `|| exit 2` cobrem
 falha do próprio hook. Regras do CLAUDE.md: R1 git fora da lista de liberação (só leitura, também
 nas opções e sem configuração injetada); R2 conteúdo do .env; R3 ORACLE_SANDBOX=1; R4 onde o
-verificador e o seguranca gravam. É guarda contra acidente, não sandbox: subprocesso, glob sem
+verificador e o seguranca gravam; R5 nenhum perfil grava na fiação do guarda (.claude/, este arquivo e o
+interpretador do hook), checado antes do R4. É guarda contra acidente, não sandbox: subprocesso, glob sem
 recursão no PowerShell, nome 8.3, link simbólico, archive -o, HOME com .gitconfig próprio, GIT_CONFIG
 antigo e subcomando futuro do reflog ainda contornam (residuais aceitos pelo responsável em 2026-11-19).
 Código de segurança (PROCESSO §2).
@@ -73,6 +74,15 @@ PADROES_SANDBOX_TESTE = (
     re.compile(r"environ\[\s*[\"']ORACLE_SANDBOX[\"']\s*\]\s*=\s*[\"']1", re.IGNORECASE),
 )
 NOME_DECISAO = re.compile(r"^(?:decisao|conferencia)[^/\\]*\.md$", re.IGNORECASE)
+
+# R5, fiação do guarda (guarda-r4-r5, decisões do responsável de 2026-11-19): nenhum perfil grava em .claude/
+# (qualquer um, também o do usuário), em tools/guarda_agentes.py nem no interpretador do hook (N8: o site roda
+# mesmo com -I), nem com autorização literal. Leitura passa.
+NOMES_FIACAO = ("sitecustomize.py", "usercustomize.py")
+RE_INTERPRETADOR = re.compile(r"^(?:python|pythonw|py|pyw)[\w.-]*\.(?:exe|bat|cmd|ps1)$")
+RE_NOME_CURTO_FIACAO = re.compile(r"(?:claude|guarda)~\d", re.IGNORECASE)
+MSG_R5 = ("Nenhum subagente grava na fiação do guarda (.claude/, tools/guarda_agentes.py, interpretador do hook), "
+          "nem com autorização literal; quem grava é a sessão principal (Opus).")
 
 
 # ---------- funções puras (testadas em tests/test_guarda_agentes.py) ----------
@@ -290,9 +300,81 @@ def texto_depois_do_edit(caminho, entrada, cwd):
     return atual.replace(velho, novo) if entrada.get("replace_all") else atual.replace(velho, novo, 1)
 
 
-def dentro_de(caminho, pasta, cwd):
-    base = os.path.normcase(os.path.abspath(pasta))
-    return _abs(caminho, cwd).startswith(base + os.sep)
+def _resolvido(caminho, resolver=os.path.realpath):
+    """realpath (resolve 8.3, junção e symlink existentes); sem resolver, None."""
+    try:
+        return os.path.normcase(resolver(caminho))
+    except (OSError, ValueError):
+        return None
+
+
+def dentro_de(caminho, pasta, cwd, resolver=os.path.realpath):
+    """Estritamente dentro da pasta, pelo caminho e pelo realpath (as duas formas precisam estar dentro)."""
+    base, alvo = os.path.normcase(os.path.abspath(pasta)), _abs(caminho, cwd)
+    if not alvo.startswith(base + os.sep):
+        return False
+    base_r, alvo_r = _resolvido(base, resolver), _resolvido(alvo, resolver)
+    return base_r is not None and alvo_r is not None and alvo_r.startswith(base_r.rstrip(os.sep) + os.sep)
+
+
+def _componentes(caminho):
+    """Componentes como o Windows abre: / no lugar de \\, sem \\\\?\\, sem :fluxo nem ponto ou espaço no fim."""
+    texto = str(caminho).replace("\\", "/")
+    for prefixo in ("//?/", "//./"):
+        if texto.startswith(prefixo):
+            texto = texto[len(prefixo):]
+    partes = []
+    for i, c in enumerate(texto.split("/")):
+        if c in (".", ".."):
+            partes.append(c)
+            continue
+        if not (i == 0 and re.fullmatch(r"[A-Za-z]:", c)):
+            c = c.split(":", 1)[0]
+        c = c.rstrip(" .")
+        if c:
+            partes.append(c.casefold())
+    return partes
+
+
+def _sob(componentes, base):
+    return len(componentes) >= len(base) and componentes[:len(base)] == base
+
+
+def e_fiacao(caminho, cwd, raiz=None, resolver=os.path.realpath, prefixos=None):
+    """R5: o caminho (texto, absoluto ou realpath) é .claude/**, tools/guarda_agentes.py ou o interpretador do hook.
+    Casa por nome (também glob no componente e nome curto) e por pasta."""
+    raiz = Path(raiz or RAIZ)
+    texto = str(caminho)
+    if RE_NOME_CURTO_FIACAO.search(texto):
+        return True
+    formas = [texto]
+    try:
+        absoluto = _abs(texto, cwd)
+        formas.append(absoluto)
+    except (OSError, ValueError):
+        absoluto = None
+    if absoluto:
+        resolvido = _resolvido(absoluto, resolver)
+        if resolvido:
+            formas.append(resolvido)
+    prefixos = prefixos if prefixos is not None else {sys.prefix, sys.base_prefix}
+    bases = [_componentes(os.path.abspath(raiz / ".claude")),
+             _componentes(os.path.abspath(raiz / "tools" / "guarda_agentes.py"))]
+    bases += [_componentes(os.path.abspath(p)) for p in prefixos if p]
+    for forma in formas:
+        comps = _componentes(forma)
+        if not comps:
+            continue
+        if any(fnmatch.fnmatchcase(".claude", c) for c in comps):
+            return True
+        ultimo = comps[-1]
+        if fnmatch.fnmatchcase("guarda_agentes.py", ultimo) or ultimo in NOMES_FIACAO or RE_INTERPRETADOR.match(ultimo):
+            return True
+        if ultimo.endswith(".pth") and "site-packages" in comps:
+            return True
+        if any(_sob(comps, b) for b in bases):
+            return True
+    return False
 
 
 def decidir(perfil, ferramenta, entrada, cwd, raiz=None):
@@ -323,8 +405,15 @@ def decidir(perfil, ferramenta, entrada, cwd, raiz=None):
         return False, ""
 
     if ferramenta not in FERRAMENTAS:
-        if perfil in ("verificador", "seguranca") and re.search(r"Edit|Write", ferramenta):
-            return bloqueio("R4", f"ferramenta de escrita {ferramenta}", f"O {perfil} só grava com Write.")
+        if re.search(r"Edit|Write", ferramenta):
+            caminhos = [str(entrada[k]) for k in ("file_path", "notebook_path", "path") if entrada.get(k)]
+            if not caminhos:
+                return bloqueio("R5", f"ferramenta de escrita {ferramenta} sem caminho conhecido", MSG_R5)
+            for caminho in caminhos:
+                if e_fiacao(caminho, cwd, raiz):
+                    return bloqueio("R5", f"{ferramenta} em {caminho}", MSG_R5)
+            if perfil in ("verificador", "seguranca"):
+                return bloqueio("R4", f"ferramenta de escrita {ferramenta}", f"O {perfil} só grava com Write.")
         return False, ""
 
     if ferramenta in ("Read", "Write", "Edit") and e_env(entrada.get("file_path", "")):
@@ -339,6 +428,8 @@ def decidir(perfil, ferramenta, entrada, cwd, raiz=None):
             return bloqueio("R3", f"{ferramenta} com ORACLE_SANDBOX=1 (forma do grep 3.5) em {caminho}",
                             "Código nunca define ORACLE_SANDBOX=1 no processo (só \"0\" ou ausente); só a "
                             "documentação (.md, .txt) pode citar.")
+        if e_fiacao(caminho, cwd, raiz):
+            return bloqueio("R5", f"{ferramenta} em {caminho}", MSG_R5)
         if perfil in ("verificador", "seguranca"):
             if not dentro_de(caminho, raiz / "docs" / "entregas", cwd):
                 return bloqueio("R4", f"{ferramenta} em {caminho}", f"O {perfil} só grava em docs/entregas/<tarefa>/.")
