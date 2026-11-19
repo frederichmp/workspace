@@ -5,10 +5,12 @@ Guarda dos subagentes do PERSONAL_AGENT: hook PreToolUse declarado no frontmatte
 Lê do stdin o JSON do hook (tool_name, tool_input, cwd) e decide: saída 0 libera; saída 2 bloqueia,
 com o motivo no stderr, que o agente recebe e deve devolver como PARE, sem contornar. Entrada
 inválida ou erro interno também saem com 2. No frontmatter, `onFailure: block` e `|| exit 2` cobrem
-falha do próprio hook. Regras do CLAUDE.md: R1 git que grava; R2 conteúdo do .env; R3
-ORACLE_SANDBOX=1; R4 onde o verificador e o seguranca gravam. É guarda contra acidente, não sandbox:
-subprocesso, alias do git, glob sem recursão no PowerShell, nome 8.3 e link simbólico ainda
-contornam (residuais aceitos em docs/entregas/ajuste-fino-subagentes/). Código de segurança (PROCESSO §2).
+falha do próprio hook. Regras do CLAUDE.md: R1 git fora da lista de liberação (só leitura, também
+nas opções e sem configuração injetada); R2 conteúdo do .env; R3 ORACLE_SANDBOX=1; R4 onde o
+verificador e o seguranca gravam. É guarda contra acidente, não sandbox: subprocesso, glob sem
+recursão no PowerShell, nome 8.3, link simbólico, archive -o, HOME com .gitconfig próprio, GIT_CONFIG
+antigo e subcomando futuro do reflog ainda contornam (residuais aceitos pelo responsável em 2026-11-19).
+Código de segurança (PROCESSO §2).
 
 Uso: python -I "$CLAUDE_PROJECT_DIR/tools/guarda_agentes.py" --perfil <mecanico|seguranca|verificador> || exit 2
 """
@@ -25,21 +27,32 @@ RAIZ = Path(__file__).resolve().parent.parent
 PERFIS = ("mecanico", "seguranca", "verificador")
 FERRAMENTAS = ("Bash", "PowerShell", "Read", "Grep", "Glob", "Write", "Edit")
 
-GIT_QUE_GRAVA = frozenset((
-    "add", "stage", "commit", "push", "pull", "fetch", "clone", "init", "stash", "reset", "checkout", "switch",
-    "restore", "rebase", "merge", "cherry-pick", "revert", "clean", "rm", "mv", "tag", "am", "apply",
-    "worktree", "submodule", "update-ref", "update-index", "read-tree", "write-tree", "commit-tree", "mktree",
-    "mktag", "gc", "prune", "repack", "pack-refs", "maintenance", "notes", "replace", "filter-branch",
-    "filter-repo", "bisect", "sparse-checkout", "fast-import", "bundle", "format-patch", "send-email",
-    "credential", "credential-cache", "credential-store", "lfs", "svn", "p4",
+# R1 por lista de liberação (decisão do responsável, 2026-11-19): só git de leitura passa; o resto, inclusive
+# alias e subcomando desconhecido, é bloqueado. Os de uso real nas transcrições estão todos aqui.
+GIT_LEITURA = frozenset((
+    "status", "diff", "log", "show", "grep", "ls-files", "ls-tree", "rev-parse", "rev-list", "archive", "blame",
+    "cat-file", "describe", "shortlog", "show-ref", "for-each-ref", "merge-base", "name-rev", "check-ignore",
+    "check-attr", "count-objects", "version", "help", "var", "whatchanged", "range-diff", "cherry", "diff-tree",
+    "diff-files", "diff-index", "show-branch", "verify-commit", "verify-tag",
 ))
+CHAVES_C_SEGURAS = frozenset(("core.quotepath", "i18n.logoutputencoding", "color.ui"))
+# O git aceita abreviação de opção longa: o prefixo (6+ caracteres) de uma destas também conta.
+OPCOES_PERIGOSAS = ("--no-index", "--no-exclude-standard", "--open-files-in-pager", "--output")
+SYMBOLIC_REF_LEITURA = frozenset(("-q", "--quiet", "--short", "--no-recurse", "--recurse"))
+REFLOG_GRAVA = frozenset(("expire", "delete", "drop", "write"))
+CONFIG_GRAVA = frozenset(("--add", "--unset", "--unset-all", "--replace-all", "--rename-section", "--remove-section",
+                          "--edit", "-e", "set", "unset", "rename-section", "remove-section", "edit"))
+# Configuração injetada pelo ambiente: com grep.fallbackToNoIndex, o git grep fora de repositório lê arquivo
+# ignorado (o .env). Medido em 2026-11-19 (conferencia_r1_r3_v2.md, sonda p13).
+RE_CONFIG_POR_AMBIENTE = re.compile(
+    r"fallbacktonoindex|\bGIT_CONFIG_(?:PARAMETERS|COUNT|KEY_\d+|VALUE_\d+|GLOBAL|SYSTEM|NOSYSTEM)\b", re.IGNORECASE)
 # Opções globais do git com valor no token seguinte.
-OPCOES_COM_VALOR = frozenset(("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix"))
+OPCOES_COM_VALOR = frozenset(("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix",
+                              "--attr-source"))
 RE_GIT_PALAVRA = re.compile(r"(?<![\w.-])git(?:\.exe)?[\"']?(?=\s|$)", re.IGNORECASE)
 BRANCH_ALTERA = frozenset(("-d", "-D", "-m", "-M", "-c", "-C", "-f", "-u", "--delete", "--move", "--copy", "--force",
                            "--set-upstream-to", "--unset-upstream", "--edit-description", "--track", "--no-track"))
 BRANCH_LISTA = frozenset(("--list", "-l", "--contains", "--no-contains", "--merged", "--no-merged", "--points-at"))
-REMOTE_ALTERA = frozenset(("add", "remove", "rm", "rename", "set-url", "set-head", "set-branches", "prune", "update"))
 
 NOME_ENV = re.compile(r"^\.env(\..+)?$", re.IGNORECASE)
 # .env como palavra num comando: bloqueia .env, .env.local e .env.; não .env.example, x.env nem o \.env$ de regex.
@@ -129,34 +142,80 @@ def _branch_altera(args):
     return bool(posicionais) and not any(a in BRANCH_LISTA or a.startswith(("--contains=", "--merged=")) for a in args)
 
 
-def git_que_grava(comando):
-    """Primeiro uso de git que grava (ou de subcomando indeterminado) no comando, ou None."""
+def _symbolic_ref_leitura(args):
+    opcoes = [a for a in args if a.startswith("-")]
+    posicionais = [a for a in args if not a.startswith("-")]
+    return len(posicionais) == 1 and all(o in SYMBOLIC_REF_LEITURA for o in opcoes)
+
+
+def _config_grava(args):
+    """Ação de gravação do git config em qualquer posição, inclusive opção longa abreviada (4+ caracteres)."""
+    for a in args:
+        if a in CONFIG_GRAVA:
+            return True
+        if a.startswith("--"):
+            nome = a.split("=", 1)[0]
+            if len(nome) >= 4 and any(o.startswith(nome) for o in CONFIG_GRAVA if o.startswith("--")):
+                return True
+    return False
+
+
+def _opcao_perigosa(args):
+    """Opção longa que é prefixo (6+ caracteres) de OPCOES_PERIGOSAS, ou -O em grupo curto (abre programa)."""
+    for a in args:
+        if a.startswith("--"):
+            nome = a.split("=", 1)[0]
+            if len(nome) >= 6 and any(p.startswith(nome) for p in OPCOES_PERIGOSAS):
+                return a
+        elif re.match(r"^-[A-Za-z]*O", a):
+            return a
+    return None
+
+
+def git_nao_liberado(comando):
+    """Primeiro uso de git fora da lista de liberação (subcomando, opção global ou opção do subcomando), ou None."""
     for m in RE_GIT_PALAVRA.finditer(comando):
         trecho = re.split(r"[;&|\n)`]", comando[m.end():], maxsplit=1)[0]
         tokens = _tokens(trecho)
         i = 0
         while i < len(tokens) and tokens[i].startswith("-"):
-            i += 2 if tokens[i] in OPCOES_COM_VALOR else 1
+            t = tokens[i]
+            if t == "-c":
+                chave = (tokens[i + 1] if i + 1 < len(tokens) else "").split("=", 1)[0].lower()
+                if chave not in CHAVES_C_SEGURAS:
+                    return f"git -c {chave or '?'} (configuração fora da lista)"
+            elif t.startswith(("-c", "--config-env", "--exec-path=")):
+                return f"git {t.split('=', 1)[0]} (opção global fora da lista)"
+            i += 2 if t in OPCOES_COM_VALOR else 1
         if i >= len(tokens):
-            continue  # só opções (git --version, git -h): não grava
+            antes = re.split(r"[;&|\n]", comando[:m.start()])[-1]
+            if re.search(r"\b(?:xargs|-exec(?:dir)?)\b", antes):
+                return "git com subcomando indeterminado (vindo do xargs ou do -exec)"
+            continue  # só opções (git --version, git -h) ou o nome sozinho (which git): não grava
         sub, args = tokens[i], tokens[i + 1:]
         if not re.fullmatch(r"[a-z][a-z0-9-]*", sub):
             return f"git com subcomando indeterminado ({sub[:30]})"
-        if sub in GIT_QUE_GRAVA:
-            return f"git {sub}"
-        if sub == "branch" and _branch_altera(args):
-            return "git branch (cria ou altera)"
-        if sub == "config" and args and not any(a in ("--list", "-l") or a.startswith("--get") for a in args):
-            return "git config (gravação)"
-        if sub == "remote" and args and args[0] in REMOTE_ALTERA:
-            return f"git remote {args[0]}"
-        if sub == "reflog" and args and args[0] in ("expire", "delete"):
-            return f"git reflog {args[0]}"
-        if sub == "hash-object" and "-w" in args:
-            return "git hash-object -w"
-        if sub == "symbolic-ref" and (any(a in ("-d", "--delete") for a in args)
-                                      or len([a for a in args if not a.startswith("-")]) >= 2):
-            return "git symbolic-ref (gravação)"
+        if sub in GIT_LEITURA:
+            achado = _opcao_perigosa(args)
+            if achado:
+                return f"git {sub} {achado} (lê fora do índice, grava arquivo ou abre programa)"
+            continue
+        if sub == "branch" and not _branch_altera(args):
+            continue
+        if sub == "config" and not _config_grava(args) and (
+                not args or any(a in ("--list", "-l") or a.startswith("--get") for a in args)):
+            continue
+        if sub == "remote":
+            posicionais = [a for a in args if a not in ("-v", "--verbose")]
+            if not posicionais or posicionais[0] in ("show", "get-url"):
+                continue
+        if sub == "reflog" and not any(a in REFLOG_GRAVA for a in args):
+            continue
+        if sub == "hash-object" and not any(a.startswith("-") and not a.startswith("--") and "w" in a for a in args):
+            continue
+        if sub == "symbolic-ref" and _symbolic_ref_leitura(args):
+            continue
+        return f"git {sub} (fora da lista de liberação)"
     return None
 
 
@@ -239,10 +298,13 @@ def decidir(perfil, ferramenta, entrada, cwd, raiz=None):
 
     if ferramenta in ("Bash", "PowerShell"):
         limpo = sem_comentarios(str(entrada.get("command", "")))
-        achado = git_que_grava(limpo)
+        if RE_CONFIG_POR_AMBIENTE.search(limpo):
+            return bloqueio("R1", "configuração do git injetada pelo ambiente (GIT_CONFIG_*, fallbackToNoIndex)",
+                            "Subagente só usa git de leitura, sem configuração injetada.")
+        achado = git_nao_liberado(limpo)
         if achado:
-            return bloqueio("R1", achado, "Subagente não altera o índice nem a árvore do git; quem commita é a "
-                            "sessão principal.")
+            return bloqueio("R1", achado, "Subagente só usa git de leitura (lista de liberação); quem grava e "
+                            "commita é a sessão principal.")
         if RE_ENV_EM_COMANDO.search(limpo) or RE_LEITOR_DOTENV.search(limpo):
             return bloqueio("R2", "comando lê ou cita o .env", "Nunca ler, editar ou imprimir o .env.")
         achado = busca_recursiva_ampla(limpo, cwd, raiz)
