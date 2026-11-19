@@ -613,6 +613,25 @@ def test_f4c2_env_ausente_nova_tentativa(tmp_path):
     assert dados["chamadas"] == [] and dados["leituras_efetivas_por_run"] == [0, 0], resumo
     assert dados["leituras_reais"] == []
 
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_f4c2b_env_ausente_preserva_sandbox_do_shell(entrada, tmp_path):
+    """(c'') T2 (registro_pos_merge): com .env ausente, a ORACLE_SANDBOX herdada do shell não é removida (o valor
+    do shell vale; bloco carga-env) e cada subida tenta de novo. Sentinela "0", só no ambiente do subprocesso: o
+    bloco testa só a presença da chave, então "0" exercita o mesmo ramo que "1"."""
+    dados = _rodar(entrada, tmp_path, "", sandbox_shell="0", runs=2, ficticio_tipo="ausente")
+    runs = dados["por_run"]
+    resumo = f"por_run={[(r['sandbox'], r['excecoes']) for r in runs]}, stats={dados['stats_por_run']}"
+    assert len(runs) == 2, resumo
+    for run in runs:
+        assert _com(run["excecoes"], MENSAGEM_FALHA_CARGA, "FileNotFoundError", MENSAGEM_NOVA_TENTATIVA), resumo
+        assert run["sandbox"] == "0", resumo
+        assert not [w for w in run["warning_tela"] if "DESCARTADA" in w], resumo
+    assert dados["sandbox"] == "0", resumo
+    assert not [a for a in dados["avisos"] if "DESCARTADA" in a], resumo
+    assert dados["stats_por_run"][1] >= 1, resumo  # o run 2 tentou de novo
+    assert dados["chamadas"] == [] and dados["leituras_efetivas_por_run"] == [0, 0], resumo
+    assert dados["leituras_reais"] == []
+
 
 @pytest.mark.parametrize("entrada", ["cli", "web"])
 def test_f4d_linhas_malformadas_so_contagem(entrada, tmp_path):
