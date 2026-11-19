@@ -32,8 +32,7 @@ Como cumprir estas regras (ciclo, delegação, verificação e lições): `docs/
 - Subagentes: Sonnet para mecânico, Haiku para execução de testes, Opus só para decisão de segurança.
 - Código de segurança (mapa em `docs/PROCESSO.md` §2) só é escrito por Opus. Antes de tocá-lo, a sessão principal confere o próprio modelo e para se não for Opus. O `mecanico` só o edita com autorização literal do responsável citada no pedido.
 - Delegação no formato de `docs/PROCESSO.md` §3; as regras fixas já estão nos agentes. Subagente não commita: a sessão principal revisa o diff inteiro, mostra o `git diff` e commita.
-- Mensagens a subagentes e respostas seguem docs/PROTOCOLO.md.
-- Em divergência, PROCESSO.md §3 prevalece sobre PROTOCOLO.md até a tarefa de reconciliação.
+- Pedido e retorno de subagentes: `docs/PROCESSO.md` §3 (o PROTOCOLO.md foi incorporado nele).
 - Paralelizar apenas com conjuntos de arquivos disjuntos. Nunca dois agentes em `oracle_dba.py`, `main.py` ou `app.py`.
 - Saídas grandes vão para `docs/entregas/`; o chat recebe caminho e resumo.
 - Antes de cada aceite: `git status`, `pytest -q`, greps de regressão (sequência em `docs/PROCESSO.md` §5).

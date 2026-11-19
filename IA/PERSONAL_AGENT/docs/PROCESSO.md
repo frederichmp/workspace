@@ -1,8 +1,8 @@
 # Processo de tarefa e delegação (PERSONAL_AGENT)
 
-Complementa o `CLAUDE.md`: lá ficam as regras; aqui, como cumpri-las. A sessão principal lê este documento antes de planejar ou delegar. Os agentes leem o §2 e o §7, e o `verificador` também o §5.
+Complementa o `CLAUDE.md`: lá ficam as regras; aqui, como cumpri-las. A sessão principal lê este documento antes de planejar ou delegar. Cada agente traz no corpo o que precisa sempre (o mapa do §2 e as lições do §7 que valem para ele) e lê aqui só o item citado no pedido; o `verificador` roda o §5 pelo script.
 
-Revisado em 2026-11-18 (tarefa `processo-subagentes`). Mudança neste arquivo segue o processo normal: plano, commit e linha no `docs/GOVERNANCA_LOG.md`.
+Revisado em 2026-11-18 (tarefas `processo-subagentes` e `revisao-subagentes-v2`). Mudança neste arquivo segue o processo normal: plano, commit e linha no `docs/GOVERNANCA_LOG.md`.
 
 ## 1. Ciclo da tarefa
 
@@ -11,7 +11,7 @@ Revisado em 2026-11-18 (tarefa `processo-subagentes`). Mudança neste arquivo se
 | 0. Abertura | sessão principal | `git status`; origem de todo diff não commitado; modelo da sessão conferido se a tarefa tocar o §2 |
 | 1. Plano | sessão principal, em `/plan` | `docs/plans/<tarefa>.md` no modelo do §4; execução só depois da aprovação |
 | 2. Decisão | `seguranca` | `docs/entregas/<tarefa>/decisao*.md`, quando a tarefa toca o §2 |
-| 3. Execução | sessão principal (Opus) no §2; `mecanico` no resto | só os arquivos do plano; agentes em paralelo só com arquivos disjuntos |
+| 3. Execução | sessão principal (Opus) no §2; `mecanico` no resto, salvo passo pequeno (§3) | só os arquivos do plano; agentes em paralelo só com arquivos disjuntos |
 | 4. Revisão | sessão principal | diff inteiro do subagente lido; classificação das mudanças em testes conferida |
 | 5. Verificação | `verificador` | sequência do §5; saída em `docs/entregas/<tarefa>/` |
 | 6. Commit | sessão principal | um por correção; `git diff` mostrado; caminhos explícitos; coautoria de todo modelo que escreveu |
@@ -33,15 +33,20 @@ Produção nestas áreas só é escrita por Opus (sessão principal), que confer
 | Pontos de entrada | topo de `app.py` e de `src/main.py` (carga única do `.env`, descarte de `ORACLE_SANDBOX`); painel e decisão HITL nas duas interfaces (`processar_decisao_hitl` na Web) |
 | Guard dos testes | `tests/conftest.py`: `ORACLE_SANDBOX_DO_OPERADOR`, `CHAVES_ENV_SANDBOX`, `guard_oracle_sandbox`, `pytest_sessionfinish`, `isolar_log_aprovacao` |
 | Execução de scripts | `src/tools/executor.py` (tokenização, tipo real do SQL, hash, conta READ ou MUT), `src/tools/registry.py`, `registry/*.yaml`, `tools/verificar_registro.py` |
+| Verificação padrão | `tools/verificacao_padrao.py` (passos 0 a 3 do §5) |
 | Contas e chaves | `.env.example` (só nomes, nunca valores) |
+
+Mudou o mapa? Atualize também a lista do `.claude/agents/mecanico.md`.
 
 ## 3. Delegação
 
 | Agente | Modelo e effort | Usar para | Não usar para | Grava em |
 |---|---|---|---|---|
-| `mecanico` | sonnet, high | passo já decidido: testes sem conexão, refatoração, documentação | decidir; produção do §2 sem autorização literal | só os arquivos do pedido; não commita |
-| `seguranca` | opus, xhigh | decidir ou conferir algo do §2; revisar diff dessas áreas | implementar | `docs/entregas/<tarefa>/decisao*.md` e `conferencia*.md` |
-| `verificador` | haiku, padrão | antes de cada commit ou aceite | corrigir qualquer coisa | `docs/entregas/<tarefa>/`, não rastreado |
+| `mecanico` | sonnet, high; medium em passo só de documentação | passo já decidido: testes sem conexão, refatoração, documentação | decidir; produção do §2 sem autorização literal; passo pequeno | só os arquivos do pedido; não commita |
+| `seguranca` | opus, xhigh em decisão nova; high em conferência de diff | decidir ou conferir algo do §2; revisar diff dessas áreas | implementar; leitura geral | `docs/entregas/<tarefa>/decisao*.md` e `conferencia*.md` |
+| `verificador` | haiku, padrão | antes de commit ou aceite, com `tools/verificacao_padrao.py` | corrigir qualquer coisa | `docs/entregas/<tarefa>/`, não rastreado |
+
+Effort diferente do padrão vai no parâmetro `effort` da chamada, por esta instrução.
 
 As regras fixas (`.env`, `ORACLE_SANDBOX`, sem Oracle, sem commit, formato de retorno) já estão nas definições dos agentes e no `CLAUDE.md`, que eles recebem automaticamente. O pedido traz só o que é da tarefa:
 
@@ -54,10 +59,23 @@ Autorização especial: <texto literal do responsável | nenhuma>.
 Saída: <docs/entregas/<tarefa>/<arquivo> | só o retorno>.
 ```
 
+O pedido tem no máximo 1.000 caracteres: o que não couber vai no plano, citado por seção, e regra que já está no corpo do agente não se repete.
+
+- **Passo pequeno** (até 3 edições em 1 ou 2 arquivos, sem rodar a suíte): a sessão principal faz direto, porque uma chamada de agente custa de 34 a 35 mil tokens só no 1º turno. O §2 continua só com Opus.
+- **Tamanho da chamada:** uma por passo do plano e uma por controle ou mutação. O agente tem teto de chamadas de ferramenta (cerca de 30 no `mecanico`, 40 no `seguranca` e 15 no `verificador`) e, ao chegar nele, devolve o parcial; o que falta vira chamada nova.
+- **Retorno** (incorporado do antigo `docs/PROTOCOLO.md`): a 1ª linha traz o status, e o detalhe fica em `docs/entregas/<tarefa>/`, nunca no retorno.
+
+  | Agente | Status da 1ª linha | Teto |
+  |---|---|---|
+  | `mecanico` | `OK`, `PARE`, `ERRO`, `PARCIAL` | 1.200 caracteres |
+  | `seguranca` | `CONFORME`, `NÃO CONFORME`, `PENDENTE`, `PARCIAL` | 1.500 caracteres |
+  | `verificador` | `OK`, `FALHA`, `PARE`, `NÃO VERIFICADO` | 1.500 caracteres |
+- **SendMessage:** só para complemento curto do mesmo passo, com o agente abaixo do teto. Outra tarefa, outro passo ou agente perto do teto: agente novo.
+- **`cd` na sessão principal:** no Bash da sessão principal, o `cd` persiste e muda o diretório de trabalho da sessão. Use caminho relativo à raiz ou `git -C`.
 - **Paralelismo:** só com conjuntos de arquivos disjuntos; nunca dois agentes em `oracle_dba.py`, `main.py` ou `app.py`.
 - **Conferência do retorno:** o ID do modelo veio; as contagens batem com o baseline; o diff inteiro foi lido; a classificação das mudanças em testes confere com o diff. O que o subagente afirma é afirmação a conferir; o modelo que ele informa se confirma na transcrição.
 - **Retorno com PARE:** resolver com o responsável. Não redelegar a mesma coisa sem mudar o pedido.
-- **Definições novas:** depois de mudar `.claude/agents/`, confirmar no próximo chat, com `/agents`, que modelo, effort, cor e ferramentas valem.
+- **Definições novas:** depois de mudar `.claude/agents/`, confirmar no próximo chat, com `/agents`, que modelo, effort, cor e ferramentas valem, e medir o 1º turno de uma chamada curta com `docs/entregas/revisao-subagentes-v2/medir_subagentes.py --desde <hora UTC>`. Antes da lista fechada de ferramentas, o 1º turno custava de 34 a 35 mil tokens.
 
 ## 4. Modelo de plano (`docs/plans/<tarefa>.md`)
 
@@ -73,6 +91,20 @@ Saída: <docs/entregas/<tarefa>/<arquivo> | só o retorno>.
 ## 5. Verificação padrão
 
 Ordem: perfil, estado do git, pytest, greps. FALHA no passo 0 ou no 2: parar e informar, sem rodar de novo.
+
+**Script.** Os passos 0 a 3 rodam com um comando, em primeiro plano e com timeout 600000:
+
+```bash
+python -I tools/verificacao_padrao.py --tarefa <t> --base <commit> --esperado <P>/<S> \
+  [--previsto '<padrão>' ...] [--rotulo <r>] [--registry-pendente]
+```
+
+- **Saídas:** `docs/entregas/<t>/<rotulo>_*.txt` e `<rotulo>.md`. O script não sobrescreve: para rodar de novo, mude o `--rotulo`.
+- **Código de saída:** 0 OK, 1 FALHA, 2 PARE ou NÃO VERIFICADO.
+- **`--previsto`:** padrão fnmatch relativo ao projeto (`*` cruza `/`). A pasta da tarefa já entra como prevista.
+- **`--registry-pendente`:** aceita mudança em `registry/` ou `db/` só se ela estiver commitada e todo commit trouxer "PENDENTE APROVAÇÃO".
+
+Os comandos abaixo são a referência do script: mudou um, mude também o script e o `tests/test_verificacao_padrao.py`.
 
 **0. Perfil do Windows, só nomes** (PowerShell). Esperado: nenhuma linha. Com `override=False`, variável do perfil vence o `.env`.
 
