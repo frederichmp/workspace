@@ -75,7 +75,7 @@ O pedido tem no máximo 1.000 caracteres: o que não couber vai no plano, citado
 - **Paralelismo:** só com conjuntos de arquivos disjuntos; nunca dois agentes em `oracle_dba.py`, `main.py` ou `app.py`.
 - **Conferência do retorno:** o ID do modelo veio; as contagens batem com o baseline; o diff inteiro foi lido; a classificação das mudanças em testes confere com o diff. O que o subagente afirma é afirmação a conferir; o modelo que ele informa se confirma na transcrição.
 - **Retorno com PARE:** resolver com o responsável. Não redelegar a mesma coisa sem mudar o pedido.
-- **Definições novas:** depois de mudar `.claude/agents/`, confirmar no próximo chat, com `/agents`, que modelo, effort, cor e ferramentas valem, e medir o 1º turno de uma chamada curta com `docs/entregas/revisao-subagentes-v2/medir_subagentes.py --desde <hora UTC>`. Antes da lista fechada de ferramentas, o 1º turno custava de 34 a 35 mil tokens.
+- **Definições novas:** valem para o agente lançado depois da gravação. Em 2026-11-18, o 1º `verificador` depois da lista fechada de ferramentas teve 1º turno de 14,1 mil tokens, contra 34 a 35 mil antes. A lista de agentes da sessão principal só se atualiza no próximo chat; confirme lá, com `/agents`, modelo, effort, cor e ferramentas. Meça o 1º turno com `docs/entregas/revisao-subagentes-v2/medir_subagentes.py --desde <hora UTC>`.
 
 ## 4. Modelo de plano (`docs/plans/<tarefa>.md`)
 
