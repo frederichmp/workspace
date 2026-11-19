@@ -101,12 +101,14 @@ def glob_cobre_env(padrao):
     return any(fnmatch.fnmatch(alvo, p) for alvo, p in ((".env", padrao), ("a/.env", padrao), (".env", ultimo)))
 
 
-def sem_comentarios(comando):
+def sem_comentarios(comando, dialeto="bash"):
     """Tira o '# comentário' fora de aspas (as linhas do §5 têm comentário). O estado das aspas segue entre
     linhas e o escape \\ vale como no bash. Comentário com aspas ou crase não é cortado: na dúvida, o texto
-    fica e é conferido (cortar a mais esconderia código que roda). Antes, junta a continuação de linha
-    (\\ no Bash, crase no PowerShell), como o shell faz."""
-    comando = re.sub(r"[\\`]\r?\n", "", comando)
+    fica e é conferido (cortar a mais esconderia código que roda). Antes, junta a continuação de linha do
+    dialeto, como o shell faz: \\ só no Bash, crase só no PowerShell. Juntar a do outro dialeto colava a
+    palavra anterior ao comando da linha seguinte (A1, guarda-r4-r5). Comentário logo depois da continuação
+    do outro dialeto também não é cortado."""
+    comando = re.sub(r"`\r?\n" if dialeto == "powershell" else r"\\\r?\n", "", comando)
     saida, aspas, i, n = [], None, 0, len(comando)
     while i < n:
         ch = comando[i]
@@ -125,7 +127,7 @@ def sem_comentarios(comando):
         elif ch == "#" and (i == 0 or comando[i - 1].isspace()):
             fim = comando.find("\n", i)
             fim = n if fim == -1 else fim
-            if not re.search(r"[\"'`]", comando[i:fim]):
+            if not re.search(r"[\"'`]", comando[i:fim]) and not re.search(r"[\\`]\r?\n$", comando[:i]):
                 i = fim
                 continue
         saida.append(ch)
@@ -302,7 +304,7 @@ def decidir(perfil, ferramenta, entrada, cwd, raiz=None):
                       "Não contorne: devolva PARE com este motivo.")
 
     if ferramenta in ("Bash", "PowerShell"):
-        limpo = sem_comentarios(str(entrada.get("command", "")))
+        limpo = sem_comentarios(str(entrada.get("command", "")), "powershell" if ferramenta == "PowerShell" else "bash")
         if RE_CONFIG_POR_AMBIENTE.search(limpo):
             return bloqueio("R1", "configuração do git injetada pelo ambiente (GIT_CONFIG_*, fallbackToNoIndex)",
                             "Subagente só usa git de leitura, sem configuração injetada.")

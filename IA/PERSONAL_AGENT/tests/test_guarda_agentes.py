@@ -210,6 +210,30 @@ def test_sem_comentarios_trata_o_escape_fora_de_aspas():
     assert gs.sem_comentarios("echo \\\" # x") == "echo \\\" "
 
 
+# A1 (guarda-r4-r5, S1): a continuação de linha é \ só no Bash e crase só no PowerShell. Juntar a do outro
+# dialeto colava a palavra anterior ao git ou ao grep da linha seguinte (agit), que escapavam do R1 e do R2.
+@pytest.mark.parametrize("ferramenta, comando, regra", [
+    ("PowerShell", "Write-Output a\\\ngit com" + "mit -m x", "R1"),
+    ("PowerShell", "Write-Output a\\\ngrep -rn X .", "R2"),
+    ("Bash", "echo a`\ngit com" + "mit -m x`", "R1"),
+    ("PowerShell", "git `\ncom" + "mit -m x", "R1"),
+    ("Bash", "git \\\ncom" + "mit -m x", "R1"),
+    ("PowerShell", "echo a\\\n#x; cat .env", "R2"),
+])
+def test_continuacao_de_linha_por_dialeto(ferramenta, comando, regra):
+    bloqueia, motivo = _decide("mecanico", ferramenta, command=comando)
+    assert bloqueia
+    assert f"({regra}," in motivo
+
+
+@pytest.mark.parametrize("ferramenta, comando", [
+    ("PowerShell", "git status `\n--short"),
+    ("Bash", "git status \\\n--short"),
+])
+def test_continuacao_de_linha_do_proprio_dialeto_continua_liberada(ferramenta, comando):
+    assert _decide("verificador", ferramenta, command=comando) == (False, "")
+
+
 # ---------- ferramentas ----------
 
 @pytest.mark.parametrize("ferramenta, entrada", [
