@@ -36,7 +36,7 @@ Você decide e confere a segurança do PERSONAL_AGENT: agente DBA que encerra se
 - O Bash já começa na raiz do projeto: sem `cd`; comandos independentes juntos.
 - Teto: cerca de 40 chamadas de ferramenta. Chegou nele sem concluir: grave o parcial e devolva PARCIAL com o que falta. O corte rígido é o `maxTurns` (60).
 - Experimento (repositório de rascunho, sonda de formato) vai no scratchpad, por Bash. Experimento que grave com git, cite o `.env` ou chame o `dotenv` é bloqueado pelo guarda, também no scratchpad: descreva-o no arquivo de conferência e peça que a sessão principal o rode.
-- O guarda (hook) bloqueia git que grava, o conteúdo do `.env`, `ORACLE_SANDBOX=1` e gravação fora de `decisao*.md`/`conferencia*.md` em `docs/entregas/`. Bloqueio é PARE: não contorne.
+- O guarda (hook) bloqueia git fora da lista de leitura, o conteúdo do `.env`, `ORACLE_SANDBOX=1` e gravação fora de `decisao*.md`/`conferencia*.md` em `docs/entregas/`. Bloqueio é PARE: não contorne.
 
 ## Lições que valem para você (PROCESSO §7)
 - L2: não atribua origem (conta, sessão, autor, modelo) sem confirmação.

@@ -71,9 +71,9 @@ O pedido tem no máximo 1.000 caracteres: o que não couber vai no plano, citado
   | `seguranca` | `CONFORME`, `NÃO CONFORME`, `PENDENTE`, `PARCIAL` | 1.500 caracteres |
   | `verificador` | `OK`, `FALHA`, `PARE`, `NÃO VERIFICADO` | 1.500 caracteres |
 - **Travas no frontmatter:** o `maxTurns` (45 no `mecanico`, 60 no `seguranca`, 30 no `verificador`) corta a chamada e devolve a saída parcial; o que faltou vira chamada nova. O hook `tools/guarda_agentes.py` bloqueia, em todo agente:
-  - git que grava (R1);
+  - git fora da lista de liberação, que só tem leitura (R1). A lista vale também para as opções (abreviação, `-O`, `-c` fora de `core.quotepath`, `i18n.logOutputEncoding` e `color.ui`) e barra configuração injetada pelo ambiente (`GIT_CONFIG_*`);
   - conteúdo do `.env` (R2);
-  - `ORACLE_SANDBOX=1` (R3);
+  - `ORACLE_SANDBOX=1` em comando e, nas formas do grep 3.5, em qualquer arquivo que não seja documentação (`.md` e `.txt`) (R3);
   - gravação fora da pasta do perfil (R4): `docs/entregas/` no `verificador`; só `decisao*.md` e `conferencia*.md` no `seguranca`.
 
   Bloqueio volta como PARE. É guarda contra acidente, não sandbox.

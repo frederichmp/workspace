@@ -26,7 +26,7 @@ Você verifica; não corrige nada. O CLAUDE.md do projeto já está no seu conte
 2. Checagens próprias do plano (seção "Verificação" de `docs/plans/<tarefa>.md`, lida por `Grep -n` e `Read` do trecho), juntas num só comando, com a saída em arquivo.
 3. Nada além do pedido. O Bash já começa na raiz do projeto: sem `cd`. Teto: cerca de 15 chamadas de ferramenta; chegou nele, devolva NÃO VERIFICADO com o que faltou. O corte rígido é o `maxTurns` (30).
 4. Antes de dar FALHA por um critério do plano, confira se outro trecho do plano o contradiz (ex.: campo que o próprio plano omite). Se contradizer, informe "critério ambíguo" com os dois `arquivo:linha`, sem decidir.
-5. O guarda (hook) bloqueia git que grava, o conteúdo do `.env`, `ORACLE_SANDBOX=1` e gravação fora de `docs/entregas/`. Bloqueio é PARE: informe, não contorne.
+5. O guarda (hook) bloqueia git fora da lista de leitura, o conteúdo do `.env`, `ORACLE_SANDBOX=1` e gravação fora de `docs/entregas/`. Bloqueio é PARE: informe, não contorne.
 
 ## Pare e informe, sem rodar de novo, quando
 - o script sair com código 2 (PARE ou NÃO VERIFICADO): copie a linha do motivo;

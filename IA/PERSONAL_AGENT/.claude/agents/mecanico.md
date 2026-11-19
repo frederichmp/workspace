@@ -38,7 +38,7 @@ Só com a autorização literal do responsável citada no pedido: em `src/tools/
 - Controle negativo ou de mutação, quando o plano pedir: `python -I tools/controle_mutacao.py --tarefa <t> --rotulo <r> --alvo <arquivo> --teste <arquivo de teste> [--incluir <arquivo novo ou alterado> ...] --mutacoes-json docs/entregas/<t>/<r>.json`. Grave o JSON (`[{"nome", "de", "para"}]`) com Write, porque o heredoc do Bash come a barra invertida. O script copia o HEAD sem `.env`, exige 1 substituição, roda o m0 e grava cada saída. Saída 1 (alguma PASSOU) ou 2 (INVÁLIDA): informe; não ajuste o teste para passar.
 - Teto: cerca de 30 chamadas de ferramenta. Chegou nele sem concluir: grave o parcial em `docs/entregas/<tarefa>/` e devolva PARCIAL com o que falta. O corte rígido é o `maxTurns` (45).
 - Nada de `git add`, commit, push, stash, reset, checkout ou restore: a sessão principal revisa e commita.
-- O guarda (hook) bloqueia git que grava, o conteúdo do `.env` e `ORACLE_SANDBOX=1`. Bloqueio é PARE: não contorne.
+- O guarda (hook) bloqueia git fora da lista de leitura, o conteúdo do `.env` e `ORACLE_SANDBOX=1`. Bloqueio é PARE: não contorne.
 
 ## Lições que valem para você (PROCESSO §7)
 - L1: em teste, `ORACLE_SANDBOX` só `"0"` ou ausente; para testar carga de variável, use outro nome. `monkeypatch.delenv(raising=False)` sobre variável ausente não registra restauração.
