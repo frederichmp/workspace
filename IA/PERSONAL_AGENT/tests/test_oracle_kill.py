@@ -23,7 +23,7 @@ b) Sandbox (sandbox_only, requer ORACLE_SANDBOX=1):
    - STARTUP_DIAG tentando comando direto -> ORA-01031;
    - STARTUP_KILL tentando comando direto -> ORA-01031.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import inspect
 import json
 import os
@@ -52,6 +52,15 @@ from src.tools.oracle_dba import (
 
 ROOT_DIR_TESTE = Path(__file__).resolve().parent.parent
 
+# Identidade esperada e ref de aprovação válidos (kill v2, item 6): valores só de teste.
+IDENTIDADE_VALIDA = {
+    "username": "APP_USER",
+    "program": "app.exe",
+    "machine": "srv-app01",
+    "logon_time": datetime(2026, 11, 23, 10, 0, 0),
+}
+REF_VALIDO = "0123456789abcdef0123456789abcdef"
+
 
 # =============================================================================
 # A. TESTES SEM CONEXÃO AO BANCO (RODAM SEMPRE)
@@ -77,7 +86,10 @@ def test_kill_param_invalido_sem_conexao(monkeypatch):
     ]
 
     for sid_val, serial_val, inst_val in casos_invalidos:
-        res_json = matar_sessao_oracle(sid=sid_val, serial=serial_val, inst_id=inst_val)
+        res_json = matar_sessao_oracle(
+            sid=sid_val, serial=serial_val, inst_id=inst_val,
+            identidade_esperada=dict(IDENTIDADE_VALIDA), ref_aprovacao=REF_VALIDO,
+        )
         res = json.loads(res_json)
         assert res.get("status") == "recusado", f"Falha para sid={sid_val}, serial={serial_val}, inst={inst_val}"
         assert res.get("motivo") == "PARAM_INVALIDO"
@@ -173,7 +185,9 @@ def test_ausencia_oracle_user_kill_sem_conexao(monkeypatch):
     monkeypatch.setenv("ORACLE_DSN", "host-teste:1521/TESTE")
     monkeypatch.delenv("ORACLE_USER_KILL", raising=False)
 
-    res = json.loads(matar_sessao_oracle(sid=10, serial=20, inst_id=1))
+    res = json.loads(matar_sessao_oracle(
+        sid=10, serial=20, inst_id=1, identidade_esperada=dict(IDENTIDADE_VALIDA), ref_aprovacao=REF_VALIDO,
+    ))
     assert res.get("status") == "erro"
     assert res.get("motivo") == "ERRO_CONFIG"
 
@@ -427,10 +441,15 @@ def test_inst_id_ausente_param_invalido_sem_conexao(monkeypatch, tmp_path):
     monkeypatch.setattr(oracledb, "connect", fail_connect)
 
     with pytest.raises(TypeError):
-        matar_sessao_oracle(sid=10, serial=20)
+        matar_sessao_oracle(
+            sid=10, serial=20, identidade_esperada=dict(IDENTIDADE_VALIDA), ref_aprovacao=REF_VALIDO,
+        )
 
     for inst_invalido in (None, True, 1.5, "1a", "", 0, -3):
-        res_inv = json.loads(matar_sessao_oracle(sid=10, serial=20, inst_id=inst_invalido))
+        res_inv = json.loads(matar_sessao_oracle(
+            sid=10, serial=20, inst_id=inst_invalido,
+            identidade_esperada=dict(IDENTIDADE_VALIDA), ref_aprovacao=REF_VALIDO,
+        ))
         assert res_inv["motivo"] == "PARAM_INVALIDO", f"inst_id={inst_invalido!r} deveria ser recusado"
 
     desfecho = conduzir_kill_hitl(
@@ -681,6 +700,316 @@ def test_caminho_padrao_redirecionado(isolar_log_aprovacao):
     assert isolar_log_aprovacao.exists()
     registro = json.loads(isolar_log_aprovacao.read_text(encoding="utf-8").splitlines()[0])
     assert registro["aprovador"] == "dba_teste"
+
+
+# =============================================================================
+# A3. ITEM 6 v2 (1.11-V2-item6, passo 5a) — IDENTIDADE E REF NO KILL (SÓ MOCK, SEM ORACLE_SANDBOX)
+# =============================================================================
+# Especificação: docs/entregas/1.11/v2_refeito/decisao.md §7 (D6) e §9 (T1-T10; T6 fica de fora deste passo).
+# O mock prova binds, formais, ordem, valores, tipo e tratamento de p_status; NÃO prova a comparação no
+# servidor, o PLS-00306 real nem o NLS (isso é do ensaio sandbox 4.1).
+
+ORDEM_V2 = [
+    "p_inst_id", "p_sid", "p_serial", "p_username_esperado", "p_program_esperado", "p_machine_esperado",
+    "p_logon_time_esperado", "p_ref_aprovacao", "p_status",
+]
+LOGON_TIME_PADRAO = datetime(2026, 11, 23, 10, 0, 0)
+
+
+def _binds_kill(oracle_fake):
+    """Os (sql, binds) de cada execute da conta KILL, na ordem."""
+    return [(sql, binds) for conta, sql, binds in oracle_fake.sql_executado if conta == "KILL"]
+
+
+def _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake, argumentos=None):
+    """Roda o fluxo completo (preparar -> aprovar -> reconsulta -> kill) com o fake; devolve (desfecho, log)."""
+    _instalar_oracle(monkeypatch, oracle_fake)
+    log = tmp_path / "kill.log"
+    desfecho = conduzir_kill_hitl(
+        dict(argumentos or ARGS_ALVO), solicitar_aprovacao=_aprovar(), canal="TESTE", caminho_log=log
+    )
+    registros = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
+    return desfecho, registros
+
+
+# ---- T1: assinaturas (D4) ----------------------------------------------------
+
+@pytest.mark.parametrize(
+    "funcao, nomes",
+    [
+        (matar_sessao_oracle, ("identidade_esperada", "ref_aprovacao")),
+        (oracle_dba.executar_kill_verificado, ("aprovacao_expirada", "ref_aprovacao")),
+    ],
+    ids=["matar_sessao_oracle", "executar_kill_verificado"],
+)
+def test_t1_assinatura_keyword_only_sem_default(funcao, nomes):
+    """T1: identidade_esperada/ref_aprovacao (e aprovacao_expirada) são KEYWORD_ONLY, sem default."""
+    params = inspect.signature(funcao).parameters
+    for nome in nomes:
+        assert nome in params, f"{funcao.__name__} sem o parâmetro {nome}"
+        assert params[nome].kind is inspect.Parameter.KEYWORD_ONLY, f"{nome} deve ser keyword-only"
+        assert params[nome].default is inspect.Parameter.empty, f"{nome} não pode ter default"
+
+
+# ---- T2: validação local antes do getenv (D1, D5) -----------------------------
+
+def _ident(**sobrescritas):
+    ident = dict(IDENTIDADE_VALIDA)
+    ident.update(sobrescritas)
+    return ident
+
+
+def _ident_sem(chave):
+    ident = dict(IDENTIDADE_VALIDA)
+    del ident[chave]
+    return ident
+
+
+_SENT = "SENTINELA_NAO_ECOAR"
+
+CASOS_IDENTIDADE_INVALIDA = [
+    pytest.param(None, REF_VALIDO, (), id="identidade_none"),
+    pytest.param([("username", "APP_USER")], REF_VALIDO, (), id="identidade_lista"),
+    pytest.param(_ident_sem("machine"), REF_VALIDO, (), id="chave_faltando"),
+    pytest.param(dict(IDENTIDADE_VALIDA, extra=_SENT), REF_VALIDO, (_SENT,), id="chave_extra"),
+    pytest.param(_ident(username=""), REF_VALIDO, (), id="username_vazio"),
+    pytest.param(_ident(username=None), REF_VALIDO, (), id="username_none"),
+    pytest.param(_ident(username=123), REF_VALIDO, (), id="username_int"),
+    pytest.param(_ident(program=123), REF_VALIDO, (), id="program_int"),
+    pytest.param(_ident(machine=123), REF_VALIDO, (), id="machine_int"),
+    pytest.param(_ident(logon_time=None), REF_VALIDO, (), id="logon_none"),
+    pytest.param(_ident(logon_time="2026-11-23 10:00:00"), REF_VALIDO, ("2026-11-23 10:00:00",), id="logon_str"),
+    pytest.param(_ident(logon_time=date(2026, 11, 23)), REF_VALIDO, (), id="logon_date"),
+    pytest.param(
+        _ident(logon_time=datetime(2026, 11, 23, 10, 0, 0, tzinfo=timezone.utc)), REF_VALIDO, ("+00:00",),
+        id="logon_tz_aware",
+    ),
+    pytest.param(_ident(logon_time=datetime(2026, 11, 23, 10, 0, 0, 1)), REF_VALIDO, (), id="logon_microsecond"),
+    pytest.param(dict(IDENTIDADE_VALIDA), None, (), id="ref_none"),
+    pytest.param(dict(IDENTIDADE_VALIDA), REF_VALIDO.encode("ascii"), (), id="ref_bytes"),
+    pytest.param(dict(IDENTIDADE_VALIDA), "f" * 31, ("f" * 31,), id="ref_31_hex"),
+    pytest.param(dict(IDENTIDADE_VALIDA), "F" * 32, ("F" * 32,), id="ref_maiusculo"),
+    pytest.param(dict(IDENTIDADE_VALIDA), "f" * 33, ("f" * 33,), id="ref_33_hex"),
+    pytest.param(dict(IDENTIDADE_VALIDA), REF_VALIDO + "\n", (), id="ref_hex_newline"),
+    pytest.param(_ident(username="u" * 129), REF_VALIDO, ("u" * 129,), id="username_129_caracteres"),
+    pytest.param(_ident(program="p" * 129), REF_VALIDO, ("p" * 129,), id="program_129_caracteres"),
+    pytest.param(_ident(machine="m" * 129), REF_VALIDO, ("m" * 129,), id="machine_129_caracteres"),
+]
+
+
+@pytest.mark.parametrize("identidade, ref, sentinelas", CASOS_IDENTIDADE_INVALIDA)
+def test_t2_identidade_obrigatoria_param_invalido(monkeypatch, identidade, ref, sentinelas):
+    """T2: identidade/ref inválidos -> PARAM_INVALIDO, sem connect, com credenciais KILL AUSENTES (a validação
+    vem antes do getenv: ERRO_CONFIG indicaria a ordem errada); a mensagem só nomeia campos."""
+    def fail_connect(*args, **kwargs):
+        pytest.fail("oracledb.connect não deve ser chamado para identidade/ref inválidos")
+
+    def fail_host(*args, **kwargs):
+        pytest.fail("verificar_acessibilidade_host não deve ser chamado para identidade/ref inválidos")
+
+    monkeypatch.setattr(oracledb, "connect", fail_connect)
+    monkeypatch.setattr(oracle_dba, "verificar_acessibilidade_host", fail_host)
+    for nome in ("ORACLE_USER_KILL", "ORACLE_PASSWORD_KILL", "ORACLE_DSN"):
+        monkeypatch.delenv(nome, raising=False)
+
+    bruto = matar_sessao_oracle(sid=10, serial=20, inst_id=1, identidade_esperada=identidade, ref_aprovacao=ref)
+    res = json.loads(bruto)
+    assert res["motivo"] == "PARAM_INVALIDO", f"obtido {res.get('motivo')!r}: a validação deve vir antes do getenv"
+    assert res["status"] == "recusado"
+    assert res["status_banco"] == "PARAM_INVALIDO"
+    for sentinela in sentinelas:
+        assert sentinela not in bruto, "a mensagem não pode ecoar valores recebidos"
+    assert "BEGIN" not in bruto and "=>" not in bruto
+
+
+# ---- T3: os 9 binds com valores exatos (D1) ----------------------------------
+
+@pytest.mark.parametrize(
+    "program, machine",
+    [(None, "SRV-App01 "), ("App.EXE ", None)],
+    ids=["program_none", "machine_none"],
+)
+def test_t3_nove_binds_valores_exatos(monkeypatch, ambiente_fake, program, machine):
+    """T3: 9 binds nomeados, na ordem da spec; None vai como None; maiúsculas e espaço final idênticos (sem
+    strip/upper/str); logon_time vai numa var DATE; exatamente 1 execute na conta KILL."""
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([], status_pkg="ENCERRADA"))
+    ident = {"username": "App_User ", "program": program, "machine": machine, "logon_time": LOGON_TIME_PADRAO}
+
+    res = json.loads(
+        matar_sessao_oracle(sid=101, serial=202, inst_id=3, identidade_esperada=ident, ref_aprovacao=REF_VALIDO)
+    )
+    assert res["status_banco"] == "ENCERRADA"
+
+    execucoes = _binds_kill(oracle_fake)
+    assert len(execucoes) == 1, "exatamente 1 execute na conta KILL"
+    sql, binds = execucoes[0]
+    assert list(binds) == ORDEM_V2
+    assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_V2
+    assert binds["p_inst_id"] == 3 and binds["p_sid"] == 101 and binds["p_serial"] == 202
+    assert binds["p_username_esperado"] == "App_User " and type(binds["p_username_esperado"]) is str
+    assert binds["p_program_esperado"] == program and (program is None) == (binds["p_program_esperado"] is None)
+    assert binds["p_machine_esperado"] == machine and (machine is None) == (binds["p_machine_esperado"] is None)
+    assert binds["p_ref_aprovacao"] == REF_VALIDO
+    assert binds["p_logon_time_esperado"].tipo is oracledb.DB_TYPE_DATE
+    assert binds["p_logon_time_esperado"].getvalue() == LOGON_TIME_PADRAO
+    assert type(binds["p_logon_time_esperado"].getvalue()) is datetime
+    assert binds["p_status"].tipo is oracledb.DB_TYPE_VARCHAR
+
+
+# ---- T4: logon_time entra no hash (D3) ---------------------------------------
+
+def test_t4_logon_time_diferente_na_reconsulta_alvo_alterado(monkeypatch, tmp_path, ambiente_fake):
+    """T4: só o logon_time muda entre aprovação e reconsulta -> ALVO_ALTERADO, 0 conexões KILL, RESULTADO gravada."""
+    aprovada = _linha_alvo(logon_time=datetime(2026, 11, 23, 10, 0, 0))
+    reconsulta = _linha_alvo(logon_time=datetime(2026, 11, 23, 10, 0, 1))
+    oracle_fake = _OracleFake([aprovada, reconsulta], kill_permitido=False)
+
+    desfecho, registros = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+
+    assert desfecho["decisao"] == "APROVADO"
+    assert desfecho["resultado_banco"] == "ALVO_ALTERADO"
+    assert desfecho["executado"] is False
+    assert oracle_fake.conexoes_kill == []
+    assert [r["fase"] for r in registros] == ["INTENCAO", "RESULTADO"]
+    assert registros[1]["resultado_banco"] == "ALVO_ALTERADO"
+    assert registros[0]["id_intervencao"] == registros[1]["id_intervencao"]
+
+
+# ---- T5: ALVO_DIVERGENTE não é execução (D5) ---------------------------------
+
+def test_t5_alvo_divergente_nao_executado(monkeypatch, tmp_path, ambiente_fake):
+    """T5: p_status=ALVO_DIVERGENTE -> executado False, e-mail 'NÃO executada', mensagem sem 'executado para',
+    RESULTADO gravada. (A tela CLI/Web cai no ramo 'NÃO EXECUTADA' já existente: tests/test_fluxo_cli.py e
+    tests/test_fluxo_web.py; este arquivo não importa main/app.)"""
+    assert "ALVO_DIVERGENTE" not in oracle_dba.RESULTADOS_KILL_EXECUTADO
+    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], status_pkg="ALVO_DIVERGENTE")
+
+    desfecho, registros = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+
+    assert oracle_fake.conexoes_kill == [USER_KILL_FAKE]
+    assert desfecho["resultado_banco"] == "ALVO_DIVERGENTE"
+    assert desfecho["executado"] is False
+    assert desfecho["resultado_desconhecido"] is False
+    assert len(ambiente_fake) == 1
+    assunto = ambiente_fake[0]["assunto"]
+    assert "NÃO executada" in assunto and "Aprovada" not in assunto and "ALVO_DIVERGENTE" in assunto
+    tool = json.loads(desfecho["resultado_tool"])
+    assert tool["executado"] is False
+    assert "executado para" not in tool["mensagem"]
+    assert "NÃO executado" in tool["mensagem"]
+    assert registros[-1]["fase"] == "RESULTADO" and registros[-1]["resultado_banco"] == "ALVO_DIVERGENTE"
+
+
+# ---- T7: o resultado_tool do LLM não vaza ref, credenciais, identidade nem SQL (D5) ----
+
+def _casos_t7():
+    base = [_linha_alvo(), _linha_alvo()]
+    micro = _linha_alvo(logon_time=datetime(2026, 11, 23, 10, 0, 0, 1))
+    return [
+        pytest.param(dict(linhas=base, fake=dict(status_pkg="ENCERRADA")), "ENCERRADA", id="encerrada"),
+        pytest.param(dict(linhas=base, fake=dict(status_pkg="ALVO_DIVERGENTE")), "ALVO_DIVERGENTE", id="divergente"),
+        # logon_time com microssegundo na reconsulta: o hash bate e a validação local do kill recusa
+        pytest.param(dict(linhas=[micro, micro], fake=dict(kill_permitido=False)), "PARAM_INVALIDO", id="param_invalido"),
+        pytest.param(
+            dict(linhas=base, fake=dict(erro_kill=oracledb.DatabaseError("ORA-00600: erro interno"))),
+            "ERRO_ORACLE", id="erro_oracle",
+        ),
+    ]
+
+
+@pytest.mark.parametrize("cenario_t7, esperado", _casos_t7())
+def test_t7_resultado_tool_sem_ref_credenciais_identidade_nem_sql(
+    monkeypatch, tmp_path, ambiente_fake, cenario_t7, esperado
+):
+    """T7: o JSON que volta ao LLM não traz id_intervencao/ref, senha ou usuário, valores de identidade nem SQL."""
+    oracle_fake = _OracleFake(cenario_t7["linhas"], **cenario_t7["fake"])
+    desfecho, _ = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+
+    assert desfecho["resultado_banco"] == esperado
+    tool = desfecho["resultado_tool"]
+    assert re.fullmatch(r"[0-9a-f]{32}", desfecho["id_intervencao"])
+    proibidos = [
+        desfecho["id_intervencao"], "senha-fake", USER_KILL_FAKE, USER_DIAG_FAKE,
+        "APP_USER", "app.exe", "srv-app01", "2026-11-23 10:00:00", "2026-11-23T10:00:00",
+        "BEGIN", "=>", "p_ref_aprovacao", "ref_aprovacao",
+    ]
+    for texto in proibidos:
+        assert texto not in tool, f"resultado_tool de {esperado} traz {texto!r}"
+
+
+# ---- T8: logon_time no SELECT DIAG, no hash e recalculável a partir do JSONL (D3) ----
+
+def test_t8_logon_time_no_select_diag_no_hash_e_no_jsonl(monkeypatch, tmp_path, ambiente_fake):
+    """T8: o SELECT DIAG lê logon_time; +1 s muda o hash; o hash é recalculável da linha INTENCAO;
+    todo campo enviado ao PKG está no hash."""
+    # Invariante (L23): todo campo da identidade esperada está nos campos hasheados
+    esperados = set(oracle_dba.CAMPOS_IDENTIDADE_ESPERADA)
+    assert esperados == {"username", "program", "machine", "logon_time"}
+    assert esperados <= set(oracle_dba.CAMPOS_IDENTIDADE_ALVO)
+
+    # O SQL DIAG (a description do fake é fixa e esconde a remoção da coluna: confere-se o texto do SELECT)
+    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], status_pkg="ENCERRADA")
+    desfecho, registros = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+    sqls_diag = [sql for conta, sql, _ in oracle_fake.sql_executado if conta == "DIAG" and "gv$session" in sql.lower()]
+    assert len(sqls_diag) == 2
+    for sql in sqls_diag:
+        assert re.search(r"\blogon_time\b", sql, re.IGNORECASE), "o SELECT DIAG deve ler logon_time"
+
+    # +1 s no logon_time muda o hash
+    base = dict(zip([c.lower() for c in COLUNAS_ALVO], _linha_alvo()))
+    mais_1s = dict(base, logon_time=base["logon_time"] + timedelta(seconds=1))
+    assert calcular_hash_identidade(base) != calcular_hash_identidade(mais_1s)
+
+    # Auditoria offline: o hash recalculado do JSON da INTENCAO é o hash_payload gravado
+    intencao = registros[0]
+    assert intencao["fase"] == "INTENCAO"
+    assert intencao["alvo"]["logon_time"] == "2026-11-23 10:00:00"
+    assert calcular_hash_identidade(intencao["alvo"]) == intencao["hash_payload"]
+    assert calcular_hash_identidade(base) == intencao["hash_payload"]
+
+
+# ---- T9: exceção depois do execute = resultado desconhecido, sem retentativa (D8) ----
+
+def test_t9_excecao_no_getvalue_apos_execute_resultado_desconhecido(monkeypatch, tmp_path, ambiente_fake):
+    """T9: o getvalue do p_status levanta RuntimeError depois do execute -> resultado_desconhecido True,
+    executado False, exatamente 1 execute na conta KILL (sem retentativa) e RESULTADO gravada."""
+    oracle_fake = _OracleFake(
+        [_linha_alvo(), _linha_alvo()], status_pkg="ENCERRADA", erro_getvalue_status=RuntimeError("falha simulada")
+    )
+    desfecho, registros = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+
+    assert len(_binds_kill(oracle_fake)) == 1, "sem retentativa: 1 execute só"
+    assert desfecho["resultado_desconhecido"] is True
+    assert desfecho["executado"] is False
+    tool = json.loads(desfecho["resultado_tool"])
+    assert tool["resultado_desconhecido"] is True
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO in tool["mensagem"]
+    assert len(ambiente_fake) == 1
+    assert "NÃO executada" not in ambiente_fake[0]["assunto"], "e-mail não pode afirmar 'NÃO executada'"
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO in ambiente_fake[0]["assunto"]
+    assert [r["fase"] for r in registros] == ["INTENCAO", "RESULTADO"]
+
+
+# ---- T10: o LLM não fornece identidade nem ref (D4) --------------------------
+
+def test_t10_argumentos_extras_do_llm_sao_ignorados(monkeypatch, tmp_path, ambiente_fake):
+    """T10: ref_aprovacao, logon_time, username, program e machine vindos do LLM são ignorados: os binds vêm
+    da reconsulta DIAG e do id_intervencao gerado internamente."""
+    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], status_pkg="ENCERRADA")
+    argumentos = dict(
+        ARGS_ALVO, ref_aprovacao="f" * 32, logon_time="1999-01-01 00:00:00",
+        username="EVIL_USER", program="evil.exe", machine="evil-host",
+    )
+    desfecho, registros = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake, argumentos)
+
+    assert desfecho["executado"] is True
+    (sql, binds), = _binds_kill(oracle_fake)
+    assert binds["p_username_esperado"] == "APP_USER"
+    assert binds["p_program_esperado"] == "app.exe"
+    assert binds["p_machine_esperado"] == "srv-app01"
+    assert binds["p_logon_time_esperado"].getvalue() == LOGON_TIME_PADRAO
+    assert binds["p_ref_aprovacao"] == desfecho["id_intervencao"] != "f" * 32
+    assert binds["p_ref_aprovacao"] == registros[0]["id_intervencao"]
 
 
 # =============================================================================

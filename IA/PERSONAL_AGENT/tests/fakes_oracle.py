@@ -4,12 +4,20 @@ Fakes de Oracle compartilhados pelos testes sem conexão (movidos de test_oracle
 Roteamento por SQL: só a consulta de alvo (consultar_alvo_sessao_diag: FROM GV$SESSION com
 bind :p_serial, conta DIAG) consome a fila `linhas_diag`; as demais consultas não a consomem.
 """
+from datetime import datetime
+
+import oracledb
 import pytest
 
 USER_DIAG_FAKE = "diag_teste_fake"
 USER_KILL_FAKE = "kill_teste_fake"
 
-COLUNAS_ALVO = ["INST_ID", "SID", "serial#", "USERNAME", "PROGRAM", "MACHINE", "STATUS", "SQL_ID", "EVENT", "TYPE"]
+# LOGON_TIME no fim: preserva row[2] = serial# (a produção lê o serial# por posição).
+COLUNAS_ALVO = [
+    "INST_ID", "SID", "serial#", "USERNAME", "PROGRAM", "MACHINE", "STATUS", "SQL_ID", "EVENT", "TYPE", "LOGON_TIME",
+]
+
+LOGON_TIME_PADRAO = datetime(2026, 11, 23, 10, 0, 0)
 
 
 def _linha_alvo(
@@ -23,15 +31,25 @@ def _linha_alvo(
     inst_id=1,
     sid=101,
     serial=202,
+    logon_time=LOGON_TIME_PADRAO,
 ):
-    return (inst_id, sid, serial, username, program, machine, status, sql_id, event, tipo)
+    return (inst_id, sid, serial, username, program, machine, status, sql_id, event, tipo, logon_time)
 
 
 class _VarFake:
-    def __init__(self, valor):
+    """Var de bind: guarda o tipo pedido e o valor (setvalue). getvalue pode levantar (T9, D8)."""
+
+    def __init__(self, tipo=None, valor=None, erro_getvalue=None):
+        self.tipo = tipo
+        self._valor = valor
+        self._erro_getvalue = erro_getvalue
+
+    def setvalue(self, pos, valor):
         self._valor = valor
 
     def getvalue(self):
+        if self._erro_getvalue is not None:
+            raise self._erro_getvalue
         return self._valor
 
 
@@ -58,8 +76,14 @@ class _CursorFake:
     def fetchone(self):
         return self._linha
 
-    def var(self, *args, **kwargs):
-        return _VarFake(self.oracle.status_pkg)
+    def var(self, tipo=None, *args, **kwargs):
+        # Só a var VARCHAR (p_status) devolve status_pkg; as demais (ex.: DATE) devolvem o que o setvalue gravou.
+        if tipo is oracledb.DB_TYPE_VARCHAR:
+            var = _VarFake(tipo, self.oracle.status_pkg, self.oracle.erro_getvalue_status)
+        else:
+            var = _VarFake(tipo)
+        self.oracle.vars_criadas.append(var)
+        return var
 
     def close(self):
         pass
@@ -80,9 +104,14 @@ class _ConexaoFake:
 class _OracleFake:
     """Simula oracledb.connect: fila de linhas para a conta DIAG e p_status para a conta KILL."""
 
-    def __init__(self, linhas_diag, status_pkg=None, kill_permitido=True, erro_kill=None, erro_connect_kill=None):
+    def __init__(
+        self, linhas_diag, status_pkg=None, kill_permitido=True, erro_kill=None, erro_connect_kill=None,
+        erro_getvalue_status=None,
+    ):
         self.linhas_diag = list(linhas_diag)
         self.status_pkg = status_pkg
+        self.erro_getvalue_status = erro_getvalue_status  # exceção levantada pelo getvalue da var do p_status
+        self.vars_criadas = []
         self.kill_permitido = kill_permitido
         self.erro_kill = erro_kill  # exceção levantada pelo execute da conta KILL
         self.erro_connect_kill = erro_connect_kill  # exceção levantada pelo connect da conta KILL

@@ -73,8 +73,21 @@ RECONCILIACAO_IDADE_MINIMA_SEGUNDOS = APROVACAO_TTL_SEGUNDOS + 300
 # Resultados de PKG_OPS_KILL que significam execução efetiva do encerramento
 RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = ("ENCERRADA", "MARCADA_PARA_KILL")
 
-# Campos que identificam a sessão alvo; únicos campos cobertos pelo hash de aprovação
-CAMPOS_IDENTIDADE_ALVO: Tuple[str, ...] = ("inst_id", "sid", "serial#", "username", "program", "machine")
+# Identidade esperada enviada ao PKG_OPS_KILL v2 (1.11-V2 item 6; docs/entregas/1.11/v2_refeito/decisao.md D1).
+CAMPOS_IDENTIDADE_ESPERADA: Tuple[str, ...] = ("username", "program", "machine", "logon_time")
+
+# Campos que identificam a sessão alvo; únicos campos cobertos pelo hash de aprovação.
+# Todo campo enviado ao PKG como identidade esperada está no hash (invariante com teste, L23).
+CAMPOS_IDENTIDADE_ALVO: Tuple[str, ...] = ("inst_id", "sid", "serial#") + CAMPOS_IDENTIDADE_ESPERADA
+
+# Limite local de tamanho (caracteres) dos textos de identidade. O PKG é a autoridade (128 bytes, LENGTHB);
+# o limite local só barra defeito e nunca recusa alvo legítimo (decisao.md D1).
+LIMITE_TEXTO_IDENTIDADE = 128
+
+MENSAGEM_ALVO_DIVERGENTE = (
+    "A identidade da sessão no banco diverge da aprovada (verificação do PKG_OPS_KILL). "
+    "Encerramento NÃO executado. Campos e valores só em OPS_KILL_AUDIT."
+)
 
 # Usuários que nunca podem ser alvo de encerramento.
 # Fonte única no Python; deve permanecer idêntica a c_protegidos em
@@ -599,7 +612,8 @@ def consultar_alvo_sessao_diag(
                    status,
                    sql_id,
                    event,
-                   type
+                   type,
+                   logon_time
             FROM GV$SESSION
             WHERE inst_id = :p_inst_id
               AND sid = :p_sid
@@ -686,13 +700,54 @@ def consultar_alvo_sessao_diag(
                 pass
 
 
-def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int]) -> str:
+def _texto_identidade_invalido(valor: Any, aceita_none: bool) -> bool:
+    """Texto de identidade: str de 1 a LIMITE_TEXTO_IDENTIDADE caracteres (ou None, se aceito). Nunca levanta."""
+    if valor is None:
+        return not aceita_none
+    if not isinstance(valor, str):
+        return True
+    return len(valor) > LIMITE_TEXTO_IDENTIDADE or (not aceita_none and len(valor) < 1)
+
+
+def campos_invalidos_identidade_e_ref(identidade_esperada: Any, ref_aprovacao: Any) -> List[str]:
+    """
+    Validação local (camada adicional; o PKG_OPS_KILL v2 é a autoridade e revalida tudo): devolve os NOMES dos
+    campos inválidos, nunca valores. Total: nunca levanta, para qualquer tipo de entrada (decisao.md D1).
+    Os valores não são transformados (nem strip/upper/str): o PKG compara bytes.
+    """
+    invalidos: List[str] = []
+    if not isinstance(identidade_esperada, dict) or set(identidade_esperada.keys()) != set(CAMPOS_IDENTIDADE_ESPERADA):
+        invalidos.append("identidade_esperada")
+    else:
+        if _texto_identidade_invalido(identidade_esperada["username"], aceita_none=False):
+            invalidos.append("username")
+        for campo in ("program", "machine"):
+            if _texto_identidade_invalido(identidade_esperada[campo], aceita_none=True):
+                invalidos.append(campo)
+        logon = identidade_esperada["logon_time"]
+        if not (isinstance(logon, datetime) and logon.tzinfo is None and logon.microsecond == 0):
+            invalidos.append("logon_time")
+    if not (isinstance(ref_aprovacao, str) and _REGEX_ID_INTERVENCAO.fullmatch(ref_aprovacao)):
+        invalidos.append("ref_aprovacao")
+    return invalidos
+
+
+def matar_sessao_oracle(
+    sid: int,
+    serial: int,
+    inst_id: Optional[int],
+    *,
+    identidade_esperada: Dict[str, Any],
+    ref_aprovacao: str,
+) -> str:
     """
     Executa o procedimento homologado de encerramento de sessão via conta segregada ORACLE_USER_KILL.
-    Chama OPS_OWNER.PKG_OPS_KILL.KILL_SESSION com binds nomeados (p_inst_id, p_sid, p_serial, p_status).
-    NÃO executa comando de sessão direto no Python.
+    Chama OPS_OWNER.PKG_OPS_KILL.KILL_SESSION (v2) num único bloco com os 9 formais nomeados, sem fallback
+    para a assinatura v1 e sem retentativa. NÃO executa comando de sessão direto no Python.
     inst_id é obrigatório: não há instância padrão. Ausente (None) ou não inteiro positivo
     retorna PARAM_INVALIDO antes de qualquer consulta ou conexão.
+    identidade_esperada e ref_aprovacao: keyword-only, sem default (decisao.md D4). A identidade vem da
+    reconsulta DIAG cujo hash bateu; o PKG a compara com a GV$SESSION na mesma chamada do kill (D2).
     """
     # 1. Validação local antes de qualquer conexão: inteiros positivos, todos obrigatórios
     validados = validar_parametros_kill(inst_id, sid, serial)
@@ -710,6 +765,22 @@ def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int]) -> str:
             ensure_ascii=False,
         )
     inst_id_int, sid_int, serial_int = validados
+
+    # 1b. Identidade esperada e ref de aprovação, ainda antes do getenv (a mensagem só nomeia campos).
+    invalidos = campos_invalidos_identidade_e_ref(identidade_esperada, ref_aprovacao)
+    if invalidos:
+        return json.dumps(
+            {
+                "status": "recusado",
+                "motivo": "PARAM_INVALIDO",
+                "status_banco": "PARAM_INVALIDO",
+                "mensagem": (
+                    "Identidade esperada ou referência de aprovação inválida; encerramento NÃO executado. "
+                    f"Campos inválidos: {', '.join(invalidos)}."
+                ),
+            },
+            ensure_ascii=False,
+        )
 
     # 2. Verificação de credenciais segregadas da conta KILL
     user = os.getenv("ORACLE_USER_KILL")
@@ -763,26 +834,55 @@ def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int]) -> str:
         )
         cursor = connection.cursor()
 
-        # Execução com binds nomeados conforme contrato de segurança da PKG_OPS_KILL
+        # Execução com os 9 formais nomeados do PKG_OPS_KILL v2. As duas var são criadas antes de
+        # execute_iniciado: erro ali prova que o PKG não rodou. logon_time vai como DATE pela própria var,
+        # sem str nem TO_DATE (decisao.md D2). Valores de identidade crus, sem transformação (D1).
         status_var = cursor.var(oracledb.DB_TYPE_VARCHAR, size=128)
+        logon_var = cursor.var(oracledb.DB_TYPE_DATE)
+        logon_var.setvalue(0, identidade_esperada["logon_time"])
         execute_iniciado = True
         cursor.execute(
             """
             BEGIN
                 OPS_OWNER.PKG_OPS_KILL.KILL_SESSION(
-                    p_inst_id => :p_inst_id,
-                    p_sid     => :p_sid,
-                    p_serial  => :p_serial,
-                    p_status  => :p_status
+                    p_inst_id             => :p_inst_id,
+                    p_sid                 => :p_sid,
+                    p_serial              => :p_serial,
+                    p_username_esperado   => :p_username_esperado,
+                    p_program_esperado    => :p_program_esperado,
+                    p_machine_esperado    => :p_machine_esperado,
+                    p_logon_time_esperado => :p_logon_time_esperado,
+                    p_ref_aprovacao       => :p_ref_aprovacao,
+                    p_status              => :p_status
                 );
             END;
             """,
             p_inst_id=inst_id_int,
             p_sid=sid_int,
             p_serial=serial_int,
+            p_username_esperado=identidade_esperada["username"],
+            p_program_esperado=identidade_esperada["program"],
+            p_machine_esperado=identidade_esperada["machine"],
+            p_logon_time_esperado=logon_var,
+            p_ref_aprovacao=ref_aprovacao,
             p_status=status_var,
         )
         status_banco = str(status_var.getvalue() or "").strip()
+
+        if status_banco == "ALVO_DIVERGENTE":
+            # O Python só recebe o código; a mensagem não usa o texto genérico "executado" (decisao.md D5).
+            return json.dumps(
+                {
+                    "status": status_banco,
+                    "motivo": status_banco,
+                    "status_banco": status_banco,
+                    "inst_id": inst_id_int,
+                    "sid": sid_int,
+                    "serial": serial_int,
+                    "mensagem": MENSAGEM_ALVO_DIVERGENTE,
+                },
+                ensure_ascii=False,
+            )
 
         return json.dumps(
             {
@@ -821,15 +921,22 @@ def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int]) -> str:
             ensure_ascii=False,
         )
     except Exception as exc:
+        # D8 (decisao.md): exceção que não é do Oracle depois do execute também não prova que o kill deixou
+        # de acontecer. Sem retentativa automática: o resultado é devolvido como desconhecido.
+        if execute_iniciado:
+            mensagem = f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro a partir da chamada ao PKG: {type(exc).__name__}"
+        else:
+            mensagem = str(exc)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": type(exc).__name__,
+                "resultado_desconhecido": execute_iniciado,
                 "instancia": dsn,
                 "sid": sid_int,
                 "serial": serial_int,
                 "tipo_erro": type(exc).__name__,
-                "mensagem": str(exc),
+                "mensagem": mensagem,
             },
             ensure_ascii=False,
         )
@@ -851,9 +958,13 @@ def matar_sessao_oracle(sid: int, serial: int, inst_id: Optional[int]) -> str:
 # ------------------------------------------------------------------------------
 
 def _normalizar_valor_identidade(valor: Any) -> Any:
-    """Normaliza tipos numéricos vindos do driver para que o hash não dependa do tipo Python."""
+    """Normaliza tipos numéricos vindos do driver para que o hash não dependa do tipo Python.
+    datetime (logon_time) vira isoformat(sep=" "), idêntico a str(dt) e ao que o JSONL grava: o hash pode ser
+    recalculado a partir da linha INTENCAO (decisao.md D3)."""
     if valor is None or isinstance(valor, (bool, str)):
         return valor
+    if isinstance(valor, datetime):
+        return valor.isoformat(sep=" ")
     if isinstance(valor, int):
         return valor
     try:
@@ -874,7 +985,7 @@ def extrair_identidade_alvo(alvo: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 def calcular_hash_identidade(alvo: Optional[Dict[str, Any]]) -> str:
     """
     Hash SHA-256 canônico calculado apenas sobre os campos de identidade:
-    inst_id, sid, serial#, username, program, machine.
+    inst_id, sid, serial#, username, program, machine, logon_time.
     timestamp, status, event e sql_id ficam de fora, pois variam sem que o alvo mude.
     """
     identidade = extrair_identidade_alvo(alvo)
@@ -910,6 +1021,7 @@ def executar_kill_verificado(
     hash_aprovado: str,
     *,
     aprovacao_expirada: Callable[[], bool],
+    ref_aprovacao: str,
 ) -> str:
     """
     Verificação de integridade imediatamente antes do encerramento:
@@ -923,6 +1035,9 @@ def executar_kill_verificado(
     TTL vencido no recheck -> APROVACAO_EXPIRADA, sem chamada à conta KILL.
     aprovacao_expirada: keyword-only, sem default. É um callable (e não preparado_em/agora) para que o
     item 7 troque a base do TTL num único ponto (desvio do plano registrado em docs/plans/1.11.md).
+    ref_aprovacao: keyword-only, sem default; é o id_intervencao da INTENCAO (decisao.md D4).
+    A identidade esperada enviada ao PKG vem da reconsulta cujo hash bateu, montada depois do hash, da
+    elegibilidade e do TTL, só com as chaves presentes (a falta de chave fica para a validação local).
     """
     reconsulta = consultar_alvo_sessao_diag(inst_id=inst_id, sid=sid, serial=serial)
 
@@ -999,7 +1114,15 @@ def executar_kill_verificado(
             ensure_ascii=False,
         )
 
-    return matar_sessao_oracle(sid=sid, serial=serial, inst_id=inst_id)
+    alvo_reconsulta = reconsulta.get("alvo") or {}
+    identidade_esperada = {c: alvo_reconsulta[c] for c in CAMPOS_IDENTIDADE_ESPERADA if c in alvo_reconsulta}
+    return matar_sessao_oracle(
+        sid=sid,
+        serial=serial,
+        inst_id=inst_id,
+        identidade_esperada=identidade_esperada,
+        ref_aprovacao=ref_aprovacao,
+    )
 
 
 def _diretorio_log_aprovacao() -> Path:
@@ -1560,6 +1683,7 @@ def registrar_decisao_kill(
             serial=serial,
             hash_aprovado=hash_aprovado,
             aprovacao_expirada=lambda: _aprovacao_expirada(preparado_em, relogio()),
+            ref_aprovacao=id_intervencao,
         )
     except Exception as exc:
         motivo_resultado = type(exc).__name__

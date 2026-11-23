@@ -216,6 +216,7 @@ def _solicitar_aprovacao_cli(prep: dict) -> tuple[str, str, str | None]:
     print(f"Alvo Identificado: inst_id={alvo_dados.get('inst_id')}, sid={alvo_dados.get('sid')}, serial#={alvo_dados.get('serial#')}")
     print(f"Usuário Oracle  : {alvo_dados.get('username')}")
     print(f"Programa/Máquina: {alvo_dados.get('program')} / {alvo_dados.get('machine')}")
+    print(f"Logon (DATE)    : {alvo_dados.get('logon_time')}")
     print(f"Status Atual    : {alvo_dados.get('status')}")
     print(f"SQL ID          : {alvo_dados.get('sql_id')}")
     print(f"Evento Espera   : {alvo_dados.get('event')}")
@@ -256,7 +257,7 @@ def _exibir_desfecho_kill_cli(desfecho: dict) -> None:
     elif desfecho.get("resultado_desconhecido"):
         print(
             f"\033[91m[Sistema]: Intervenção APROVADA por '{desfecho['aprovador']}': "
-            f"{MENSAGEM_RESULTADO_DESCONHECIDO} (erro do Oracle a partir da chamada ao PKG; "
+            f"{MENSAGEM_RESULTADO_DESCONHECIDO} (erro a partir da chamada ao PKG; "
             f"resultado: {desfecho['resultado_banco']}).\033[0m"
         )
     elif desfecho["executado"]:

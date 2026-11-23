@@ -54,6 +54,11 @@ from tests.test_oracle_kill import (  # noqa: F401  (ambiente_fake é uma fixtur
 )
 
 RAIZ = Path(__file__).resolve().parent.parent
+# Os 9 formais do PKG_OPS_KILL v2, na ordem da spec (docs/plans/1.11.md:117; implantacao.md:68-82).
+ORDEM_BINDS_KILL_V2 = [
+    "p_inst_id", "p_sid", "p_serial", "p_username_esperado", "p_program_esperado", "p_machine_esperado",
+    "p_logon_time_esperado", "p_ref_aprovacao", "p_status",
+]
 ID_A = "a" * 32
 ID_B = "b" * 32
 ID_C = "c" * 32
@@ -207,9 +212,16 @@ def test_intencao_gravada_antes_da_conta_kill(monkeypatch, tmp_path, ambiente_fa
     assert re.fullmatch(r"[0-9a-f]{32}", intencao["id_intervencao"])
     assert resultado["resultado_banco"] == "ENCERRADA"
     assert desfecho["falha_registro"] is None
-    # Sem o item 6 (aa9a0a5 revertido): a chamada ao PKG continua v1 (4 binds), sem ref_aprovacao
-    (_, _, binds), = [s for s in fake.sql_executado if s[0] == "KILL"]
-    assert set(binds) == {"p_inst_id", "p_sid", "p_serial", "p_status"}
+    # Item 6 v2 (docs/plans/1.11-V2-item6.md §4.3; decisao.md D7): a chamada ao PKG tem os 9 formais da v2,
+    # conferidos por nome e ordem nos binds e no texto do bloco; o ref é o id_intervencao da INTENCAO e da
+    # RESULTADO; o logon_time vai numa var DATE com o valor lido pela DIAG.
+    (_, sql, binds), = [s for s in fake.sql_executado if s[0] == "KILL"]
+    assert list(binds) == ORDEM_BINDS_KILL_V2
+    assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2
+    assert binds["p_ref_aprovacao"] == intencao["id_intervencao"]
+    assert binds["p_ref_aprovacao"] == resultado["id_intervencao"]
+    assert binds["p_logon_time_esperado"].tipo is oracledb.DB_TYPE_DATE
+    assert binds["p_logon_time_esperado"].getvalue() == _linha_alvo()[COLUNAS_ALVO.index("LOGON_TIME")]
 
 
 # =============================================================================
@@ -551,6 +563,60 @@ def test_pls00306_no_execute_e_resultado_desconhecido(monkeypatch, tmp_path, amb
     assert [s for s in fake.sql_executado if s[0] == "KILL"].__len__() == 1, "sem nova tentativa"
     assert MENSAGEM_RESULTADO_DESCONHECIDO in desfecho["resultado_tool"]
     assert MENSAGEM_RESULTADO_DESCONHECIDO in ambiente_fake[0]["assunto"]
+
+
+@pytest.mark.parametrize(
+    "cenario, fake_kw, resultado_esperado",
+    [
+        ("encerrada", {"status_pkg": "ENCERRADA"}, "ENCERRADA"),
+        ("alvo_divergente", {"status_pkg": "ALVO_DIVERGENTE"}, "ALVO_DIVERGENTE"),
+        ("erro_no_execute", {"erro_kill": oracledb.DatabaseError("ORA-00600: erro interno")}, "ERRO_ORACLE"),
+    ],
+)
+def test_kill_ponto_unico_de_chamada(monkeypatch, tmp_path, ambiente_fake, cenario, fake_kw, resultado_esperado):
+    """implantacao.md:202-205 (achado da conferencia.md do passo 7): fluxo completo aprovado, nos 3 cenários,
+    com exatamente 1 conexão KILL e exatamente 1 execute na conta KILL, e esse execute é o bloco v2 com os
+    9 formais em ordem. Prova pelo comportamento que não há segunda chamada nem bloco alternativo de 4
+    formais em nenhum caminho (o ALVO_DIVERGENTE incluído)."""
+    log = tmp_path / "kill.log"
+    fake = _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo(), _linha_alvo()], **fake_kw))
+    desfecho = conduzir_kill_hitl(dict(ARGS_ALVO), solicitar_aprovacao=_aprovar(), canal="TESTE", caminho_log=log)
+
+    assert desfecho["resultado_banco"] == resultado_esperado
+    assert fake.conexoes_kill == [USER_KILL_FAKE], f"{cenario}: exatamente 1 conexão KILL"
+    execucoes = [(sql, binds) for conta, sql, binds in fake.sql_executado if conta == "KILL"]
+    assert len(execucoes) == 1, f"{cenario}: exatamente 1 execute na conta KILL"
+    sql, binds = execucoes[0]
+    assert "OPS_OWNER.PKG_OPS_KILL.KILL_SESSION" in sql
+    assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2
+    assert list(binds) == ORDEM_BINDS_KILL_V2
+
+
+def test_t6_v2_contra_pkg_v1_falha_fechado_sem_fallback(monkeypatch, tmp_path, ambiente_fake):
+    """T6 (decisao.md D6; plano §7.4): o Python v2 contra o PKG v1 (PLS-00306 no execute) falha fechado.
+    Exatamente 1 execute na conta KILL, com o bloco v2 de 9 formais; nenhum bloco de 4 formais, nenhuma
+    retentativa; ERRO_ORACLE com resultado desconhecido, executado False e RESULTADO gravada."""
+    log = tmp_path / "kill.log"
+    fake = _instalar_oracle(
+        monkeypatch,
+        _OracleFake(
+            [_linha_alvo(), _linha_alvo()],
+            erro_kill=oracledb.DatabaseError("PLS-00306: wrong number or types of arguments in call to 'KILL_SESSION'"),
+        ),
+    )
+    desfecho = conduzir_kill_hitl(dict(ARGS_ALVO), solicitar_aprovacao=_aprovar(), canal="TESTE", caminho_log=log)
+
+    execucoes = [(sql, binds) for conta, sql, binds in fake.sql_executado if conta == "KILL"]
+    assert len(execucoes) == 1, "sem fallback nem retentativa: 1 execute só"
+    sql, binds = execucoes[0]
+    assert list(binds) == ORDEM_BINDS_KILL_V2
+    assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2, "nenhum bloco v1 de 4 formais"
+    assert desfecho["resultado_banco"] == "ERRO_ORACLE"
+    assert desfecho["resultado_desconhecido"] is True
+    assert desfecho["executado"] is False
+    registros = _ler_jsonl(log)
+    assert [r["fase"] for r in registros] == ["INTENCAO", "RESULTADO"]
+    assert registros[1]["resultado_banco"] == "ERRO_ORACLE"
 
 
 # =============================================================================
