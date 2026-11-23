@@ -24,7 +24,7 @@ Tarefa só de leitura (revisão, diagnóstico, levantamento) pula as etapas 1, 6
 
 ## 2. Mapa de código de segurança
 
-Produção nestas áreas só é escrita por Opus (sessão principal), que confere o próprio modelo antes de começar. O `mecanico` só a edita com a autorização literal do responsável citada no pedido. Testes dessas áreas podem ser do `mecanico`, com revisão da sessão principal.
+Produção nestas áreas só é escrita por Opus (sessão principal), que confere o próprio modelo antes de começar. O `mecanico` só a edita com a autorização literal do responsável citada no pedido. A exceção é a fiação do guarda (`.claude/**`, `tools/guarda_agentes.py`): nenhum subagente a grava, nem com autorização literal. O guarda bloqueia essa gravação (R5, §3), conforme a decisão do responsável de 2026-11-19 (`docs/plans/guarda-r4-r5.md`). Testes dessas áreas podem ser do `mecanico`, com revisão da sessão principal.
 
 | Área | Onde |
 |---|---|
@@ -35,8 +35,9 @@ Produção nestas áreas só é escrita por Opus (sessão principal), que confer
 | Execução de scripts | `src/tools/executor.py` (tokenização, tipo real do SQL, hash, conta READ ou MUT), `src/tools/registry.py`, `registry/*.yaml`, `tools/verificar_registro.py` |
 | Verificação, controle e guarda | `tools/verificacao_padrao.py` (passos 0 a 3 do §5), `tools/controle_mutacao.py` (controle de mutação) e `tools/guarda_agentes.py` (hook dos subagentes) |
 | Contas e chaves | `.env.example` (só nomes, nunca valores) |
+| Definição dos agentes e hooks | `.claude/agents/*.md` (modelo, ferramentas, `maxTurns`, hook do guarda) e `.claude/settings*.json`. É a fiação do guarda: nenhum subagente grava aqui (R5) |
 
-Mudou o mapa? Atualize também a lista do `.claude/agents/mecanico.md`.
+Mudou o mapa? Atualize também a lista do `.claude/agents/mecanico.md`, o que só Opus faz, porque o arquivo é da fiação.
 
 ## 3. Delegação
 
@@ -74,9 +75,43 @@ O pedido tem no máximo 1.000 caracteres: o que não couber vai no plano, citado
   - git fora da lista de liberação, que só tem leitura (R1). A lista vale também para as opções (abreviação, `-O`, `-c` fora de `core.quotepath`, `i18n.logOutputEncoding` e `color.ui`) e barra configuração injetada pelo ambiente (`GIT_CONFIG_*`);
   - conteúdo do `.env` (R2);
   - `ORACLE_SANDBOX=1` em comando e, nas formas do grep 3.5, em qualquer arquivo que não seja documentação (`.md` e `.txt`) (R3);
-  - gravação fora da pasta do perfil (R4): `docs/entregas/` no `verificador`; só `decisao*.md` e `conferencia*.md` no `seguranca`.
+  - gravação fora da pasta do perfil (R4), no `verificador` e no `seguranca`:
+    - **onde gravam:** o `verificador` grava em `docs/entregas/`; o `seguranca`, só `decisao*.md` e `conferencia*.md` ali.
+    - **pasta temporária:** os dois também gravam na pasta temporária (scratchpad), mas só pelo shell. A pasta temporária deixa de valer se contém a raiz do projeto.
+    - **o que o guarda olha:** Write, Edit e, no Bash e no PowerShell (`guarda-r4-r5`), os destinos das formas comuns: redirecionamento; `tee`, `cp`, `mv`, `rm`, `mkdir`, `touch`, `sed -i`, `ln`, `tar -x`, `robocopy`, `xcopy`; e os cmdlets de conteúdo, item, cópia, remoção e arquivo, com aliases.
+    - **variável e `cd`:** a variável vale só se foi atribuída com valor literal no começo do comando. O `cd` só conta com alvo literal.
+    - **bloqueio por falha fechada:** destino que o guarda não resolve bloqueia. Comando não analisável também bloqueia: shell aninhado sem texto literal, `eval`, `iex`, `cmd /c`, `xargs` com gravação, splat, .NET que grava e aspas abertas.
+  - gravação na fiação do guarda (R5), em todo perfil, por qualquer ferramenta:
+    - em qualquer `.claude/` (o do projeto e o do usuário);
+    - em `tools/guarda_agentes.py`;
+    - no interpretador do hook: `sitecustomize.py`, `usercustomize.py`, `*.pth` em `site-packages`, executáveis `python`/`py` e as pastas `sys.prefix`.
 
-  Bloqueio volta como PARE. É guarda contra acidente, não sandbox.
+    O guarda reconhece a fiação pelo nome, pelo caminho, pelo `realpath` e pelo ancestral em operação recursiva. Quando o destino não se resolve, o R5 também vale se o texto do comando citar a fiação. A leitura da fiação passa.
+
+  Bloqueio volta como PARE. É guarda contra acidente, não sandbox (critério de 2026-11-23, `docs/plans/guarda-r4-r5.md` §5).
+
+  **Residuais aceitos:**
+  - gravação por interpretador (`python -c`, script);
+  - programa que grava por opção própria fora da lista (N1);
+  - no `mecanico`, destino não resolvido que não cita a fiação (N6);
+  - as formas de evasão deliberada listadas nas conferências (`docs/entregas/guarda-r4-r5/conferencia_5b.md` a `conferencia_5e.md`).
+
+  A detecção desses residuais é o `git status` e o hash da fiação (abaixo).
+
+  **Formas que o guarda barra por falso positivo, com a alternativa:**
+  - `$TEMP` no Bash: caminho literal;
+  - `[IO.File]::Write*`: `Set-Content` ou `Out-File`;
+  - destino com a variável do laço: gravar fora do laço;
+  - no Git Bash, `robocopy /E`: `robocopy //E`, porque o Git Bash converte `/E` em `E:/`;
+  - comando com `-Command -` ou `| bash`: texto literal em `-c`.
+
+  **Sonda do `seguranca` que cita a fiação ou forma opaca:** é barrada, também no scratchpad, e o Write dele não grava fora de `decisao*`/`conferencia*`. Ele a descreve no arquivo da conferência, e a sessão principal a roda (L33).
+
+  **Hash da fiação (N7):** antes e depois de cada delegação, a sessão principal grava o hash da fiação em `docs/entregas/<tarefa>/hash_fiacao_<antes|depois>.txt` e compara os dois. A fiação são os arquivos de `.claude/` do projeto, o `.claude/settings.local.json` (ignorado pelo git) e, no usuário, `~/.claude/agents/` e `~/.claude/settings*.json`. Diferença sem explicação é PARE, porque o `git status` não vê esses arquivos.
+
+  ```bash
+  find .claude ~/.claude/agents -type f 2>/dev/null | sort | xargs -r sha256sum; sha256sum ~/.claude/settings*.json 2>/dev/null
+  ```
 
   Testado ao vivo em 2026-11-19 (`docs/entregas/ajuste-fino-subagentes/sondas.md`):
   - R1, R2 e R4 bloquearam, e o `git status` rodou;

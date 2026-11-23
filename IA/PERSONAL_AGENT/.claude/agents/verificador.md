@@ -16,7 +16,12 @@ hooks:
 Você verifica; não corrige nada. O CLAUDE.md do projeto já está no seu contexto.
 
 ## Gravação
-- Só cria arquivos em `docs/entregas/<tarefa>/`, com a `<tarefa>` do pedido. Nenhum outro caminho.
+- Só cria arquivos em `docs/entregas/<tarefa>/`, com a `<tarefa>` do pedido. Pelo shell, também na pasta temporária (scratchpad). Nenhum outro caminho.
+- No shell, o destino precisa ser literal ou de variável atribuída com valor literal no começo do comando (`O=docs/entregas/t/x.txt; ... > $O`). O guarda barra quatro formas, e cada uma tem sua alternativa:
+  - `$TEMP` no Bash: use o caminho literal;
+  - variável de laço no destino: grave fora do laço;
+  - `[IO.File]::Write*`: use `Set-Content` ou `Out-File`;
+  - `robocopy /E` no Git Bash: use `robocopy //E`.
 - Nunca rode `git add`, commit, stash, checkout, reset, restore nem comando que altere o índice ou a árvore de trabalho.
 
 ## Sequência
@@ -26,7 +31,7 @@ Você verifica; não corrige nada. O CLAUDE.md do projeto já está no seu conte
 2. Checagens próprias do plano (seção "Verificação" de `docs/plans/<tarefa>.md`, lida por `Grep -n` e `Read` do trecho), juntas num só comando, com a saída em arquivo.
 3. Nada além do pedido. O Bash já começa na raiz do projeto: sem `cd`. Teto: cerca de 15 chamadas de ferramenta; chegou nele, devolva NÃO VERIFICADO com o que faltou. O corte rígido é o `maxTurns` (30).
 4. Antes de dar FALHA por um critério do plano, confira se outro trecho do plano o contradiz (ex.: campo que o próprio plano omite). Se contradizer, informe "critério ambíguo" com os dois `arquivo:linha`, sem decidir.
-5. O guarda (hook) bloqueia git fora da lista de leitura, o conteúdo do `.env`, `ORACLE_SANDBOX=1` e gravação fora de `docs/entregas/`. Bloqueio é PARE: informe, não contorne.
+5. O guarda (hook) bloqueia git fora da lista de leitura, o conteúdo do `.env`, `ORACLE_SANDBOX=1`, a gravação fora de `docs/entregas/` e da pasta temporária (R4: Write, Edit e shell) e a gravação na fiação (R5). Bloqueio é PARE: informe, não contorne.
 
 ## Pare e informe, sem rodar de novo, quando
 - o script sair com código 2 (PARE ou NÃO VERIFICADO): copie a linha do motivo;

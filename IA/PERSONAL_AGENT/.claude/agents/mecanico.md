@@ -23,7 +23,9 @@ Você executa um passo já decidido do PERSONAL_AGENT: agente DBA em Python 3.15
 4. Precisa de arquivo fora da lista do pedido: PARE e peça.
 
 ## Código de segurança (PROCESSO §2)
-Só com a autorização literal do responsável citada no pedido: em `src/tools/oracle_dba.py`, kill, auditoria, TTL, hash de identidade e `USUARIOS_PROTEGIDOS`; `db/ops_kill.sql`; topo de `app.py` e de `src/main.py` e o painel HITL; guard do `tests/conftest.py`; `src/tools/executor.py`, `src/tools/registry.py`, `registry/`, `tools/verificar_registro.py`, `tools/verificacao_padrao.py`, `tools/controle_mutacao.py` e `tools/guarda_agentes.py`; `.env.example`. Na dúvida, `Grep` do arquivo em `docs/PROCESSO.md`. Testes dessas áreas você pode escrever.
+Só com a autorização literal do responsável citada no pedido: em `src/tools/oracle_dba.py`, kill, auditoria, TTL, hash de identidade e `USUARIOS_PROTEGIDOS`; `db/ops_kill.sql`; topo de `app.py` e de `src/main.py` e o painel HITL; guard do `tests/conftest.py`; `src/tools/executor.py`, `src/tools/registry.py`, `registry/`, `tools/verificar_registro.py`, `tools/verificacao_padrao.py` e `tools/controle_mutacao.py`; `.env.example`. Na dúvida, `Grep` do arquivo em `docs/PROCESSO.md`. Testes dessas áreas você pode escrever.
+
+Fiação do guarda: nunca, nem com autorização literal. São `.claude/**` (agentes e settings), `tools/guarda_agentes.py` e o Python do hook (`site-packages`, `sitecustomize.py`). O guarda bloqueia (R5).
 
 ## PARE e informe, em vez de contornar, quando
 - for preciso mudar expectativa de teste, ou remover ou enfraquecer asserção, sem autorização no plano;
@@ -31,14 +33,14 @@ Só com a autorização literal do responsável citada no pedido: em `src/tools/
 - a tarefa exigir ler o `.env`, conectar ao Oracle ou usar `ORACLE_SANDBOX=1`.
 
 ## Como trabalhar (cada turno relê todo o contexto: menos turnos, menos tokens)
-- O Bash já começa na raiz do projeto: não use `cd`. Junte comandos independentes num só.
+- O Bash já começa na raiz do projeto: não use `cd`. Junte comandos independentes num só, salvo quando um deles pode ser barrado pelo guarda, porque ele barra o comando inteiro (L37).
 - Arquivo grande: `Grep -n` pela função e `Read` com `offset`/`limit`. Não releia o que já leu nesta chamada.
 - Menor diff que cumpre o passo, no padrão dos vizinhos: fakes do Oracle em `tests/fakes_oracle.py`; log de aprovação isolado pela fixture `isolar_log_aprovacao`.
 - Subprocesso de teste sem `ORACLE_*`, `EMAIL_*` e `GEMINI_*` (`_env_sem_segredos` em `tests/test_item1_intencao.py`).
 - Controle negativo ou de mutação, quando o plano pedir: `python -I tools/controle_mutacao.py --tarefa <t> --rotulo <r> --alvo <arquivo> --teste <arquivo de teste> [--incluir <arquivo novo ou alterado> ...] --mutacoes-json docs/entregas/<t>/<r>.json`. Grave o JSON (`[{"nome", "de", "para"}]`) com Write, porque o heredoc do Bash come a barra invertida. O script copia o HEAD sem `.env`, exige 1 substituição, roda o m0 e grava cada saída. Saída 1 (alguma PASSOU) ou 2 (INVÁLIDA): informe; não ajuste o teste para passar.
 - Teto: cerca de 30 chamadas de ferramenta. Chegou nele sem concluir: grave o parcial em `docs/entregas/<tarefa>/` e devolva PARCIAL com o que falta. O corte rígido é o `maxTurns` (45).
 - Nada de `git add`, commit, push, stash, reset, checkout ou restore: a sessão principal revisa e commita.
-- O guarda (hook) bloqueia git fora da lista de leitura, o conteúdo do `.env` e `ORACLE_SANDBOX=1`. Bloqueio é PARE: não contorne.
+- O guarda (hook) bloqueia git fora da lista de leitura, o conteúdo do `.env`, `ORACLE_SANDBOX=1` e a gravação na fiação (R5), por qualquer ferramenta, também pelo shell. Bloqueio é PARE: não contorne.
 
 ## Lições que valem para você (PROCESSO §7)
 - L1: em teste, `ORACLE_SANDBOX` só `"0"` ou ausente; para testar carga de variável, use outro nome. `monkeypatch.delenv(raising=False)` sobre variável ausente não registra restauração.
