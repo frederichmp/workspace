@@ -981,7 +981,9 @@ def _parametros_ps(args):
             continue
         candidatos = [c for c in conhecidos if c == nome] or [c for c in conhecidos if c.startswith(nome)]
         de_switch = [s for s in SWITCHES_PS if s.startswith(nome)]
-        if not candidatos or (de_switch and not any(c in PARAMS_DESTINO for c in candidatos)):
+        # Abreviação que casa switch e parâmetro ao mesmo tempo (-D, -N) é ambígua: não analisável (E10). Nome exato
+        # de parâmetro conhecido vale como ele (-Include não é -IncludeTypeInformation).
+        if nome not in conhecidos and (not candidatos or de_switch):
             if de_switch and not candidatos:
                 switches.add(nome)
             else:
@@ -1096,10 +1098,15 @@ def analisar_gravacao(comando, dialeto, cwd, ambiente=None, prof=0, cands=None, 
             for nome, _ in atrib:
                 variaveis[nome] = None
             continue
-        # cd seguido de & ou | roda em subshell no Bash e não muda o cwd (D7 da conferência).
+        # cd seguido de & ou |, ou numa lista &&/|| que termina em &, roda em subshell no Bash e não muda o cwd
+        # (D7 e E2 das conferências).
+        j = k + 1
+        while j < len(cmds) and cmds[j].op in ("&&", "||", "|"):
+            j += 1
+        fim_lista = cmds[j].op if j < len(cmds) else None
         cd_fixo = (_cd_para_pasta_existente(c, ps, expandir, base)
                    if aceita and not pode_falhar and not c.redirs and not cdpath and
-                   (ps or proximo not in ("|", "&")) else None)
+                   (ps or (proximo not in ("|", "&") and fim_lista != "&")) else None)
         if cd_fixo is not None:
             cands, cadeia = cd_fixo, None  # cd incondicional para pasta literal que existe: não falha
             continue
@@ -1189,6 +1196,10 @@ def _despachar(args, ps, base, resolver, aninhar):
             # command -v/-V só consulta; outro embrulho com opção (command -p, exec -a, time -p) é opaco (D15).
             return not (nome == "command" and resto[0][1] in ("-v", "-V"))
         return _despachar(resto, ps, base, resolver, aninhar)
+    if nome in ("nice", "timeout", "stdbuf") and any(
+            (a[1] or "") in ("-s", "-k", "-i", "-o", "-e", "--signal", "--kill-after", "--input", "--output",
+                             "--error", "--adjustment") for a in resto):
+        return True  # opção com valor separado: o guarda não sabe onde começa o comando (E12)
     if nome == "nice":
         k = 2 if resto and resto[0][1] == "-n" else (1 if resto and (resto[0][1] or "").startswith("-") else 0)
         return _despachar(resto[k:], ps, base, resolver, aninhar)
@@ -1198,29 +1209,32 @@ def _despachar(args, ps, base, resolver, aninhar):
             k += 1
         return _despachar(resto[k + (1 if nome == "timeout" else 0):], ps, base, resolver, aninhar)
     if nome in SHELLS:
+        # O -c vale em qualquer posição (bash -o pipefail -c ...). Sem -c: com script é interpretador (residual);
+        # sem script ou com -s, lê o comando da entrada (| bash, <<<): opaco (E5, E6).
+        if any(a[1] is None for a in resto):
+            return True
         for k, a in enumerate(resto):
-            if a[1] is None:
-                return True
             if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", a[1]):
-                if k + 1 >= len(resto) or resto[k + 1][1] is None:
+                if k + 1 >= len(resto):
                     return True
                 return aninhar(resto[k + 1][1], "bash")
-            if not a[1].startswith("-"):
-                return False  # bash script.sh: interpretador (residual aceito)
-        return False
+        k = 0
+        while k < len(resto) and resto[k][1].startswith(("-", "+")):
+            if resto[k][1] in ("-s", "--"):
+                return True
+            k += 2 if resto[k][1] in ("-o", "+o", "-O", "+O") else 1
+        return k >= len(resto)
     if nome in PWSH:
-        for k, a in enumerate(resto):
-            v = (a[1] or "").lower()
-            if a[1] is None or re.fullmatch(r"-e(?:c|n\w*)?", v):
-                return True  # -EncodedCommand e abreviações: opaco
-            if v in ("-file", "-f"):
-                return False
-            if not v.startswith("-") or re.fullmatch(r"-c(?:o\w*)?", v):
-                texto = resto[k:] if not v.startswith("-") else resto[k + 1:]
-                if not texto or any(t[1] is None for t in texto):
-                    return True
+        valores = [(a[1] or "").lower() for a in resto]
+        if any(a[1] is None for a in resto) or any(re.fullmatch(r"-e(?:c|n\w*)?", v) for v in valores):
+            return True  # -EncodedCommand e abreviações: opaco
+        for k, v in enumerate(valores):
+            if re.fullmatch(r"-c(?:o\w*)?", v):  # -Command em qualquer posição (-ExecutionPolicy Bypass -Command)
+                texto = resto[k + 1:]
+                if not texto or texto[0][1] == "-":
+                    return True  # -Command -: lê da entrada (E5)
                 return aninhar(" ".join(t[1] for t in texto), "powershell")
-        return False
+        return not any(v in ("-file", "-f") for v in valores)  # -File: interpretador; o resto, opaco
     if nome == "cmd":
         texto = " ".join(a[0] for a in resto)
         # cmd /c (e //c do Git Bash) é shell aninhado: não analisável (D10, D11 da conferência).
@@ -1238,7 +1252,7 @@ def _despachar(args, ps, base, resolver, aninhar):
     if tipo_ps:
         return _cmdlet(tipo_ps, resto, base, resolver)
     if nome in NOMES_GRAVA_BASH:
-        return _utilitario(nome, resto, base, resolver)
+        return _utilitario(nome, resto, base, resolver, ps)
     return False
 
 
@@ -1261,6 +1275,8 @@ def _registrar_junto(destino, fonte, registrar):
 def _cmdlet(tipo, resto, base, resolver):
     if tipo == "opaco" or any(re.match(r"@\w", a[0]) for a in resto):
         return True
+    if any(not a[0].startswith(("'", '"')) and (a[0].startswith(",") or a[0].endswith(",")) for a in resto):
+        return True  # lista com vírgula separada por espaço (a ,b): o guarda não monta a lista (E11)
     nomeados, posicionais, switches, desconhecido = _parametros_ps(resto)
     if desconhecido:
         return True
@@ -1340,7 +1356,7 @@ def _cmdlet(tipo, resto, base, resolver):
     return True
 
 
-def _utilitario(nome, resto, base, resolver):
+def _utilitario(nome, resto, base, resolver, ps=False):
     def registrar(par, t, so_r5=False):
         resolver(par[0], par[1], base, t, so_r5)
 
@@ -1443,7 +1459,16 @@ def _utilitario(nome, resto, base, resolver):
     if nome in ("robocopy", "xcopy"):
         # R1 (responsável, 2026-11-23): 2º posicional é o destino, recursivo. Opção é /X ou /X:valor; sem destino
         # reconhecível no robocopy, não analisável. xcopy com um só posicional copia para o cwd.
-        posicionais = [a for a in resto if a[1] is None or not re.fullmatch(r"/[A-Za-z0-9?-]+(?::\S*)?", a[1])]
+        opcao = r"/{1,2}[A-Za-z0-9?+-]+(?::\S*)?"
+        if not ps and any(a[1] and re.fullmatch(r"/[A-Za-z0-9?+-]+(?::\S*)?", a[1]) for a in resto):
+            return True  # N29f: no Git Bash, /E vira E:/ e desloca os posicionais (medido); use //E
+        for a in resto:
+            m = re.fullmatch(r"(?i)/{1,2}(?:uni)?log\+?:(.+)", a[1] or "")
+            if m:
+                registrar((m.group(1), m.group(1)), "grava")  # /LOG:arq grava o arquivo (E13)
+        posicionais = [a for a in resto if a[1] is None or not re.fullmatch(opcao, a[1])]
+        if nome == "robocopy" and posicionais and any(re.fullmatch(r"(?i)/{1,2}mov(?:e)?", a[1] or "") for a in resto):
+            registrar(posicionais[0], "recursivo")  # /MOV e /MOVE removem a origem (E13)
         if len(posicionais) >= 2:
             registrar(posicionais[1], "recursivo")
             return False
@@ -1506,6 +1531,19 @@ def r4_no_shell(perfil, destinos, falha, cwd, raiz, temp):
     return None
 
 
+def _textos(obj, prof=0):
+    """Todas as strings de um JSON (dict, lista), para achar destino em chave que o guarda não conhece."""
+    if prof > 5:
+        return []
+    if isinstance(obj, str):
+        return [obj]
+    if isinstance(obj, dict):
+        return [t for v in obj.values() for t in _textos(v, prof + 1)]
+    if isinstance(obj, (list, tuple)):
+        return [t for v in obj for t in _textos(v, prof + 1)]
+    return []
+
+
 def decidir(perfil, ferramenta, entrada, cwd, raiz=None, temp=None, ambiente=None):
     """(bloqueia, motivo). Ferramenta de leitura fora da lista é liberada (o tools: do agente já limita)."""
     raiz = Path(raiz or RAIZ)
@@ -1545,13 +1583,13 @@ def decidir(perfil, ferramenta, entrada, cwd, raiz=None, temp=None, ambiente=Non
         return False, ""
 
     if ferramenta not in FERRAMENTAS:
-        if re.search(r"(?i)edit|write|create|move|delete|rename|copy", ferramenta):  # D16
+        if re.search(r"(?i)edit|write|create|move|delete|rename|copy|append|put|save|upload", ferramenta):  # D16, E14
             caminhos = [str(entrada[k]) for k in ("file_path", "notebook_path", "path") if entrada.get(k)]
             if not caminhos:
                 return bloqueio("R5", f"ferramenta de escrita {ferramenta} sem caminho conhecido", MSG_R5)
-            for caminho in caminhos:
+            for caminho in caminhos + _textos(entrada):  # destino em qualquer chave (destination, target...)
                 if e_fiacao(caminho, cwd, raiz):
-                    return bloqueio("R5", f"{ferramenta} em {caminho}", MSG_R5)
+                    return bloqueio("R5", f"{ferramenta} em {caminho[:80]}", MSG_R5)
             if perfil in ("verificador", "seguranca"):
                 return bloqueio("R4", f"ferramenta de escrita {ferramenta}", f"O {perfil} só grava com Write.")
         return False, ""

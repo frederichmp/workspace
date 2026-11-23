@@ -535,11 +535,33 @@ SHELL_LIBERADOS = [
     ("verificador", "PowerShell", "\"n: $((@($(@((Get-Item 'HKCU:\\Environment').Property)))).Count)\""),
     # Não regressão das correções da conferência do passo 5.
     ("seguranca", "PowerShell", "Set-Location docs | Out-Null; Set-Content entregas/t/conferencia_x.md x"),
-    ("verificador", "Bash", f"robocopy src {E} /E"),
     ("verificador", "Bash", f"time python -m pytest -q > {E}/p.txt"),
     ("verificador", "PowerShell", f"$n = (Get-Content {E}/a.txt | Measure-Object).Count"),
     ("verificador", "PowerShell", f"Out-File -FilePath {E}/a.txt -InputObject x -Encoding utf8 -NoNewline"),
+    # Não regressão do passo 5c.
+    ("verificador", "Bash", f"timeout 600 python -m pytest -q > {E}/p.txt 2>&1"),
+    ("verificador", "Bash", f"robocopy src {E} //E //NJH"),
+    ("verificador", "PowerShell", f"robocopy src {E} /E /NJH /LOG:{E}/robo.txt"),
+    ("verificador", "Bash", f"cd docs && echo x > entregas/t/a.txt"),
+    ("verificador", "PowerShell", f"Export-Csv -Path {E}/a.csv -Include x -NoTypeInformation"),
+    ("mecanico", "Bash", "bash tools/x.sh"),                             # interpretador: residual aceito
 ]
+
+
+@pytest.mark.parametrize("perfil", gs.PERFIS)
+@pytest.mark.parametrize("ferramenta, entrada", [
+    ("mcp__fs__copy_file", {"path": "src/a.py", "destination": ".claude/settings.json"}),  # E14
+    ("mcp__fs__append_file", {"target": [".claude/settings.json"]}),
+    ("mcp__fs__put_file", {"arquivo": "tools/guarda_agentes.py"}),
+])
+def test_ferramenta_de_escrita_com_destino_em_qualquer_chave(perfil, ferramenta, entrada):  # E14
+    bloqueia, motivo = gs.decidir(perfil, ferramenta, entrada, CWD)
+    assert bloqueia and "(R5," in motivo
+
+
+def test_ferramenta_que_nao_grava_pode_citar_a_fiacao():
+    entrada = {"message": "OK: alterei .claude/agents/mecanico.md e tools/guarda_agentes.py"}
+    assert gs.decidir("seguranca", "SubagentHandback", entrada, CWD) == (False, "")
 
 
 @pytest.mark.parametrize("perfil", gs.PERFIS)
@@ -661,6 +683,26 @@ SHELL_R4 = [
     ("Bash", "robocopy evil ../../x /E"),                                # R1
     ("PowerShell", "xcopy evil ..\\..\\x\\ /E"),                         # R1
     ("Bash", "robocopy evil"),                                           # R1: sem destino reconhecível
+    # Reconferência do passo 5b (conferencia_5b.md): os E plausíveis por acidente (decisão de 2026-11-23).
+    ("Bash", "cd docs && true & echo x > entregas/t/conferencia_z.md"),  # E2: lista em segundo plano
+    ("Bash", "echo 'touch ../../fora.txt' | bash"),                      # E5
+    ("Bash", "bash <<< 'touch ../../fora.txt'"),                         # E5
+    ("PowerShell", "'Set-Content ../../fora.txt x' | pwsh -c -"),        # E5
+    ("Bash", "echo 'Set-Content ../../fora.txt x' | pwsh -NoProfile"),  # E5: pwsh sem -Command lê a entrada
+    ("Bash", "pwsh -ExecutionPolicy Bypass -Command \"Set-Content ../../fora.txt x\""),  # E6
+    ("Bash", "bash -o pipefail -c \"touch ../../fora.txt\""),            # E6
+    ("PowerShell", "Set-Content -D ../../fora.txt docs/entregas/t/conferencia_a.md"),  # E10
+    ("PowerShell", "Set-Content docs/entregas/t/conferencia_a.md ,../../fora.txt -Value x"),  # E11
+    ("Bash", "timeout -k 1 5 touch ../../fora.txt"),                     # E12
+    ("Bash", "stdbuf -o L touch ../../fora.txt"),                        # E12
+    ("Bash", "nice --adjustment 5 touch ../../fora.txt"),                # E12
+    ("Bash", f"robocopy //E {E} ../../x"),                               # E13
+    ("PowerShell", f"robocopy src {E} /LOG:..\\..\\fora.txt"),           # E13
+    ("PowerShell", f"robocopy ../../x {E} /MOVE"),                       # E13: /MOVE remove a origem
+    ("Bash", f"robocopy /E ../../x {E}"),                                # N29f: o Git Bash converte /E em E:/
+    # Era liberado no 819311b; o experimento do N29f mostrou que, no Git Bash, o /E vira E:/ e desloca origem e
+    # destino. Expectativa alterada com justificativa (a forma certa, //E, está em SHELL_LIBERADOS).
+    ("Bash", f"robocopy src {E} /E"),
 ]
 
 
@@ -729,6 +771,14 @@ SHELL_R5 = [
     ("Bash", "command -p cp evil .claude/settings.json"),                # D15
     ("Bash", "robocopy evil .claude /E"),                                # R1
     ("PowerShell", "xcopy evil .claude\\ /E"),                           # R1
+    # Reconferência do passo 5b: E plausíveis por acidente.
+    ("Bash", "echo 'cp evil .claude/settings.json' | bash"),             # E5
+    ("PowerShell", "Set-Content -N .claude/settings.json evil"),         # E10
+    ("PowerShell", "Set-Content x.txt ,.claude/settings.json -Value evil"),  # E11
+    ("Bash", "timeout -s KILL 5 cp evil .claude/settings.json"),         # E12
+    ("Bash", "robocopy //E evil .claude"),                               # E13
+    ("PowerShell", "robocopy .claude bak /MOVE"),                        # E13
+    ("PowerShell", "robocopy a b /LOG:.claude/settings.json"),           # E13
 ]
 
 
