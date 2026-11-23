@@ -397,14 +397,15 @@ RE_DOTNET_GRAVA = re.compile(
     r"(?i)\[(?:System\.)?IO\.(?:File|Directory|FileInfo|DirectoryInfo|StreamWriter|FileStream|Path)\]::"
     r"(?!(?:Read\w*|Exists|Get\w*|Enumerate\w*|OpenRead|OpenText|Combine|Join|GetFullPath|GetTempPath)\b)\w+|"
     r"New-Object\s+(?:-TypeName\s+)?(?:System\.)?IO\.(?:StreamWriter|FileStream|FileInfo|DirectoryInfo)|"
-    r"\.(?:Delete|MoveTo|CopyTo|Create|CreateText|AppendText|OpenWrite|WriteAllText|WriteAllBytes|WriteAllLines)\s*\(")
+    r"\.(?:Delete|MoveTo|CopyTo|Create|CreateText|AppendText|OpenWrite|WriteAllText|WriteAllBytes|WriteAllLines)\s*\(|"
+    r"\[scriptblock\]::Create|\$ExecutionContext\.InvokeCommand|\.InvokeScript\s*\(|NewScriptBlock")
 RE_TEMP_ATRIBUIDO = re.compile(r"(?i)\$env:te?mp\s*=|(?<![$\w])env:\\?te?mp\b|SetEnvironmentVariable\(\s*['\"]te?mp"
                                r"|(?<![\w$])te?mp=")
 SHELLS = frozenset(("bash", "sh", "dash", "zsh", "ksh"))
 PWSH = frozenset(("powershell", "pwsh"))
 EMBRULHOS = frozenset(("command", "builtin", "exec", "nohup", "time", "winpty", "sudo"))
 NOMES_GRAVA_BASH = frozenset(("tee", "cp", "install", "mv", "rm", "rmdir", "mkdir", "touch", "truncate", "dd", "sed",
-                              "perl", "ln", "tar", "unzip", "rsync", "curl", "wget"))
+                              "perl", "ln", "tar", "unzip", "rsync", "curl", "wget", "robocopy", "xcopy"))
 CMDLETS = {
     "set-content": "conteudo", "sc": "conteudo", "add-content": "conteudo", "ac": "conteudo",
     "clear-content": "conteudo", "clc": "conteudo", "export-csv": "conteudo", "epcsv": "conteudo",
@@ -426,8 +427,18 @@ PARAMS_DESTINO = ("path", "literalpath", "pspath", "lp", "filepath", "destinatio
                   "name", "newname", "target")
 PARAMS_VALOR = ("value", "encoding", "delimiter", "filter", "include", "exclude", "itemtype", "type", "stream", "width",
                 "inputobject", "variable", "erroraction", "ea", "errorvariable", "ev", "outvariable", "ov",
-                "warningaction", "wa", "informationaction", "credential", "childpath", "compressionlevel")
+                "warningaction", "wa", "informationaction", "credential", "childpath", "compressionlevel",
+                "outbuffer", "ob", "pipelinevariable", "pv", "warningvariable", "wv", "informationvariable", "iv",
+                "progressaction", "uri", "method", "headers", "body", "contenttype", "timeoutsec", "usequotes",
+                "quotefields", "session", "fromsession", "tosession")
+# Lista fechada de switches dos cmdlets que gravam: parâmetro fora das duas listas torna o comando não analisável
+# (senão o valor dele viraria o 1º posicional; D13 da conferência).
+SWITCHES_PS = ("force", "append", "noclobber", "nonewline", "passthru", "recurse", "whatif", "confirm", "asbytestream",
+               "container", "notypeinformation", "includetypeinformation", "useculture", "verbose", "debug", "raw",
+               "update", "usebasicparsing", "skipcertificatecheck")
 NOMES_CD = frozenset(("cd", "pushd", "chdir", "set-location", "sl", "push-location"))
+PREFIXOS_BASH = frozenset(("!", "if", "then", "elif", "else", "do", "while", "until", "coproc"))
+PREFIXOS_PS = frozenset((".", "return", "throw", "exit"))
 PALAVRAS_CHAVE_BASH = frozenset(("if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "case",
                                  "esac", "select", "function", "coproc"))
 PALAVRAS_CHAVE_PS = frozenset(("if", "elseif", "else", "foreach", "for", "while", "do", "until", "switch", "try",
@@ -571,6 +582,9 @@ def _lexar(cmd, ps):
         if nx in "0123456789@*#?$!-":
             p.partes.append(("x",))
             return j + 2
+        if nx == '"' and not em_aspas:
+            p.partes.append(("x",))  # $"..." (tradução de locale): a string, sem o $ (D5 da conferência)
+            return j + 1
         p.partes.append(("lit", "$"))
         return j + 1
 
@@ -752,7 +766,7 @@ def _lexar(cmd, ps):
             m = re.match(r"(?:<>|>>?\|?)(&)?", cmd[i:])
             i += m.end()
             if m.group(1):
-                m2 = re.match(r"\d+|-", cmd[i:])
+                m2 = re.match(r"(?:\d+|-)(?=[\s;|&()<>]|$)", cmd[i:])  # >&1/../x é arquivo (D6)
                 if m2:
                     i += m2.end()  # junção (2>&1, >&-): não é destino
                     continue
@@ -952,7 +966,7 @@ def _opcoes_bash(args, com_valor=(), com_valor_longo=()):
 def _parametros_ps(args):
     """(nomeados {param: [(bruto, valor)]}, posicionais, switches) com abreviação pelo prefixo único."""
     conhecidos = PARAMS_DESTINO + PARAMS_VALOR
-    nomeados, posicionais, switches, k = {}, [], set(), 0
+    nomeados, posicionais, switches, k, desconhecido = {}, [], set(), 0, False
     while k < len(args):
         bruto, valor = args[k]
         m = re.fullmatch(r"-([A-Za-z][\w-]*)(?::(.*))?", valor or "") if not bruto.startswith(("'", '"')) else None
@@ -961,9 +975,17 @@ def _parametros_ps(args):
             k += 1
             continue
         nome = m.group(1).lower()
-        candidatos = [c for c in conhecidos if c == nome] or [c for c in conhecidos if c.startswith(nome)]
-        if not candidatos:
+        if nome in SWITCHES_PS:
             switches.add(nome)
+            k += 1
+            continue
+        candidatos = [c for c in conhecidos if c == nome] or [c for c in conhecidos if c.startswith(nome)]
+        de_switch = [s for s in SWITCHES_PS if s.startswith(nome)]
+        if not candidatos or (de_switch and not any(c in PARAMS_DESTINO for c in candidatos)):
+            if de_switch and not candidatos:
+                switches.add(nome)
+            else:
+                desconhecido = True
             k += 1
             continue
         destino = next((c for c in candidatos if c in PARAMS_DESTINO), None)
@@ -974,7 +996,7 @@ def _parametros_ps(args):
             nomeados.setdefault(chave, []).append(args[k + 1])
             k += 1
         k += 1
-    return nomeados, posicionais, switches
+    return nomeados, posicionais, switches, desconhecido
 
 
 def analisar_gravacao(comando, dialeto, cwd, ambiente=None, prof=0, cands=None, variaveis=None):
@@ -1028,7 +1050,10 @@ def analisar_gravacao(comando, dialeto, cwd, ambiente=None, prof=0, cands=None, 
     condicionais, segmento_atual, pode_falhar, encerrado = {}, None, False, False
     palavras_chave = PALAVRAS_CHAVE_PS if ps else PALAVRAS_CHAVE_BASH
     base = cands
-    for c in cmds:
+    # CDPATH (citado no comando ou no ambiente) muda o alvo do cd relativo do Bash (D8 da conferência).
+    cdpath = not ps and bool(re.search(r"\bCDPATH\b", comando) or ambiente.get("CDPATH"))
+    for k, c in enumerate(cmds):
+        proximo = cmds[k + 1].op if k + 1 < len(cmds) else None
         if c.op != "&&" and cadeia is not None:
             cands |= cadeia
             cadeia = None
@@ -1045,6 +1070,12 @@ def analisar_gravacao(comando, dialeto, cwd, ambiente=None, prof=0, cands=None, 
                     sub_d, sub_f = analisar_gravacao(parte[1], dialeto, cwd, ambiente, prof + 1, base, variaveis)
                     destinos.extend(sub_d)
                     falha = falha or sub_f
+        trecho = comando[c.inicio:c.fim] if c.inicio is not None else ""
+        if ps and c.palavras and c.palavras[0].bruto.startswith("$"):
+            # $x = Set-Content ... e $null = ...: o lado direito também é comando (D2, D3 da conferência).
+            m = re.match(r"\s*\$[\w:{}]+\s*[-+*/]?=(?!=)\s*(\S.*)", trecho, re.S)
+            if m:
+                falha = aninhar(m.group(1), "powershell") or falha
         primeira = (c.palavras[0].bruto if c.palavras else "").lower()
         if primeira in palavras_chave:
             encerrado = True
@@ -1065,13 +1096,14 @@ def analisar_gravacao(comando, dialeto, cwd, ambiente=None, prof=0, cands=None, 
             for nome, _ in atrib:
                 variaveis[nome] = None
             continue
+        # cd seguido de & ou | roda em subshell no Bash e não muda o cwd (D7 da conferência).
         cd_fixo = (_cd_para_pasta_existente(c, ps, expandir, base)
-                   if aceita and not pode_falhar and not c.redirs else None)
+                   if aceita and not pode_falhar and not c.redirs and not cdpath and
+                   (ps or proximo not in ("|", "&")) else None)
         if cd_fixo is not None:
             cands, cadeia = cd_fixo, None  # cd incondicional para pasta literal que existe: não falha
             continue
         pode_falhar = True
-        trecho = comando[c.inicio:c.fim] if c.inicio is not None else ""
         for nome in list(variaveis):  # variável citada como palavra solta (for X, read X, -OutVariable X)
             nome_re = re.escape(nome)
             if re.search(r"(?<![^\s;(|&])" + nome_re + r"(?![^\s;)=|&+])", trecho, re.IGNORECASE if ps else 0) or (
@@ -1084,12 +1116,17 @@ def analisar_gravacao(comando, dialeto, cwd, ambiente=None, prof=0, cands=None, 
         if not ps:
             while args and re.match(r"[A-Za-z_]\w*\+?=", args[0][0]):
                 args = args[1:]  # NOME=v cmd: ambiente só do comando
+        # Palavras que só introduzem o comando (then cp ..., ! touch ..., . Set-Content ..., return sc ...): D1, D4, D9.
+        prefixos = PREFIXOS_PS if ps else PREFIXOS_BASH
+        while args and args[0][0].lower() in prefixos:
+            args = args[1:]
         falha = _despachar(args, ps, base, resolver, aninhar) or falha
         nome = _nome_comando(args[0][1]) if args else None
         if nome in NOMES_CD:
             alvo = next((a for a in args[1:] if not (a[1] or "").startswith("-") or a[1] == "-"), None)
             if alvo is None or alvo[1] is None or alvo[1] in ("-", "") or alvo[1].startswith("~") or \
-                    DESCONHECIDO in base:
+                    DESCONHECIDO in base or (cdpath and not re.match(r"(?:\.\.?(?:[\\/]|$)|[A-Za-z]:|[\\/])",
+                                                                       alvo[1])):
                 novo = {DESCONHECIDO}
             else:
                 novo = {_abs(alvo[1], b) for b in base}
@@ -1148,6 +1185,9 @@ def _despachar(args, ps, base, resolver, aninhar):
                 break
         return _despachar(resto[k:], ps, base, resolver, aninhar)
     if nome in EMBRULHOS:
+        if resto and (resto[0][1] or "").startswith("-"):
+            # command -v/-V só consulta; outro embrulho com opção (command -p, exec -a, time -p) é opaco (D15).
+            return not (nome == "command" and resto[0][1] in ("-v", "-V"))
         return _despachar(resto, ps, base, resolver, aninhar)
     if nome == "nice":
         k = 2 if resto and resto[0][1] == "-n" else (1 if resto and (resto[0][1] or "").startswith("-") else 0)
@@ -1183,11 +1223,8 @@ def _despachar(args, ps, base, resolver, aninhar):
         return False
     if nome == "cmd":
         texto = " ".join(a[0] for a in resto)
-        if re.search(r"(?i)(?:^|\s)/[ckr]\b", texto):
-            limpo = re.sub(r"(?i)\d?>&\d|>\s*nul\b", "", texto)
-            return bool(re.search(r">|(?i:\b(?:copy|xcopy|robocopy|move|del|erase|ren|rename|md|mkdir|rd|rmdir|mklink"
-                                  r"|fsutil|type)\b)", limpo))
-        return False
+        # cmd /c (e //c do Git Bash) é shell aninhado: não analisável (D10, D11 da conferência).
+        return bool(re.search(r"(?i)(?:^|\s)/{1,2}[ckr]\b", texto))
     if nome in ("xargs",) or (nome == "find" and any((a[1] or "") in ("-exec", "-execdir", "-ok", "-okdir")
                                                        for a in resto)):
         nomes = {_nome_comando(a[1]) for a in resto}
@@ -1224,7 +1261,9 @@ def _registrar_junto(destino, fonte, registrar):
 def _cmdlet(tipo, resto, base, resolver):
     if tipo == "opaco" or any(re.match(r"@\w", a[0]) for a in resto):
         return True
-    nomeados, posicionais, switches = _parametros_ps(resto)
+    nomeados, posicionais, switches, desconhecido = _parametros_ps(resto)
+    if desconhecido:
+        return True
     recursivo = any("recurse".startswith(s) and len(s) >= 2 for s in switches) or "r" in switches
 
     def lista(chaves):
@@ -1235,7 +1274,8 @@ def _cmdlet(tipo, resto, base, resolver):
         return saida
 
     def registrar(par, t, so_r5=False):
-        resolver(par[0], par[1], base, t, so_r5)
+        for v in (par[1].split(",") if par[1] is not None else [None]):  # lista com vírgula (D12)
+            resolver(v if v is not None else par[0], v, base, t, so_r5)
 
     caminhos = lista(("path", "literalpath", "pspath", "lp", "filepath"))
     if tipo == "conteudo":
@@ -1400,6 +1440,17 @@ def _utilitario(nome, resto, base, resolver):
             return True
         registrar(alvo, "grava")
         return False
+    if nome in ("robocopy", "xcopy"):
+        # R1 (responsável, 2026-11-23): 2º posicional é o destino, recursivo. Opção é /X ou /X:valor; sem destino
+        # reconhecível no robocopy, não analisável. xcopy com um só posicional copia para o cwd.
+        posicionais = [a for a in resto if a[1] is None or not re.fullmatch(r"/[A-Za-z0-9?-]+(?::\S*)?", a[1])]
+        if len(posicionais) >= 2:
+            registrar(posicionais[1], "recursivo")
+            return False
+        if nome == "xcopy" and len(posicionais) == 1:
+            registrar((".", "."), "recursivo")
+            return False
+        return True
     return False
 
 
@@ -1494,7 +1545,7 @@ def decidir(perfil, ferramenta, entrada, cwd, raiz=None, temp=None, ambiente=Non
         return False, ""
 
     if ferramenta not in FERRAMENTAS:
-        if re.search(r"Edit|Write", ferramenta):
+        if re.search(r"(?i)edit|write|create|move|delete|rename|copy", ferramenta):  # D16
             caminhos = [str(entrada[k]) for k in ("file_path", "notebook_path", "path") if entrada.get(k)]
             if not caminhos:
                 return bloqueio("R5", f"ferramenta de escrita {ferramenta} sem caminho conhecido", MSG_R5)

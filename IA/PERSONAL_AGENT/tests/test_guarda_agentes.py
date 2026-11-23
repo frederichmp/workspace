@@ -533,7 +533,27 @@ SHELL_LIBERADOS = [
     ("verificador", "PowerShell", f"Set-Location -LiteralPath '{CWD}'\n$out = '{E}/p.txt'\n"
                                   f"python -m pytest 2>&1 | Out-File -FilePath $out -Encoding utf8"),
     ("verificador", "PowerShell", "\"n: $((@($(@((Get-Item 'HKCU:\\Environment').Property)))).Count)\""),
+    # Não regressão das correções da conferência do passo 5.
+    ("seguranca", "PowerShell", "Set-Location docs | Out-Null; Set-Content entregas/t/conferencia_x.md x"),
+    ("verificador", "Bash", f"robocopy src {E} /E"),
+    ("verificador", "Bash", f"time python -m pytest -q > {E}/p.txt"),
+    ("verificador", "PowerShell", f"$n = (Get-Content {E}/a.txt | Measure-Object).Count"),
+    ("verificador", "PowerShell", f"Out-File -FilePath {E}/a.txt -InputObject x -Encoding utf8 -NoNewline"),
 ]
+
+
+@pytest.mark.parametrize("perfil", gs.PERFIS)
+def test_ferramenta_de_escrita_com_nome_minusculo_tem_r5(perfil):  # D16
+    bloqueia, motivo = gs.decidir(perfil, "mcp__fs__write_file", {"path": ".claude/settings.json"}, CWD)
+    assert bloqueia and "(R5," in motivo
+    bloqueia, motivo = gs.decidir(perfil, "mcp__fs__edit_file", {"path": "tools/guarda_agentes.py"}, CWD)
+    assert bloqueia and "(R5," in motivo
+
+
+def test_ferramenta_de_escrita_com_nome_minusculo_tem_r4():  # D16
+    bloqueia, motivo = gs.decidir("seguranca", "mcp__fs__write_file", {"path": "src/x.py"}, CWD)
+    assert bloqueia and "(R4," in motivo
+    assert gs.decidir("mecanico", "mcp__fs__write_file", {"path": "src/x.py"}, CWD) == (False, "")
 
 
 @pytest.mark.parametrize("perfil, ferramenta, comando", SHELL_LIBERADOS)
@@ -617,6 +637,30 @@ SHELL_R4 = [
     ("PowerShell", f"$o = '{E}'; foreach ($o in @('src')) {{ Set-Content \"$o/x.py\" x }}"),
     ("Bash", "pwsh -Command \"Set-Content src/x.py x\""),
     ("Bash", "bash -c \"$X\""),
+    # Conferência do passo 5 (conferencia.md, D1 a D16) e R1.
+    ("Bash", "if :; then cp evil ../../fora.txt; fi"),                   # D1
+    ("Bash", "for f in a; do rm -rf ../../x; done"),                     # D1
+    ("Bash", "! touch ../../fora.txt"),                                  # D1
+    ("PowerShell", "$x = Set-Content ../../fora.txt evil"),              # D2
+    ("PowerShell", "$x = & sc ../../fora.txt y"),                        # D2
+    ("PowerShell", ". Set-Content ../../fora.txt evil"),                 # D4
+    ("Bash", "echo x > $\"docs/entregas/t/conferencia.md\""),            # D5
+    ("Bash", "echo x >&1/../../../fora.txt"),                            # D6
+    ("Bash", "cd docs & echo x > entregas/t/conferencia_a.md"),                     # D7: cd em segundo plano não muda o cwd
+    ("Bash", "cd docs | cat; echo x > entregas/t/conferencia_a.md"),                # D7
+    ("Bash", "cd docs; if :; then cd ..; fi; echo x > entregas/t/conferencia_a.md"),  # D9
+    ("Bash", "cmd //c \"echo x > ../../fora.txt\""),                     # D10
+    ("Bash", "cmd /c powershell -c Set-Content ../../fora.txt x"),       # D11
+    ("PowerShell", "Set-Content docs/entregas/t/x,../conferencia.md -Value evil"),  # D12
+    ("PowerShell", "Out-File -wv docs/entregas/t/conferencia.md ../../fora.txt -InputObject x"),  # D13
+    ("PowerShell", "Set-Content -Bogus docs/entregas/t/conferencia.md ../../fora.txt -Value x"),  # P8: parâmetro desconhecido
+    ("PowerShell", "Invoke-Command ([scriptblock]::Create(\"sc ../../fora.txt x\"))"),  # D14
+    ("Bash", "exec -a z touch ../../fora.txt"),                          # D15
+    ("Bash", "time -p touch ../../fora.txt"),                            # D15
+    ("Bash", "sudo -u x touch ../../fora.txt"),                          # D15
+    ("Bash", "robocopy evil ../../x /E"),                                # R1
+    ("PowerShell", "xcopy evil ..\\..\\x\\ /E"),                         # R1
+    ("Bash", "robocopy evil"),                                           # R1: sem destino reconhecível
 ]
 
 
@@ -666,6 +710,25 @@ SHELL_R5 = [
     ("Bash", f"echo x > \"{_PREFIXO_PY}/Lib/site-packages/x.pth\""),     # N8
     ("PowerShell", f"Copy-Item \"{T}\\s.py\" \"{_PREFIXO_PY}\\Lib\\site-packages\\sitecustomize.py\""),  # N8
     ("PowerShell", "Copy-Item \"$S\\guarda_agentes.py\" tools\\"),     # dest/basename(fonte) no Copy-Item
+    # Conferência do passo 5 (conferencia.md, D1 a D15; experimento_shell.md) e R1.
+    ("Bash", "if true; then cp evil .claude/settings.json; fi"),        # D1
+    ("Bash", "! cp evil tools/guarda_agentes.py"),                       # D1
+    ("PowerShell", "$x = Set-Content .claude/settings.json evil"),       # D2
+    ("PowerShell", "$null = Set-Content .claude/settings.json evil"),    # D3
+    ("PowerShell", ". Set-Content .claude/settings.json evil"),          # D4
+    ("PowerShell", "return Set-Content .claude/settings.json evil"),  # D4
+    ("Bash", "echo x > $\".claude/settings.json\""),                     # D5
+    ("Bash", "echo x >&1/../.claude/settings.json"),                     # D6
+    ("Bash", "CDPATH=.claude; cd agents && echo x > mecanico.md"),       # D8
+    ("Bash", "if :; then cd .claude; fi; echo x > settings.json"),       # D9
+    ("Bash", "cmd //c \"echo x > .claude/settings.json\""),              # D10
+    ("Bash", "cmd /c \"powershell -c Set-Content .claude/settings.json x\""),  # D11
+    ("PowerShell", "Set-Content x.txt,.claude/settings.json -Value evil"),  # D12
+    ("PowerShell", "Set-Content -PipelineVariable pv .claude/settings.json -Value evil"),  # D13
+    ("PowerShell", "Invoke-Command -ScriptBlock ([scriptblock]::Create(\"Set-Content .claude/settings.json x\"))"),  # D14
+    ("Bash", "command -p cp evil .claude/settings.json"),                # D15
+    ("Bash", "robocopy evil .claude /E"),                                # R1
+    ("PowerShell", "xcopy evil .claude\\ /E"),                           # R1
 ]
 
 
