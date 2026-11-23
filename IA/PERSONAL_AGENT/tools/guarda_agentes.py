@@ -1542,25 +1542,29 @@ def r4_no_shell(perfil, destinos, falha, cwd, raiz, temp):
 
 VERBOS_DE_ESCRITA = frozenset(("edit", "write", "create", "move", "delete", "rename", "copy", "append", "put", "save",
                                "upload", "update", "replace", "patch", "multiedit"))
+VERBOS_INTEIROS = frozenset(("put", "patch"))
 CHAVES_DE_CONTEUDO = frozenset(("content", "contents", "text", "body", "data", "new_string", "old_string", "edits",
                                 "new_source", "message"))
 
 
 def _ferramenta_que_grava(ferramenta):
-    """Nome com verbo de escrita como palavra (write_file, NotebookEdit, mcp__x__apply_patch), sem diferenciar caixa.
-    Palavra, e não trecho: BashOutput e TaskOutput não são put (O2 do 5c)."""
-    palavras = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])", ferramenta)
-    return any(p.lower() in VERBOS_DE_ESCRITA for p in palavras)
+    """Nome com verbo de escrita (write_file, overwrite_file, NotebookEdit, text_editor), sem diferenciar caixa. O verbo
+    conta como trecho da palavra (G1 do 5d); put e patch só como palavra inteira (BashOutput, dispatch: O2 do 5c)."""
+    palavras = [p.lower() for p in re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])", ferramenta)]
+    return any(p in VERBOS_INTEIROS or any(v in p for v in VERBOS_DE_ESCRITA - VERBOS_INTEIROS) for p in palavras)
 
 
 def _textos(obj, prof=0):
-    """Todas as strings de um JSON (dict, lista), para achar destino em chave que o guarda não conhece."""
-    if prof > 5:
-        return []
+    """Todas as strings de um JSON (dict, lista), para achar destino em chave que o guarda não conhece. As chaves de
+    conteúdo são puladas em todo nível, mas o que está ao lado delas conta (path dentro de edits: G2 do 5d). Mais
+    fundo que 8 níveis: devolve um marcador que casa a fiação (falha fechada)."""
+    if prof > 8:
+        return [".claude"]
     if isinstance(obj, str):
         return [obj]
     if isinstance(obj, dict):
-        return [t for v in obj.values() for t in _textos(v, prof + 1)]
+        return [t for k, v in obj.items() if k not in CHAVES_DE_CONTEUDO or isinstance(v, (dict, list, tuple))
+                for t in _textos(v, prof + 1)]
     if isinstance(obj, (list, tuple)):
         return [t for v in obj for t in _textos(v, prof + 1)]
     return []
@@ -1610,8 +1614,7 @@ def decidir(perfil, ferramenta, entrada, cwd, raiz=None, temp=None, ambiente=Non
             if not caminhos:
                 return bloqueio("R5", f"ferramenta de escrita {ferramenta} sem caminho conhecido", MSG_R5)
             # Destino em qualquer chave (destination, target...), menos o conteúdo gravado (O3 do 5c).
-            outras = {k: v for k, v in entrada.items() if k not in CHAVES_DE_CONTEUDO}
-            for caminho in caminhos + _textos(outras):
+            for caminho in caminhos + _textos(entrada):
                 if e_fiacao(caminho, cwd, raiz):
                     return bloqueio("R5", f"{ferramenta} em {caminho[:80]}", MSG_R5)
             if perfil in ("verificador", "seguranca"):

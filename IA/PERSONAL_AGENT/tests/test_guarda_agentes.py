@@ -565,6 +565,27 @@ def test_conteudo_que_cita_a_fiacao_nao_e_destino():  # O3 da conferência do 5c
 
 
 @pytest.mark.parametrize("perfil", gs.PERFIS)
+@pytest.mark.parametrize("ferramenta", ["mcp__x__overwrite_file", "mcp__x__remove_file", "mcp__x__removeFile",
+                                        "mcp__x__writefile", "mcp__x__text_editor", "mcp__x__rewrite_file"])
+def test_verbo_dentro_da_palavra_tem_r5(perfil, ferramenta):  # G1 da conferência do 5d
+    bloqueia, motivo = gs.decidir(perfil, ferramenta, {"path": ".claude/settings.json"}, CWD)
+    assert bloqueia and "(R5," in motivo
+
+
+@pytest.mark.parametrize("ferramenta", ["mcp__x__dispatch_event", "mcp__x__compute", "mcp__x__read_input"])
+def test_put_e_patch_so_como_palavra_inteira(ferramenta):  # G1: put e patch dentro de outra palavra não contam
+    assert gs.decidir("verificador", ferramenta, {"path": "src/x.py"}, CWD) == (False, "")
+
+
+def test_destino_aninhado_em_chave_de_conteudo_conta():  # G2 da conferência do 5d
+    entrada = {"path": "src/a.py", "edits": [{"path": ".claude/settings.json", "content": "x"}]}
+    bloqueia, motivo = gs.decidir("mecanico", "mcp__fs__edit_files", entrada, CWD)
+    assert bloqueia and "(R5," in motivo
+    entrada = {"path": "src/a.py", "files": [{"path": "src/b.py", "content": "cita .claude/agents/x.md"}]}
+    assert gs.decidir("mecanico", "mcp__fs__write_files", entrada, CWD) == (False, "")
+
+
+@pytest.mark.parametrize("perfil", gs.PERFIS)
 @pytest.mark.parametrize("ferramenta", ["mcp__fs__update_file", "mcp__fs__replace_in_file", "mcp__fs__apply_patch"])
 def test_ferramenta_update_replace_patch_tem_r5(perfil, ferramenta):  # E14, nomes (conferência do 5c §7)
     bloqueia, motivo = gs.decidir(perfil, ferramenta, {"path": ".claude/settings.json"}, CWD)
