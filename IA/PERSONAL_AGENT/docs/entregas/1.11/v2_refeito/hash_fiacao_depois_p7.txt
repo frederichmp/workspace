@@ -1,0 +1,5 @@
+55733fc3cadaf3ef6bdbe83e76759dd7bc34b868da3018971e1b17abf897caae *.claude/agents/mecanico.md
+d7307de03b62032d9ff40c30bf6ceb3d52a0e19433beaebeeb0d6ff2d789a79f *.claude/agents/seguranca.md
+b3a965a59030e3377a3e90340b1e7f2555377c4a06388c4c98d6f523910d8184 *.claude/agents/verificador.md
+f4d23e3229cd8941b419fdf27a008aedeacd2be30a53ee7ef7d841e2c238d01b *.claude/settings.json
+00da0f98735cab1ea54bc9c8bac8d0229f48971664d4df72756fb60f2b3d92b2 */c/Users/Frederich/.claude/settings.json

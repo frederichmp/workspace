@@ -1,0 +1,37 @@
+[
+ {
+  "nome": "m9_logon_fora_do_hash",
+  "de": "CAMPOS_IDENTIDADE_ALVO: Tuple[str, ...] = (\"inst_id\", \"sid\", \"serial#\") + CAMPOS_IDENTIDADE_ESPERADA",
+  "para": "CAMPOS_IDENTIDADE_ALVO: Tuple[str, ...] = (\"inst_id\", \"sid\", \"serial#\", \"username\", \"program\", \"machine\")"
+ },
+ {
+  "nome": "m10_divergente_como_executado",
+  "de": "RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = (\"ENCERRADA\", \"MARCADA_PARA_KILL\")",
+  "para": "RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = (\"ENCERRADA\", \"MARCADA_PARA_KILL\", \"ALVO_DIVERGENTE\")"
+ },
+ {
+  "nome": "m11_retentativa_v1_no_except",
+  "de": "    except oracledb.Error as db_err:\r\n        if execute_iniciado:\r\n",
+  "para": "    except oracledb.Error as db_err:\r\n        if execute_iniciado and cursor is not None:\r\n            try:\r\n                cursor.execute(\"BEGIN OPS_OWNER.PKG_OPS_KILL.KILL_SESSION(p_inst_id => :p_inst_id, p_sid => :p_sid, p_serial => :p_serial, p_status => :p_status); END;\", p_inst_id=inst_id_int, p_sid=sid_int, p_serial=serial_int, p_status=status_var)\r\n            except Exception:\r\n                pass\r\n        if execute_iniciado:\r\n"
+ },
+ {
+  "nome": "m12_ecoa_ref_no_resultado",
+  "de": "                    \"mensagem\": MENSAGEM_ALVO_DIVERGENTE,\r\n",
+  "para": "                    \"mensagem\": MENSAGEM_ALVO_DIVERGENTE,\r\n                    \"ref\": ref_aprovacao,\r\n"
+ },
+ {
+  "nome": "m13_logon_fora_do_select",
+  "de": "                   type,\r\n                   logon_time\r\n            FROM GV$SESSION",
+  "para": "                   type\r\n            FROM GV$SESSION"
+ },
+ {
+  "nome": "m14_isoformat_com_T",
+  "de": "        return valor.isoformat(sep=\" \")",
+  "para": "        return valor.isoformat()"
+ },
+ {
+  "nome": "m15_d8_sem_resultado_desconhecido",
+  "de": "                \"motivo\": type(exc).__name__,\r\n                \"resultado_desconhecido\": execute_iniciado,\r\n",
+  "para": "                \"motivo\": type(exc).__name__,\r\n                \"resultado_desconhecido\": False,\r\n"
+ }
+]
