@@ -577,6 +577,19 @@ def test_put_e_patch_so_como_palavra_inteira(ferramenta):  # G1: put e patch den
     assert gs.decidir("verificador", ferramenta, {"path": "src/x.py"}, CWD) == (False, "")
 
 
+def _aninhado(niveis, folha):
+    valor = folha
+    for _ in range(niveis):
+        valor = [valor]
+    return {"path": "src/a.py", "itens": valor}
+
+
+def test_entrada_funda_demais_falha_fechada():  # H1 da conferência do 5e (invariante do _textos vira teste, L23)
+    assert gs.decidir("mecanico", "mcp__fs__write_file", _aninhado(6, "src/b.py"), CWD) == (False, "")
+    bloqueia, motivo = gs.decidir("mecanico", "mcp__fs__write_file", _aninhado(10, "src/b.py"), CWD)
+    assert bloqueia and "(R5," in motivo
+
+
 def test_destino_aninhado_em_chave_de_conteudo_conta():  # G2 da conferência do 5d
     entrada = {"path": "src/a.py", "edits": [{"path": ".claude/settings.json", "content": "x"}]}
     bloqueia, motivo = gs.decidir("mecanico", "mcp__fs__edit_files", entrada, CWD)
