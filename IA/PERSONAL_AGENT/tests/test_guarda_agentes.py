@@ -545,7 +545,30 @@ SHELL_LIBERADOS = [
     ("verificador", "Bash", f"cd docs && echo x > entregas/t/a.txt"),
     ("verificador", "PowerShell", f"Export-Csv -Path {E}/a.csv -Include x -NoTypeInformation"),
     ("mecanico", "Bash", "bash tools/x.sh"),                             # interpretador: residual aceito
+    # Não regressão da conferência do passo 5c (F2, F3) e falsos positivos O1 criados pelo 5c.
+    ("verificador", "Bash", "cd docs &&\necho x > entregas/t/a.txt"),
+    ("verificador", "PowerShell", f"robocopy src {E} /E /LOG:$env:TEMP\\robo.txt"),
+    ("verificador", "Bash", f"timeout 600 python -m pytest -q -k guarda > {E}/p.txt 2>&1"),
+    ("verificador", "Bash", f"timeout 60 grep -i foo src/x.py > {E}/g.txt"),
 ]
+
+
+@pytest.mark.parametrize("perfil", gs.PERFIS)
+@pytest.mark.parametrize("ferramenta", ["BashOutput", "TaskOutput", "mcp__x__get_output"])
+def test_ferramenta_de_leitura_com_put_no_nome_e_liberada(perfil, ferramenta):  # O2 da conferência do 5c
+    assert gs.decidir(perfil, ferramenta, {"bash_id": "1"}, CWD) == (False, "")
+
+
+def test_conteudo_que_cita_a_fiacao_nao_e_destino():  # O3 da conferência do 5c
+    entrada = {"path": "src/notas.md", "content": "editar .claude/agents/mecanico.md e tools/guarda_agentes.py"}
+    assert gs.decidir("mecanico", "mcp__fs__write_file", entrada, CWD) == (False, "")
+
+
+@pytest.mark.parametrize("perfil", gs.PERFIS)
+@pytest.mark.parametrize("ferramenta", ["mcp__fs__update_file", "mcp__fs__replace_in_file", "mcp__fs__apply_patch"])
+def test_ferramenta_update_replace_patch_tem_r5(perfil, ferramenta):  # E14, nomes (conferência do 5c §7)
+    bloqueia, motivo = gs.decidir(perfil, ferramenta, {"path": ".claude/settings.json"}, CWD)
+    assert bloqueia and "(R5," in motivo
 
 
 @pytest.mark.parametrize("perfil", gs.PERFIS)
@@ -703,6 +726,12 @@ SHELL_R4 = [
     # Era liberado no 819311b; o experimento do N29f mostrou que, no Git Bash, o /E vira E:/ e desloca origem e
     # destino. Expectativa alterada com justificativa (a forma certa, //E, está em SHELL_LIBERADOS).
     ("Bash", f"robocopy src {E} /E"),
+    # Conferência do passo 5c (conferencia_5c.md, F2 e F3).
+    ("Bash", "cd docs && sleep 1 &\necho x > entregas/t/conferencia_z.md"),     # F2: & seguido de newline
+    ("Bash", "cd docs &&\nsleep 1 &\necho x > entregas/t/conferencia_z.md"),    # F2
+    ("PowerShell", f"robocopy src {E} /E /LOG:$PWD\\robo.log"),                  # F3: log com variável
+    ("Bash", f"robocopy //E src {E} //LOG:$HOME/robo.log"),                       # F3
+    ("Bash", "echo 'touch ../../fora.txt' | bash -es x"),                         # F1: -s agrupado lê a entrada
 ]
 
 
@@ -779,6 +808,9 @@ SHELL_R5 = [
     ("Bash", "robocopy //E evil .claude"),                               # E13
     ("PowerShell", "robocopy .claude bak /MOVE"),                        # E13
     ("PowerShell", "robocopy a b /LOG:.claude/settings.json"),           # E13
+    # Conferência do passo 5c (F1): opção curta terminada em o consome valor; -s lê a entrada.
+    ("Bash", "bash -euo pipefail <<'EOF'\ncp evil .claude/settings.json\nEOF"),
+    ("Bash", "echo 'cp evil .claude/settings.json' | bash -eo pipefail"),
 ]
 
 

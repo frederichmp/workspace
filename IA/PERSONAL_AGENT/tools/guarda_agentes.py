@@ -838,6 +838,10 @@ def _comandos(itens):
         if atual.palavras or atual.redirs:
             cmds.append(atual)
         if tipo == "op":
+            # newline logo depois de operador de lista (cmd &⏎, a &&⏎ b) não apaga o operador (F2 do 5c)
+            if item[1] == "\n" and not (atual.palavras or atual.redirs) and op in ("&", "&&", "||", "|"):
+                atual = _Comando(op, max(prof, 0), segmento)
+                continue
             op = item[1]
             if prof == 0 and op in QUEBRAS:
                 segmento += 1
@@ -1196,10 +1200,15 @@ def _despachar(args, ps, base, resolver, aninhar):
             # command -v/-V só consulta; outro embrulho com opção (command -p, exec -a, time -p) é opaco (D15).
             return not (nome == "command" and resto[0][1] in ("-v", "-V"))
         return _despachar(resto, ps, base, resolver, aninhar)
-    if nome in ("nice", "timeout", "stdbuf") and any(
-            (a[1] or "") in ("-s", "-k", "-i", "-o", "-e", "--signal", "--kill-after", "--input", "--output",
-                             "--error", "--adjustment") for a in resto):
-        return True  # opção com valor separado: o guarda não sabe onde começa o comando (E12)
+    if nome in ("nice", "timeout", "stdbuf"):
+        iniciais = []  # só as opções antes do 1º argumento que não é opção (O1 do 5c: pytest -k não conta)
+        for a in resto:
+            if not (a[1] or "").startswith("-"):
+                break
+            iniciais.append(a[1])
+        if any(v in ("-s", "-k", "-i", "-o", "-e", "--signal", "--kill-after", "--input", "--output", "--error",
+                     "--adjustment") for v in iniciais):
+            return True  # opção com valor separado: o guarda não sabe onde começa o comando (E12)
     if nome == "nice":
         k = 2 if resto and resto[0][1] == "-n" else (1 if resto and (resto[0][1] or "").startswith("-") else 0)
         return _despachar(resto[k:], ps, base, resolver, aninhar)
@@ -1220,9 +1229,9 @@ def _despachar(args, ps, base, resolver, aninhar):
                 return aninhar(resto[k + 1][1], "bash")
         k = 0
         while k < len(resto) and resto[k][1].startswith(("-", "+")):
-            if resto[k][1] in ("-s", "--"):
-                return True
-            k += 2 if resto[k][1] in ("-o", "+o", "-O", "+O") else 1
+            if resto[k][1] == "--" or re.fullmatch(r"-[A-Za-z]*s[A-Za-z]*", resto[k][1]):
+                return True  # -s (também agrupado) lê da entrada
+            k += 2 if re.fullmatch(r"[-+][A-Za-z]*[oO]", resto[k][1]) else 1  # -euo pipefail: o valor do o (F1)
         return k >= len(resto)
     if nome in PWSH:
         valores = [(a[1] or "").lower() for a in resto]
@@ -1463,9 +1472,9 @@ def _utilitario(nome, resto, base, resolver, ps=False):
         if not ps and any(a[1] and re.fullmatch(r"/[A-Za-z0-9?+-]+(?::\S*)?", a[1]) for a in resto):
             return True  # N29f: no Git Bash, /E vira E:/ e desloca os posicionais (medido); use //E
         for a in resto:
-            m = re.fullmatch(r"(?i)/{1,2}(?:uni)?log\+?:(.+)", a[1] or "")
-            if m:
-                registrar((m.group(1), m.group(1)), "grava")  # /LOG:arq grava o arquivo (E13)
+            m = re.fullmatch(r"(?i)[\"']?/{1,2}(?:uni)?log\+?:(.+?)[\"']?", a[1] if a[1] is not None else a[0])
+            if m:  # /LOG:arq grava o arquivo (E13); com variável, destino não resolvido (F3 do 5c)
+                registrar((m.group(1), m.group(1) if a[1] is not None else None), "grava")
         posicionais = [a for a in resto if a[1] is None or not re.fullmatch(opcao, a[1])]
         if nome == "robocopy" and posicionais and any(re.fullmatch(r"(?i)/{1,2}mov(?:e)?", a[1] or "") for a in resto):
             registrar(posicionais[0], "recursivo")  # /MOV e /MOVE removem a origem (E13)
@@ -1531,6 +1540,19 @@ def r4_no_shell(perfil, destinos, falha, cwd, raiz, temp):
     return None
 
 
+VERBOS_DE_ESCRITA = frozenset(("edit", "write", "create", "move", "delete", "rename", "copy", "append", "put", "save",
+                               "upload", "update", "replace", "patch", "multiedit"))
+CHAVES_DE_CONTEUDO = frozenset(("content", "contents", "text", "body", "data", "new_string", "old_string", "edits",
+                                "new_source", "message"))
+
+
+def _ferramenta_que_grava(ferramenta):
+    """Nome com verbo de escrita como palavra (write_file, NotebookEdit, mcp__x__apply_patch), sem diferenciar caixa.
+    Palavra, e não trecho: BashOutput e TaskOutput não são put (O2 do 5c)."""
+    palavras = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])", ferramenta)
+    return any(p.lower() in VERBOS_DE_ESCRITA for p in palavras)
+
+
 def _textos(obj, prof=0):
     """Todas as strings de um JSON (dict, lista), para achar destino em chave que o guarda não conhece."""
     if prof > 5:
@@ -1583,11 +1605,13 @@ def decidir(perfil, ferramenta, entrada, cwd, raiz=None, temp=None, ambiente=Non
         return False, ""
 
     if ferramenta not in FERRAMENTAS:
-        if re.search(r"(?i)edit|write|create|move|delete|rename|copy|append|put|save|upload", ferramenta):  # D16, E14
+        if _ferramenta_que_grava(ferramenta):  # D16, E14
             caminhos = [str(entrada[k]) for k in ("file_path", "notebook_path", "path") if entrada.get(k)]
             if not caminhos:
                 return bloqueio("R5", f"ferramenta de escrita {ferramenta} sem caminho conhecido", MSG_R5)
-            for caminho in caminhos + _textos(entrada):  # destino em qualquer chave (destination, target...)
+            # Destino em qualquer chave (destination, target...), menos o conteúdo gravado (O3 do 5c).
+            outras = {k: v for k, v in entrada.items() if k not in CHAVES_DE_CONTEUDO}
+            for caminho in caminhos + _textos(outras):
                 if e_fiacao(caminho, cwd, raiz):
                     return bloqueio("R5", f"{ferramenta} em {caminho[:80]}", MSG_R5)
             if perfil in ("verificador", "seguranca"):
