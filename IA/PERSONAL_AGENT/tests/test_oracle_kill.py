@@ -1061,11 +1061,13 @@ def _casos_t7():
             dict(linhas=base, fake=dict(erro_kill=oracledb.DatabaseError("ORA-00600: erro interno"))),
             "ERRO_ORACLE", id="erro_oracle",
         ),
-        # A5 (só :935, ramo D8): o DSN fictício também não pode ir ao LLM
+        # A5 (só :935, ramo D8): o DSN fictício também não pode ir ao LLM.
+        # K6/N1 (asserção acrescentada, declarada no plano 8.12.3): o texto da exceção Python também não vai ao
+        # LLM; depois do execute a mensagem do D8 leva só o nome do tipo (mata N1_D8_VAZA_STR_EXC).
         pytest.param(
             dict(
                 linhas=base, fake=dict(status_pkg="ENCERRADA", erro_getvalue_status=RuntimeError("falha simulada")),
-                proibidos_extra=["host-teste:1521/TESTE", "instancia"],
+                proibidos_extra=["host-teste:1521/TESTE", "instancia", "falha simulada"],
             ),
             "RuntimeError", id="d8",
         ),
@@ -1270,6 +1272,43 @@ def test_k6_n3_recusa_pre_hitl_com_caminho_log_none_grava_no_caminho_padrao(
     (reg,) = [json.loads(l) for l in isolar_log_aprovacao.read_text(encoding="utf-8").splitlines()]
     assert set(reg) == _CHAVES_RECUSA_PRE_HITL
     assert reg["fase"] == "RECUSA_PRE_HITL" and reg["campos_invalidos"] == ["logon_time"]
+
+
+# ---- K6 (N5, N6): retornos de matar_sessao_oracle chamada direto ----
+
+def test_k6_n5_matar_sessao_com_p_status_vazio_devolve_status_desconhecido(monkeypatch, ambiente_fake):
+    """K6/N5 (mata N5_SEM_STATUS_PKG_VAZIO_EM_MATAR): direto em matar_sessao_oracle, sem o fallback de
+    registrar_decisao_kill que mascarava a falta, p_status "" -> status_banco STATUS_PKG_VAZIO, desconhecido
+    True e a mensagem diz o status (nunca "PKG_OPS_KILL: ;")."""
+    _instalar_oracle(monkeypatch, _OracleFake([], status_pkg=""))
+
+    res = json.loads(matar_sessao_oracle(
+        sid=10, serial=20, inst_id=1, identidade_esperada=dict(IDENTIDADE_VALIDA), ref_aprovacao=REF_VALIDO,
+    ))
+
+    assert res["status_banco"] == oracle_dba.STATUS_PKG_VAZIO == "DESCONHECIDO"
+    assert res["status"] == res["motivo"] == oracle_dba.STATUS_PKG_VAZIO
+    assert res["resultado_desconhecido"] is True
+    assert "Status retornado pelo PKG_OPS_KILL: DESCONHECIDO;" in res["mensagem"]
+
+
+@pytest.mark.parametrize(
+    "sid_val, serial_val, inst_val",
+    [(-1, 100, 1), (0, 100, 1), (100, -5, 1), (100, 0, 1), (100, 100, -1), (100, 100, 0),
+     ("abc", 100, 1), (100, "xyz", 1), (None, 100, 1)],
+)
+def test_k6_n6_param_invalido_de_matar_sessao_nao_e_desconhecido(monkeypatch, sid_val, serial_val, inst_val):
+    """K6/N6 (mata N6_PARAM_INST_DESCONHECIDO_TRUE): os casos de test_kill_param_invalido_sem_conexao (que não
+    é alterado) -> PARAM_INVALIDO com resultado_desconhecido False, literal: nada foi chamado."""
+    monkeypatch.setattr(oracledb, "connect", lambda *a, **k: pytest.fail("connect não deve ser chamado"))
+
+    res = json.loads(matar_sessao_oracle(
+        sid=sid_val, serial=serial_val, inst_id=inst_val,
+        identidade_esperada=dict(IDENTIDADE_VALIDA), ref_aprovacao=REF_VALIDO,
+    ))
+
+    assert res["motivo"] == "PARAM_INVALIDO"
+    assert res["resultado_desconhecido"] is False
 
 
 # ---- K4 (A8): matar_sessao_oracle fora da exportação de src.tools ----------------
