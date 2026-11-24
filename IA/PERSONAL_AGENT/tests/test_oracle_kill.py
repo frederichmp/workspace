@@ -1228,6 +1228,50 @@ def test_k4_a10_2_falha_ao_gravar_o_evento_da_logger_error_e_a_recusa_se_mantem(
     assert any("HITL RECUSADO LOCALMENTE" in r.getMessage() for r in caplog.records), "o warning também sai"
 
 
+# ---- K6 (N2, N3): recusa pré-HITL com chave ausente e com o caminho padrão do log ----
+
+def test_k6_n2_alvo_da_diag_sem_a_chave_program_recusa_antes_do_prompt(monkeypatch, tmp_path, ambiente_fake):
+    """K6/N2 (mata N2_PREP_GET_DEFAULT): a pré-consulta devolve o alvo SEM a chave `program` -> a identidade não
+    tem os 4 campos e a recusa é antes do prompt, com campos_invalidos == ["identidade_esperada"]. Com
+    `fonte.get(c)` a chave ausente viraria None (aceito em program) e o prompt seria exibido. O fake monta a linha
+    pelo SELECT de produção, então o alvo sem a coluna vem de monkeypatch de consultar_alvo_sessao_diag."""
+    alvo = dict(zip([c.lower() for c in COLUNAS_ALVO], _linha_diag_k4()))
+    del alvo["program"]
+    monkeypatch.setattr(
+        oracle_dba, "consultar_alvo_sessao_diag",
+        lambda inst_id, sid, serial: {"elegivel": True, "alvo": dict(alvo)},
+    )
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([], kill_permitido=False))
+    log = tmp_path / "kill.log"
+
+    desfecho = conduzir_kill_hitl(dict(ARGS_ALVO), solicitar_aprovacao=_prompt_proibido, canal="TESTE", caminho_log=log)
+
+    assert desfecho["prompt_exibido"] is False and desfecho["motivo"] == "PARAM_INVALIDO"
+    assert oracle_fake.conexoes == [] and ambiente_fake == []
+    (reg,) = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()]
+    assert reg["fase"] == "RECUSA_PRE_HITL" and reg["campos_invalidos"] == ["identidade_esperada"]
+
+
+def test_k6_n3_recusa_pre_hitl_com_caminho_log_none_grava_no_caminho_padrao(
+    monkeypatch, ambiente_fake, isolar_log_aprovacao
+):
+    """K6/N3 (mata N3_PRE_HITL_IGNORA_CAMINHO_EFETIVO): a CLI (src/main.py) e a Web (app.py) chamam sem
+    caminho_log. A recusa pré-HITL grava o evento no caminho padrão (aqui isolado em tmp pelo fixture); com
+    Path(None) o TypeError seria engolido pelo except e o evento nunca chegaria ao JSONL real."""
+    assert oracle_dba._caminho_log_efetivo(None) == isolar_log_aprovacao
+    assert not isolar_log_aprovacao.exists()
+    linha = _linha_diag_k4(logon_time=_LOGON_MICRO_2001)
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([linha, linha], kill_permitido=False))
+
+    desfecho = conduzir_kill_hitl(dict(ARGS_ALVO), solicitar_aprovacao=_prompt_proibido, canal="TESTE")
+
+    assert desfecho["prompt_exibido"] is False and desfecho["motivo"] == "PARAM_INVALIDO"
+    assert oracle_fake.conexoes_kill == []
+    (reg,) = [json.loads(l) for l in isolar_log_aprovacao.read_text(encoding="utf-8").splitlines()]
+    assert set(reg) == _CHAVES_RECUSA_PRE_HITL
+    assert reg["fase"] == "RECUSA_PRE_HITL" and reg["campos_invalidos"] == ["logon_time"]
+
+
 # ---- K4 (A8): matar_sessao_oracle fora da exportação de src.tools ----------------
 
 def test_k4_a8_matar_sessao_oracle_nao_e_exportada_por_src_tools():
