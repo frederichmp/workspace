@@ -294,6 +294,7 @@ from tests.fakes_oracle import (  # noqa: E402
     USER_KILL_FAKE,
     _OracleFake,
     _linha_alvo,
+    _sem_comentarios_sql,
 )
 
 
@@ -853,8 +854,10 @@ def test_t3_nove_binds_valores_exatos(monkeypatch, ambiente_fake, program, machi
     assert len(execucoes) == 1, "exatamente 1 execute na conta KILL"
     sql, binds = execucoes[0]
     assert list(binds) == ORDEM_V2
-    assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_V2
-    assert re.findall(r"\b(p_\w+)\s*=>\s*:(\w+)\b", sql) == [(n, n) for n in ORDEM_V2]
+    # K6/N7: os pares são conferidos no SQL sem comentários (`--` e `/* ... */`), como o Oracle o lê.
+    sql_efetivo = _sem_comentarios_sql(sql)
+    assert re.findall(r"\b(p_\w+)\s*=>", sql_efetivo) == ORDEM_V2
+    assert re.findall(r"\b(p_\w+)\s*=>\s*:(\w+)\b", sql_efetivo) == [(n, n) for n in ORDEM_V2]
     assert binds["p_inst_id"] == 3 and binds["p_sid"] == 101 and binds["p_serial"] == 202
     assert binds["p_username_esperado"] == "App_User " and type(binds["p_username_esperado"]) is str
     assert binds["p_program_esperado"] == program and (program is None) == (binds["p_program_esperado"] is None)

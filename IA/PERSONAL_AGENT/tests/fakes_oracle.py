@@ -87,8 +87,13 @@ def _eh_consulta_alvo(sql):
 
 
 def _sem_comentarios_sql(sql):
-    """Remove comentários de linha `--` (o Oracle também ignora o que está neles)."""
-    return re.sub(r"--[^\n]*", "", sql)
+    """
+    Remove comentários de bloco `/* ... */` e de linha `--` (o Oracle também ignora o que está neles).
+    K6/N7: sem o bloco, parâmetros comentados com `/* ... */` passavam pelos pares formal-placeholder e pela
+    conferência de placeholders x binds.
+    """
+    sem_bloco = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
+    return re.sub(r"--[^\n]*", "", sem_bloco)
 
 
 def _colunas_do_select(sql):
@@ -109,7 +114,7 @@ def _colunas_do_select(sql):
 
 
 def _placeholders_sql(sql):
-    """Conjunto dos :nome do SQL, sem os que estão em comentários `--`."""
+    """Conjunto dos :nome do SQL, sem os que estão em comentários (`--` e `/* ... */`)."""
     return set(re.findall(r":([A-Za-z_][A-Za-z0-9_$#]*)", _sem_comentarios_sql(sql)))
 
 

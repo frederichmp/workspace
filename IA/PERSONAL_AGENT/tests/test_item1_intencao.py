@@ -45,6 +45,7 @@ from tests.fakes_oracle import (
     USER_KILL_FAKE,
     _OracleFake,
     _linha_alvo,
+    _sem_comentarios_sql,
 )
 from tests.test_oracle_kill import (  # noqa: F401  (ambiente_fake é uma fixture)
     ARGS_ALVO,
@@ -225,7 +226,7 @@ def test_intencao_gravada_antes_da_conta_kill(monkeypatch, tmp_path, ambiente_fa
     (_, sql, binds), = [s for s in fake.sql_executado if s[0] == "KILL"]
     assert list(binds) == ORDEM_BINDS_KILL_V2
     assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2
-    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, sql) == PARES_BINDS_KILL_V2, "placeholder trocado (A2)"
+    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, _sem_comentarios_sql(sql)) == PARES_BINDS_KILL_V2, "placeholder trocado (A2)"
     assert binds["p_ref_aprovacao"] == intencao["id_intervencao"]
     assert binds["p_ref_aprovacao"] == resultado["id_intervencao"]
     assert binds["p_logon_time_esperado"].tipo is oracledb.DB_TYPE_DATE
@@ -606,7 +607,7 @@ def test_kill_ponto_unico_de_chamada(monkeypatch, tmp_path, ambiente_fake, cenar
     sql, binds = execucoes[0]
     assert "OPS_OWNER.PKG_OPS_KILL.KILL_SESSION" in sql
     assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2
-    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, sql) == PARES_BINDS_KILL_V2, f"{cenario}: placeholder trocado (A2)"
+    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, _sem_comentarios_sql(sql)) == PARES_BINDS_KILL_V2, f"{cenario}: placeholder trocado (A2)"
     assert list(binds) == ORDEM_BINDS_KILL_V2
 
 
@@ -652,7 +653,7 @@ def test_t6_v2_contra_pkg_v1_falha_fechado_sem_fallback(monkeypatch, tmp_path, a
     sql, binds = execucoes[0]
     assert list(binds) == ORDEM_BINDS_KILL_V2
     assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2, "nenhum bloco v1 de 4 formais"
-    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, sql) == PARES_BINDS_KILL_V2, "placeholder trocado (A2)"
+    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, _sem_comentarios_sql(sql)) == PARES_BINDS_KILL_V2, "placeholder trocado (A2)"
     assert desfecho["resultado_banco"] == "ERRO_ORACLE"
     assert desfecho["resultado_desconhecido"] is True
     assert desfecho["executado"] is False
