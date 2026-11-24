@@ -23,6 +23,7 @@ b) Sandbox (sandbox_only, requer ORACLE_SANDBOX=1):
    - STARTUP_DIAG tentando comando direto -> ORA-01031;
    - STARTUP_KILL tentando comando direto -> ORA-01031.
 """
+import ast
 from datetime import date, datetime, timedelta, timezone
 import inspect
 import json
@@ -1010,6 +1011,284 @@ def test_t10_argumentos_extras_do_llm_sao_ignorados(monkeypatch, tmp_path, ambie
     assert binds["p_logon_time_esperado"].getvalue() == LOGON_TIME_PADRAO
     assert binds["p_ref_aprovacao"] == desfecho["id_intervencao"] != "f" * 32
     assert binds["p_ref_aprovacao"] == registros[0]["id_intervencao"]
+
+
+# ---- K2: desfecho fora da lista fechada e texto sem erro do Oracle (correcao/decisao_c1.md, pontos 1 a 4) ----
+
+def _texto_do_desfecho_sem_execucao(desfecho):
+    """Textos de um desfecho que não podem afirmar execução nem 'NÃO executada' (resultado desconhecido)."""
+    tool = json.loads(desfecho["resultado_tool"])
+    return tool, tool.get("mensagem", "")
+
+
+@pytest.mark.parametrize(
+    "status_pkg",
+    ["ERRO_ORACLE", "", None, "XYZ", "encerrada"],
+    ids=["erro_oracle", "vazio", "nulo", "codigo_novo", "minusculo"],
+)
+def test_k2_status_fora_da_lista_fechada_e_resultado_desconhecido(monkeypatch, tmp_path, ambiente_fake, status_pkg):
+    """K2 (A1; mata m17 e m18): p_status fora das duas listas (ERRO_ORACLE, vazio, nulo, código novo, caixa
+    diferente) -> resultado_desconhecido True, executado False, 1 execute na conta KILL; tool e e-mail dizem
+    'resultado desconhecido' e nunca 'executado para' nem 'NÃO executada'."""
+    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], status_pkg=status_pkg)
+    desfecho, registros = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+
+    assert len(_binds_kill(oracle_fake)) == 1, "sem retentativa: 1 execute só"
+    assert desfecho["resultado_desconhecido"] is True
+    assert desfecho["executado"] is False
+    assert desfecho["resultado_banco"] == (status_pkg or oracle_dba.STATUS_PKG_VAZIO)
+    tool, mensagem = _texto_do_desfecho_sem_execucao(desfecho)
+    assert tool["resultado_desconhecido"] is True and tool["executado"] is False
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO in mensagem
+    assert "executado para" not in mensagem
+    assert "NÃO executad" not in mensagem
+    assert len(ambiente_fake) == 1
+    assunto = ambiente_fake[0]["assunto"]
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO in assunto
+    assert "NÃO executada" not in assunto and "Aprovada" not in assunto
+    assert [r["fase"] for r in registros] == ["INTENCAO", "RESULTADO"]
+
+
+# As 6 recusas do PKG que provam que nada foi encerrado (lista escrita aqui de propósito, sem ler a constante)
+RECUSAS_ESPERADAS_PKG = [
+    "PARAM_INVALIDO", "PROPRIA_SESSAO", "ALVO_NAO_ENCONTRADO", "ALVO_DIVERGENTE", "NAO_USUARIO", "USUARIO_PROTEGIDO",
+]
+
+
+@pytest.mark.parametrize("status_pkg", RECUSAS_ESPERADAS_PKG)
+def test_k2_recusas_do_pkg_nao_sao_desconhecidas_nem_executadas(monkeypatch, tmp_path, ambiente_fake, status_pkg):
+    """K2 (A1): cada recusa do PKG -> resultado_desconhecido False, executado False, mensagem própria (nunca
+    'executado para'), e-mail 'NÃO executada' e não 'resultado desconhecido'."""
+    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], status_pkg=status_pkg)
+    desfecho, registros = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+
+    assert len(_binds_kill(oracle_fake)) == 1
+    assert desfecho["resultado_banco"] == status_pkg
+    assert desfecho["resultado_desconhecido"] is False
+    assert desfecho["executado"] is False
+    tool, mensagem = _texto_do_desfecho_sem_execucao(desfecho)
+    assert tool["resultado_desconhecido"] is False
+    if status_pkg == "ALVO_DIVERGENTE":
+        assert mensagem == oracle_dba.MENSAGEM_ALVO_DIVERGENTE
+    else:
+        assert mensagem == oracle_dba.MENSAGEM_RECUSA_PKG.format(status=status_pkg)
+    assert "executado para" not in mensagem
+    assert len(ambiente_fake) == 1
+    assunto = ambiente_fake[0]["assunto"]
+    assert "NÃO executada" in assunto and status_pkg in assunto
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO not in assunto and "Aprovada" not in assunto
+    assert [r["fase"] for r in registros] == ["INTENCAO", "RESULTADO"]
+
+
+def test_k2_executado_so_para_encerrada_e_marcada_para_kill(monkeypatch, tmp_path, ambiente_fake):
+    """K2 (A1): o ramo 'executado para' continua valendo para MARCADA_PARA_KILL, com desconhecido False."""
+    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], status_pkg="MARCADA_PARA_KILL")
+    desfecho, _ = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+
+    assert desfecho["executado"] is True and desfecho["resultado_desconhecido"] is False
+    _, mensagem = _texto_do_desfecho_sem_execucao(desfecho)
+    assert "executado para" in mensagem and "MARCADA_PARA_KILL" in mensagem
+    assert "Aprovada" in ambiente_fake[0]["assunto"]
+
+
+def test_k2_invariantes_das_listas_de_status_do_pkg():
+    """K2 (L23; mata m17): listas disjuntas; códigos de erro fora das duas; e os literais v_status do SQL do PKG
+    são exatamente RECUSAS U EXECUTADO U {ERRO_ORACLE} (status novo no SQL obriga a classificá-lo)."""
+    recusas = set(oracle_dba.RECUSAS_PKG_SEM_KILL)
+    executado = set(oracle_dba.RESULTADOS_KILL_EXECUTADO)
+    assert recusas == set(RECUSAS_ESPERADAS_PKG)
+    assert recusas.isdisjoint(executado)
+    for valor in ("ERRO_ORACLE", "", "DESCONHECIDO", "ERRO_INTERNO"):
+        assert valor not in recusas, f"{valor!r} não pode estar em RECUSAS_PKG_SEM_KILL"
+        assert valor not in executado, f"{valor!r} não pode estar em RESULTADOS_KILL_EXECUTADO"
+    sql = (ROOT_DIR_TESTE / "docs" / "entregas" / "1.11" / "item6" / "ops_kill.sql").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    literais = set(re.findall(r"v_status\s*:=\s*'([A-Z_]+)'", sql))
+    assert literais, "nenhum v_status := '...' encontrado em ops_kill.sql"
+    assert literais == recusas | executado | {"ERRO_ORACLE"}
+
+
+class _ErroOracleStrQuebrado(oracledb.DatabaseError):
+    """oracledb.Error cujo __str__ levanta (A3)."""
+
+    def __str__(self):
+        raise RuntimeError("SENTINELA_STR_QUEBRADO")
+
+
+class _ErroGenericoStrQuebrado(Exception):
+    """Exceção comum cujo __str__ levanta (A3)."""
+
+    def __str__(self):
+        raise RuntimeError("SENTINELA_STR_QUEBRADO")
+
+
+@pytest.mark.parametrize(
+    "falha, classe, desconhecido, motivo",
+    [
+        ("erro_kill", _ErroOracleStrQuebrado, True, "ERRO_ORACLE"),
+        ("erro_getvalue_status", _ErroGenericoStrQuebrado, True, "_ErroGenericoStrQuebrado"),
+        ("erro_connect_kill", _ErroOracleStrQuebrado, False, "ERRO_ORACLE"),
+        ("erro_connect_kill", _ErroGenericoStrQuebrado, False, "_ErroGenericoStrQuebrado"),
+    ],
+    ids=["oracle_depois_do_execute", "generico_depois_do_execute", "oracle_antes_do_execute", "generico_antes_do_execute"],
+)
+def test_k2_str_do_erro_que_levanta_nao_escapa_de_matar_sessao(
+    monkeypatch, ambiente_fake, falha, classe, desconhecido, motivo
+):
+    """K2 (A3; mata m21): o __str__ do erro levanta; nenhuma exceção sai de matar_sessao_oracle. Depois do execute:
+    resultado_desconhecido True. Antes: False, e a mensagem é o nome do tipo (o texto do erro não é usado)."""
+    oracle_fake = _OracleFake([], status_pkg="ENCERRADA", **{falha: classe("x")})
+    _instalar_oracle(monkeypatch, oracle_fake)
+
+    bruto = matar_sessao_oracle(
+        sid=101, serial=202, inst_id=1, identidade_esperada=dict(IDENTIDADE_VALIDA), ref_aprovacao=REF_VALIDO
+    )
+    res = json.loads(bruto)
+    assert res["status"] == "erro"
+    assert res["motivo"] == motivo
+    assert res["resultado_desconhecido"] is desconhecido
+    assert "SENTINELA_STR_QUEBRADO" not in bruto
+    if desconhecido:
+        assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO in res["mensagem"]
+        assert len(_binds_kill(oracle_fake)) == 1
+    else:
+        assert res["mensagem"] == classe.__name__
+        assert _binds_kill(oracle_fake) == []
+
+
+@pytest.mark.parametrize(
+    "retorno",
+    ["texto livre SENTINELA_ECO_DO_RETORNO", "[]", '"SENTINELA_ECO_DO_RETORNO"', None, "42"],
+    ids=["nao_json", "lista_vazia", "json_string", "none", "json_numero"],
+)
+def test_k2_retorno_ilegivel_do_fluxo_de_kill_e_resultado_desconhecido(
+    monkeypatch, tmp_path, ambiente_fake, retorno
+):
+    """K2 (A3; mata m20): matar_sessao_oracle devolve algo que não é um JSON dict -> resultado_desconhecido True,
+    executado False, mensagem 'resultado desconhecido' e nenhum eco do texto recebido (tool, e-mail, JSONL)."""
+    monkeypatch.setattr(oracle_dba, "matar_sessao_oracle", lambda *a, **k: retorno)
+    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], kill_permitido=False)
+    desfecho, registros = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+
+    assert desfecho["resultado_desconhecido"] is True
+    assert desfecho["executado"] is False
+    assert desfecho["resultado_banco"] == oracle_dba.STATUS_PKG_VAZIO
+    tool, mensagem = _texto_do_desfecho_sem_execucao(desfecho)
+    assert tool["resultado_desconhecido"] is True and tool["executado"] is False
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO in mensagem
+    assert "NÃO executad" not in mensagem
+    assert len(ambiente_fake) == 1
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO in ambiente_fake[0]["assunto"]
+    assert "NÃO executada" not in ambiente_fake[0]["assunto"]
+    tudo = desfecho["resultado_tool"] + json.dumps(ambiente_fake) + json.dumps(registros)
+    assert "SENTINELA_ECO_DO_RETORNO" not in tudo
+    assert [r["fase"] for r in registros] == ["INTENCAO", "RESULTADO"]
+
+
+@pytest.mark.parametrize(
+    "chave",
+    [{}, {"resultado_desconhecido": 0}, {"resultado_desconhecido": None}, {"resultado_desconhecido": "false"}],
+    ids=["chave_ausente", "zero", "none", "texto_false"],
+)
+def test_k2_so_o_false_literal_tira_o_desconhecido(monkeypatch, tmp_path, ambiente_fake, chave):
+    """K2 (A3; mata m20): JSON dict sem a chave, ou com 0, None ou 'false', continua desconhecido e executado
+    False, mesmo com status_banco ENCERRADA; só o bool False explícito libera (controle positivo ao fim)."""
+    monkeypatch.setattr(
+        oracle_dba, "matar_sessao_oracle",
+        lambda *a, **k: json.dumps(dict({"status": "ENCERRADA", "status_banco": "ENCERRADA"}, **chave)),
+    )
+    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], kill_permitido=False)
+    desfecho, _ = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+
+    assert desfecho["resultado_desconhecido"] is True
+    assert desfecho["executado"] is False
+    tool, _ = _texto_do_desfecho_sem_execucao(desfecho)
+    assert tool["resultado_desconhecido"] is True and tool["executado"] is False
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO in ambiente_fake[0]["assunto"]
+
+
+def test_k2_false_literal_explicito_libera_o_executado(monkeypatch, tmp_path, ambiente_fake):
+    """K2: controle positivo do teste anterior: com resultado_desconhecido False explícito e ENCERRADA, executado."""
+    monkeypatch.setattr(
+        oracle_dba, "matar_sessao_oracle",
+        lambda *a, **k: json.dumps({"status": "ENCERRADA", "status_banco": "ENCERRADA", "resultado_desconhecido": False}),
+    )
+    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], kill_permitido=False)
+    desfecho, _ = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+
+    assert desfecho["resultado_desconhecido"] is False and desfecho["executado"] is True
+    assert "Aprovada" in ambiente_fake[0]["assunto"]
+
+
+def _chaves_dos_json_dumps(funcao):
+    """Para cada json.dumps(...) do código da função: (linha relativa, chaves literais do dict do 1º argumento)."""
+    arvore = ast.parse(inspect.getsource(funcao))
+    saida = []
+    for no in ast.walk(arvore):
+        if (
+            isinstance(no, ast.Call) and isinstance(no.func, ast.Attribute) and no.func.attr == "dumps"
+            and isinstance(no.func.value, ast.Name) and no.func.value.id == "json"
+        ):
+            assert no.args and isinstance(no.args[0], ast.Dict), f"json.dumps sem dict literal na linha {no.lineno}"
+            chaves = {k.value for k in no.args[0].keys if isinstance(k, ast.Constant)}
+            saida.append((no.lineno, chaves))
+    return saida
+
+
+@pytest.mark.parametrize(
+    "funcao, minimo",
+    [(matar_sessao_oracle, 7), (oracle_dba.executar_kill_verificado, 4)],
+    ids=["matar_sessao_oracle", "executar_kill_verificado"],
+)
+def test_k2_todo_json_dumps_traz_resultado_desconhecido(funcao, minimo):
+    """K2 (decisao_c1.md, pontos 2a e 2c): todo json.dumps({...}) de matar_sessao_oracle e de
+    executar_kill_verificado traz a chave resultado_desconhecido (o consumidor só aceita o bool False literal)."""
+    chamadas = _chaves_dos_json_dumps(funcao)
+    assert len(chamadas) >= minimo, f"{funcao.__name__}: esperava ao menos {minimo} json.dumps, achou {len(chamadas)}"
+    faltando = [linha for linha, chaves in chamadas if "resultado_desconhecido" not in chaves]
+    assert faltando == [], f"{funcao.__name__}: json.dumps sem resultado_desconhecido (linhas relativas {faltando})"
+
+
+def test_k2_montar_notificacao_kill_resultado_desconhecido_keyword_only_sem_default():
+    """K2 (ponto 2e): resultado_desconhecido é KEYWORD_ONLY e sem default (o chamador sempre o informa)."""
+    parametro = inspect.signature(oracle_dba.montar_notificacao_kill).parameters["resultado_desconhecido"]
+    assert parametro.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parametro.default is inspect.Parameter.empty
+    with pytest.raises(TypeError):
+        oracle_dba.montar_notificacao_kill("dba", 1, 2, 3, "ENCERRADA", "h" * 64, "TESTE")
+
+
+def test_k2_email_desconhecido_sem_erro_do_oracle_direto():
+    """K2 (A9; mata m24): o corpo do e-mail desconhecido diz 'desfecho no banco não confirmado' e não 'erro do Oracle'."""
+    assunto, corpo = oracle_dba.montar_notificacao_kill(
+        "dba", 1, 101, 202, "XYZ", "h" * 64, "TESTE", resultado_desconhecido=True
+    )
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO in assunto
+    assert oracle_dba.MENSAGEM_DESFECHO_NAO_CONFIRMADO in corpo
+    assert "erro do Oracle" not in corpo
+
+
+@pytest.mark.parametrize(
+    "fake",
+    [
+        dict(status_pkg="ENCERRADA", erro_getvalue_status=RuntimeError("falha simulada")),
+        dict(status_pkg=""),
+        dict(erro_kill=oracledb.DatabaseError("ORA-00600: erro interno")),
+    ],
+    ids=["d8_getvalue_levanta", "status_vazio", "erro_oracle_no_execute"],
+)
+def test_k2_email_do_desconhecido_no_fluxo_sem_erro_do_oracle(monkeypatch, tmp_path, ambiente_fake, fake):
+    """K2 (A9; mata m24): no fluxo completo (D8, p_status vazio, erro do execute) o e-mail do desconhecido traz
+    MENSAGEM_DESFECHO_NAO_CONFIRMADO e nunca 'erro do Oracle'."""
+    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], **fake)
+    desfecho, _ = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+
+    assert desfecho["resultado_desconhecido"] is True
+    assert len(ambiente_fake) == 1
+    corpo = ambiente_fake[0]["corpo"]
+    assert oracle_dba.MENSAGEM_DESFECHO_NAO_CONFIRMADO in corpo
+    assert "erro do Oracle" not in corpo
 
 
 # =============================================================================

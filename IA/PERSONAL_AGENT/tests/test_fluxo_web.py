@@ -492,6 +492,30 @@ def test_web_resultado_desconhecido(montar_web):
     assert "resultado desconhecido: conferir sessão" in devolvido["mensagem"]
 
 
+def test_web_status_pkg_vazio_e_resultado_desconhecido(montar_web):
+    """K2 (A1, m30): p_status vazio (fora da lista fechada): st.error com 'resultado desconhecido' e o texto comum
+    'desfecho no banco não confirmado', sem 'NÃO EXECUTADA' nem 'erro a partir da chamada ao PKG'."""
+    import tools.oracle_dba as od
+
+    linha = _linha_alvo()
+    amb = montar_web([linha, linha], status_pkg="")
+    _ate_painel_hitl(amb)
+    _decidir(amb, "btn_hitl_approve", "dba_teste")
+
+    assert amb.oracle.conexoes_kill == [USER_KILL_FAKE]
+    textos = amb.textos_tela()
+    assert any(od.MENSAGEM_RESULTADO_DESCONHECIDO in t and od.MENSAGEM_DESFECHO_NAO_CONFIRMADO in t for t in textos)
+    assert not any("NÃO EXECUTADA" in t or "NÃO executada" in t for t in textos)
+    assert not any("erro a partir da chamada ao PKG" in t for t in textos)
+    assert len(amb.emails) == 1
+    assert od.MENSAGEM_RESULTADO_DESCONHECIDO in amb.emails[0]["assunto"]
+    assert "NÃO executada" not in amb.emails[0]["assunto"]
+    assert od.MENSAGEM_DESFECHO_NAO_CONFIRMADO in amb.emails[0]["corpo"]
+    assert "erro do Oracle" not in amb.emails[0]["corpo"]
+    devolvido = amb.json_devolvido_ao_llm()
+    assert devolvido["resultado_desconhecido"] is True and devolvido["executado"] is False
+
+
 def _intencao_antiga(id_="e" * 32):
     from datetime import datetime, timedelta, timezone
 

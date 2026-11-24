@@ -48,6 +48,11 @@ _LOCK_LOG_INTERVALO_SEGUNDOS = 0.05
 # Texto exigido pelo responsável para ERRO_ORACLE a partir do execute do KILL_SESSION (2026-11-17)
 MENSAGEM_RESULTADO_DESCONHECIDO = "resultado desconhecido: conferir sessão"
 
+# Desfecho fora da lista fechada (correcao/decisao_c1.md, pontos 2 e 4): texto comum a e-mail, CLI e Web.
+MENSAGEM_DESFECHO_NAO_CONFIRMADO = "desfecho no banco não confirmado"
+MENSAGEM_RECUSA_PKG = "Encerramento NÃO executado: recusado pelo PKG_OPS_KILL (status {status})."
+STATUS_PKG_VAZIO = "DESCONHECIDO"
+
 # Reconciliador na subida
 RESULTADO_NAO_CONCLUIDA = "NAO_CONCLUIDA"
 MOTIVO_RECONCILIADO = "RECONCILIADO_NA_SUBIDA"
@@ -72,6 +77,14 @@ RECONCILIACAO_IDADE_MINIMA_SEGUNDOS = APROVACAO_TTL_SEGUNDOS + 300
 
 # Resultados de PKG_OPS_KILL que significam execução efetiva do encerramento
 RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = ("ENCERRADA", "MARCADA_PARA_KILL")
+
+# p_status do PKG_OPS_KILL v2 que provam que nenhuma sessão foi encerrada (ops_kill.sql:128-176; o
+# ALVO_NAO_ENCONTRADO também vem do ORA-00030 no ALTER SYSTEM, :193-194). Lista FECHADA: qualquer outro
+# p_status (ERRO_ORACLE, vazio, nulo, código novo) é resultado desconhecido (decisao_c1.md, ponto 1).
+RECUSAS_PKG_SEM_KILL: Tuple[str, ...] = (
+    "PARAM_INVALIDO", "PROPRIA_SESSAO", "ALVO_NAO_ENCONTRADO",
+    "ALVO_DIVERGENTE", "NAO_USUARIO", "USUARIO_PROTEGIDO",
+)
 
 # Identidade esperada enviada ao PKG_OPS_KILL v2 (1.11-V2 item 6; docs/entregas/1.11/v2_refeito/decisao.md D1).
 CAMPOS_IDENTIDADE_ESPERADA: Tuple[str, ...] = ("username", "program", "machine", "logon_time")
@@ -700,6 +713,18 @@ def consultar_alvo_sessao_diag(
                 pass
 
 
+def _descrever_erro(exc: BaseException) -> str:
+    """Texto do erro para mensagem; nunca levanta (A3): str(exc), senão o nome do tipo, senão texto fixo."""
+    try:
+        return str(exc)
+    except Exception:
+        pass
+    try:
+        return type(exc).__name__
+    except Exception:
+        return "Exception"
+
+
 def _texto_identidade_invalido(valor: Any, aceita_none: bool) -> bool:
     """Texto de identidade: str de 1 a LIMITE_TEXTO_IDENTIDADE caracteres (ou None, se aceito). Nunca levanta."""
     if valor is None:
@@ -757,6 +782,7 @@ def matar_sessao_oracle(
                 "status": "recusado",
                 "motivo": "PARAM_INVALIDO",
                 "status_banco": "PARAM_INVALIDO",
+                "resultado_desconhecido": False,
                 "mensagem": (
                     f"Parâmetros inválidos para encerramento de sessão: inst_id={inst_id}, sid={sid}, serial={serial}. "
                     "inst_id, sid e serial são obrigatórios e devem ser inteiros estritamente positivos (> 0)."
@@ -774,6 +800,7 @@ def matar_sessao_oracle(
                 "status": "recusado",
                 "motivo": "PARAM_INVALIDO",
                 "status_banco": "PARAM_INVALIDO",
+                "resultado_desconhecido": False,
                 "mensagem": (
                     "Identidade esperada ou referência de aprovação inválida; encerramento NÃO executado. "
                     f"Campos inválidos: {', '.join(invalidos)}."
@@ -792,6 +819,7 @@ def matar_sessao_oracle(
             {
                 "status": "erro",
                 "motivo": "ERRO_CONFIG",
+                "resultado_desconhecido": False,
                 "instancia": dsn or "NAO_CONFIGURADO",
                 "mensagem": (
                     "Configuração incompleta no cofre (.env). "
@@ -808,6 +836,7 @@ def matar_sessao_oracle(
             {
                 "status": "erro",
                 "motivo": "HostInacessivelVPN",
+                "resultado_desconhecido": False,
                 "instancia": dsn,
                 "host_acessivel": False,
                 "mensagem": (
@@ -869,19 +898,26 @@ def matar_sessao_oracle(
         )
         status_banco = str(status_var.getvalue() or "").strip()
 
-        if status_banco == "ALVO_DIVERGENTE":
+        # Classificação pela lista fechada (decisao_c1.md, pontos 1 e 2a). "executado para" só para
+        # RESULTADOS_KILL_EXECUTADO; fora das duas listas o desfecho é desconhecido.
+        desconhecido = False
+        if status_banco in RESULTADOS_KILL_EXECUTADO:
+            mensagem = (
+                f"Procedimento OPS_OWNER.PKG_OPS_KILL.KILL_SESSION executado para "
+                f"inst_id={inst_id_int}, sid={sid_int}, serial={serial_int}. "
+                f"Status retornado pelo banco: {status_banco}."
+            )
+        elif status_banco == "ALVO_DIVERGENTE":
             # O Python só recebe o código; a mensagem não usa o texto genérico "executado" (decisao.md D5).
-            return json.dumps(
-                {
-                    "status": status_banco,
-                    "motivo": status_banco,
-                    "status_banco": status_banco,
-                    "inst_id": inst_id_int,
-                    "sid": sid_int,
-                    "serial": serial_int,
-                    "mensagem": MENSAGEM_ALVO_DIVERGENTE,
-                },
-                ensure_ascii=False,
+            mensagem = MENSAGEM_ALVO_DIVERGENTE
+        elif status_banco in RECUSAS_PKG_SEM_KILL:
+            mensagem = MENSAGEM_RECUSA_PKG.format(status=status_banco)
+        else:
+            desconhecido = True
+            status_banco = status_banco or STATUS_PKG_VAZIO
+            mensagem = (
+                f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Status retornado pelo PKG_OPS_KILL: {status_banco}; "
+                f"{MENSAGEM_DESFECHO_NAO_CONFIRMADO}. Consulte OPS_KILL_AUDIT."
             )
 
         return json.dumps(
@@ -889,23 +925,24 @@ def matar_sessao_oracle(
                 "status": status_banco,
                 "motivo": status_banco,
                 "status_banco": status_banco,
+                "resultado_desconhecido": desconhecido,
                 "inst_id": inst_id_int,
                 "sid": sid_int,
                 "serial": serial_int,
-                "mensagem": (
-                    f"Procedimento OPS_OWNER.PKG_OPS_KILL.KILL_SESSION executado para "
-                    f"inst_id={inst_id_int}, sid={sid_int}, serial={serial_int}. "
-                    f"Status retornado pelo banco: {status_banco}."
-                ),
+                "mensagem": mensagem,
             },
             ensure_ascii=False,
         )
 
     except oracledb.Error as db_err:
+        # A3: o texto do erro passa por _descrever_erro, que nunca levanta; nenhuma exceção sai daqui.
         if execute_iniciado:
-            mensagem = f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro do Oracle a partir da chamada ao PKG: {db_err}"
+            mensagem = (
+                f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro do Oracle a partir da chamada ao PKG: "
+                f"{_descrever_erro(db_err)}"
+            )
         else:
-            mensagem = str(db_err)
+            mensagem = _descrever_erro(db_err)
         return json.dumps(
             {
                 "status": "erro",
@@ -926,7 +963,7 @@ def matar_sessao_oracle(
         if execute_iniciado:
             mensagem = f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro a partir da chamada ao PKG: {type(exc).__name__}"
         else:
-            mensagem = str(exc)
+            mensagem = _descrever_erro(exc)
         return json.dumps(
             {
                 "status": "erro",
@@ -1052,6 +1089,7 @@ def executar_kill_verificado(
                 "status": "recusado",
                 "motivo": motivo,
                 "status_banco": motivo,
+                "resultado_desconhecido": False,
                 "mensagem": (
                     "Reconsulta do alvo antes da execução falhou; nenhuma chamada à conta KILL. "
                     f"{reconsulta.get('mensagem', '')}"
@@ -1071,6 +1109,7 @@ def executar_kill_verificado(
                 "status": "recusado",
                 "motivo": "ALVO_ALTERADO",
                 "status_banco": "ALVO_ALTERADO",
+                "resultado_desconhecido": False,
                 "hash_aprovado": hash_aprovado,
                 "hash_atual": hash_atual,
                 "mensagem": (
@@ -1091,6 +1130,7 @@ def executar_kill_verificado(
                 "status": "recusado",
                 "motivo": motivo,
                 "status_banco": motivo,
+                "resultado_desconhecido": False,
                 "mensagem": reconsulta.get("mensagem", "Alvo não elegível na reconsulta."),
             },
             ensure_ascii=False,
@@ -1106,6 +1146,7 @@ def executar_kill_verificado(
                 "status": "recusado",
                 "motivo": "APROVACAO_EXPIRADA",
                 "status_banco": "APROVACAO_EXPIRADA",
+                "resultado_desconhecido": False,
                 "mensagem": (
                     f"A aprovação venceu ({APROVACAO_TTL_SEGUNDOS} s desde a preparação) antes da execução. "
                     "Nenhuma chamada à conta KILL."
@@ -1404,14 +1445,16 @@ def montar_notificacao_kill(
     resultado_banco: str,
     hash_payload: str,
     canal: str,
-    resultado_desconhecido: bool = False,
+    *,
+    resultado_desconhecido: bool,
 ) -> Tuple[str, str]:
     """
     Monta assunto e corpo do e-mail de uma intervenção aprovada.
     O assunto "Intervenção Aprovada" só é usado quando resultado_banco indica execução
-    efetiva (ENCERRADA ou MARCADA_PARA_KILL). resultado_desconhecido (ERRO_ORACLE a partir do
-    execute do PKG) gera MENSAGEM_RESULTADO_DESCONHECIDO. Qualquer outro resultado gera
-    "Intervenção NÃO executada", informando o status.
+    efetiva (ENCERRADA ou MARCADA_PARA_KILL). resultado_desconhecido (qualquer desfecho fora da
+    lista fechada) gera MENSAGEM_RESULTADO_DESCONHECIDO. Qualquer outro resultado gera
+    "Intervenção NÃO executada", informando o status. resultado_desconhecido é keyword-only e sem
+    default: o chamador sempre o informa (decisao_c1.md, ponto 2e).
     """
     if resultado_desconhecido:
         assunto = (
@@ -1420,7 +1463,7 @@ def montar_notificacao_kill(
         )
         corpo = (
             f"O encerramento da sessão SID={sid}, SERIAL={serial}, INST_ID={inst_id} "
-            f"foi aprovado por {aprovador} ({canal}); a chamada ao PKG_OPS_KILL retornou erro do Oracle.\n"
+            f"foi aprovado por {aprovador} ({canal}); {MENSAGEM_DESFECHO_NAO_CONFIRMADO}.\n"
             f"{MENSAGEM_RESULTADO_DESCONHECIDO[0].upper()}{MENSAGEM_RESULTADO_DESCONHECIDO[1:]} "
             f"(GV$SESSION e OPS_KILL_AUDIT).\n"
             f"Status retornado: {resultado_banco}\n"
@@ -1696,9 +1739,11 @@ def registrar_decisao_kill(
                 "status": "erro",
                 "motivo": "ERRO_INTERNO",
                 "status_banco": "ERRO_INTERNO",
+                "resultado_desconhecido": True,
                 "tipo_erro": motivo_resultado,
                 "mensagem": (
-                    "Erro interno no fluxo de kill; estado no banco não confirmado. Consulte OPS_KILL_AUDIT."
+                    f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro interno no fluxo de kill; "
+                    "estado no banco não confirmado. Consulte OPS_KILL_AUDIT."
                 ),
             },
             ensure_ascii=False,
@@ -1739,13 +1784,26 @@ def registrar_decisao_kill(
         )
         raise
 
+    # Falha fechada (decisao_c1.md, ponto 2d): só um bool False explícito, num JSON dict legível, tira o
+    # desconhecido. Retorno ilegível não é ecoado ao LLM.
     try:
         dados_exec = json.loads(resultado_exec)
+        parse_ok = isinstance(dados_exec, dict)
     except (TypeError, ValueError):
-        dados_exec = {"status": "erro", "mensagem": str(resultado_exec)}
+        parse_ok = False
+    if not parse_ok:
+        dados_exec = {
+            "status": "erro",
+            "status_banco": STATUS_PKG_VAZIO,
+            "resultado_desconhecido": True,
+            "mensagem": (
+                f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Retorno do fluxo de kill ilegível; "
+                "estado no banco não confirmado. Consulte OPS_KILL_AUDIT."
+            ),
+        }
     resultado_banco = str(dados_exec.get("status_banco") or dados_exec.get("motivo") or "DESCONHECIDO")
-    executado = resultado_banco in RESULTADOS_KILL_EXECUTADO
-    resultado_desconhecido = bool(dados_exec.get("resultado_desconhecido"))
+    resultado_desconhecido = not (parse_ok and dados_exec.get("resultado_desconhecido") is False)
+    executado = resultado_banco in RESULTADOS_KILL_EXECUTADO and not resultado_desconhecido
 
     # 3. RESULTADO com o mesmo id_intervencao.
     falha_registro = None
@@ -1815,6 +1873,7 @@ def registrar_decisao_kill(
     dados_exec["decisao"] = "APROVADO"
     dados_exec["resultado_banco"] = resultado_banco
     dados_exec["executado"] = executado
+    dados_exec["resultado_desconhecido"] = resultado_desconhecido
     resultado_tool = json.dumps(dados_exec, ensure_ascii=False, default=str)
 
     return {

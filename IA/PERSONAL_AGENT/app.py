@@ -154,6 +154,7 @@ from tools.oracle_dba import (
     reconciliar_intencoes_orfas,
     APROVACAO_TTL_SEGUNDOS,
     MENSAGEM_RESULTADO_DESCONHECIDO,
+    MENSAGEM_DESFECHO_NAO_CONFIRMADO,
 )
 from tools.gemini_router import (
     gemini_tools_schema,
@@ -510,7 +511,7 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
     elif desfecho.get("resultado_desconhecido"):
         aviso_ui = (
             f"❌ **Intervenção aprovada por `{id_aprovador_limpo}`: {MENSAGEM_RESULTADO_DESCONHECIDO}** "
-            f"(erro a partir da chamada ao PKG; resultado: `{desfecho['resultado_banco']}`). "
+            f"({MENSAGEM_DESFECHO_NAO_CONFIRMADO}; resultado: `{desfecho['resultado_banco']}`). "
             f"*(Notificação SMTP: {desfecho['email_detalhe']})*"
         )
         st.error(aviso_ui)

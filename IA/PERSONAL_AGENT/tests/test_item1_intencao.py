@@ -648,7 +648,12 @@ def test_erro_interno_grava_resultado(monkeypatch, tmp_path, ambiente_fake, capl
     assert resultado["resultado_banco"] == "ERRO_INTERNO" and resultado["motivo"] == "RuntimeError"
     assert intencao["id_intervencao"] == resultado["id_intervencao"]
     assert fake.conexoes_kill == []
-    assert len(ambiente_fake) == 1 and "NÃO executada" in ambiente_fake[0]["assunto"]
+    # Expectativa alterada, declarada (correcao/decisao_c1.md P1, aceita pelo responsável em 2026-11-24):
+    # ERRO_INTERNO é sempre "resultado desconhecido", mesmo antes da conta KILL (falha fechada).
+    assert len(ambiente_fake) == 1
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO in ambiente_fake[0]["assunto"]
+    assert "NÃO executada" not in ambiente_fake[0]["assunto"]
+    assert desfecho["resultado_desconhecido"] is True
     assert desfecho["resultado_banco"] == "ERRO_INTERNO" and desfecho["executado"] is False
     assert "segredo-xyz" not in log.read_text(encoding="utf-8")
     assert "segredo-xyz" not in desfecho["resultado_tool"]

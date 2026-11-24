@@ -145,6 +145,7 @@ from tools.oracle_dba import (
     reconciliar_intencoes_orfas,
     APROVACAO_TTL_SEGUNDOS,
     MENSAGEM_RESULTADO_DESCONHECIDO,
+    MENSAGEM_DESFECHO_NAO_CONFIRMADO,
 )
 
 # 3. Importando a Ferramenta de Nuvem (Gemini), o Notificador SMTP e a Busca RAG Local
@@ -257,7 +258,7 @@ def _exibir_desfecho_kill_cli(desfecho: dict) -> None:
     elif desfecho.get("resultado_desconhecido"):
         print(
             f"\033[91m[Sistema]: Intervenção APROVADA por '{desfecho['aprovador']}': "
-            f"{MENSAGEM_RESULTADO_DESCONHECIDO} (erro a partir da chamada ao PKG; "
+            f"{MENSAGEM_RESULTADO_DESCONHECIDO} ({MENSAGEM_DESFECHO_NAO_CONFIRMADO}; "
             f"resultado: {desfecho['resultado_banco']}).\033[0m"
         )
     elif desfecho["executado"]:
