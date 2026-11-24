@@ -39,6 +39,9 @@ CAMINHO_LOG_APROVACAO_PADRAO: Optional[Path] = None
 # Gravação do JSONL (docs/entregas/1.11/item1/decisao.md, seção a): ponto único, fsync,
 # lock de processo (threads da Web) + lock de arquivo (CLI e Web em processos distintos).
 FASES_REGISTRO_KILL: Tuple[str, ...] = ("INTENCAO", "RESULTADO")
+# Evento próprio da recusa local antes do prompt HITL (A10; decisao_c1.md ponto 5). Fica FORA de
+# FASES_REGISTRO_KILL: não é INTENCAO nem RESULTADO, e o reconciliador o ignora.
+FASE_RECUSA_PRE_HITL = "RECUSA_PRE_HITL"
 _REGEX_ID_INTERVENCAO = re.compile(r"[0-9a-f]{32}")
 _LOCK_LOG_APROVACAO = threading.Lock()
 _FSYNC_DIRETORIO = os.name == "posix"  # Windows: sem chamada sobre o diretório (decisão a2)
@@ -726,19 +729,21 @@ def _descrever_erro(exc: BaseException) -> str:
 
 
 def _texto_identidade_invalido(valor: Any, aceita_none: bool) -> bool:
-    """Texto de identidade: str de 1 a LIMITE_TEXTO_IDENTIDADE caracteres (ou None, se aceito). Nunca levanta."""
+    """
+    Texto de identidade: str de 1 a LIMITE_TEXTO_IDENTIDADE caracteres (ou None, se aceito). Nunca levanta.
+    A10: "" é sempre inválido, também onde None é aceito (no Oracle '' é NULL; a GV$SESSION nunca traz '').
+    """
     if valor is None:
         return not aceita_none
     if not isinstance(valor, str):
         return True
-    return len(valor) > LIMITE_TEXTO_IDENTIDADE or (not aceita_none and len(valor) < 1)
+    return len(valor) > LIMITE_TEXTO_IDENTIDADE or len(valor) < 1
 
 
-def campos_invalidos_identidade_e_ref(identidade_esperada: Any, ref_aprovacao: Any) -> List[str]:
+def campos_invalidos_identidade(identidade_esperada: Any) -> List[str]:
     """
-    Validação local (camada adicional; o PKG_OPS_KILL v2 é a autoridade e revalida tudo): devolve os NOMES dos
-    campos inválidos, nunca valores. Total: nunca levanta, para qualquer tipo de entrada (decisao.md D1).
-    Os valores não são transformados (nem strip/upper/str): o PKG compara bytes.
+    Validação local da identidade (sem o ref): NOMES dos campos inválidos, nunca valores. Total: nunca levanta
+    (decisao.md D1). Usada no kill (com o ref) e antes do prompt HITL (A10, decisao_c1.md ponto 5).
     """
     invalidos: List[str] = []
     if not isinstance(identidade_esperada, dict) or set(identidade_esperada.keys()) != set(CAMPOS_IDENTIDADE_ESPERADA):
@@ -752,6 +757,16 @@ def campos_invalidos_identidade_e_ref(identidade_esperada: Any, ref_aprovacao: A
         logon = identidade_esperada["logon_time"]
         if not (isinstance(logon, datetime) and logon.tzinfo is None and logon.microsecond == 0):
             invalidos.append("logon_time")
+    return invalidos
+
+
+def campos_invalidos_identidade_e_ref(identidade_esperada: Any, ref_aprovacao: Any) -> List[str]:
+    """
+    Validação local (camada adicional; o PKG_OPS_KILL v2 é a autoridade e revalida tudo): devolve os NOMES dos
+    campos inválidos, nunca valores. Total: nunca levanta, para qualquer tipo de entrada (decisao.md D1).
+    Os valores não são transformados (nem strip/upper/str): o PKG compara bytes.
+    """
+    invalidos = campos_invalidos_identidade(identidade_esperada)
     if not (isinstance(ref_aprovacao, str) and _REGEX_ID_INTERVENCAO.fullmatch(ref_aprovacao)):
         invalidos.append("ref_aprovacao")
     return invalidos
@@ -969,7 +984,7 @@ def matar_sessao_oracle(
                 "status": "erro",
                 "motivo": type(exc).__name__,
                 "resultado_desconhecido": execute_iniciado,
-                "instancia": dsn,
+                # A5 (só este ramo, D8): sem "instancia": dsn; os demais ramos ficam para a tarefa R1 ampliada.
                 "sid": sid_int,
                 "serial": serial_int,
                 "tipo_erro": type(exc).__name__,
@@ -1263,7 +1278,8 @@ def _codificar_linha(registro: Dict[str, Any]) -> bytes:
 
 def _gravar_linha_jsonl_duravel(caminho_log: Path, registro: Dict[str, Any]) -> None:
     """
-    ÚNICO ponto de escrita do kill_approval.log (INTENCAO e RESULTADO, inclusive REJEITADO/TIMEOUT).
+    ÚNICO ponto de escrita do kill_approval.log (INTENCAO e RESULTADO, inclusive REJEITADO/TIMEOUT, e o
+    evento RECUSA_PRE_HITL).
     Ordem: serializa e codifica; lock de processo; os.makedirs(exist_ok); lock de arquivo (5 s);
     open "a+b"; write; flush; os.fsync; close; fsync do diretório só em POSIX e só para arquivo novo.
     Qualquer falha levanta exceção.
@@ -1309,6 +1325,24 @@ def _montar_registro_aprovacao_kill(
         "hash_payload": hash_payload,
         "parametros": parametros,
         "alvo": alvo or {},
+    }
+
+
+def _montar_registro_recusa_pre_hitl(
+    parametros: Dict[str, Any], campos_invalidos: List[str], id_evento: str
+) -> Dict[str, Any]:
+    """
+    Linha RECUSA_PRE_HITL (A10; decisao_c1.md ponto 5): só nomes de campo, nunca valores de identidade.
+    Sem alvo, aprovador, decisao, hash_payload nem resultado_banco. O id é só deste evento (não vai ao PKG,
+    ao LLM nem a uma INTENCAO) e existe para o reconciliador não contar a linha como inválida.
+    """
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "fase": FASE_RECUSA_PRE_HITL,
+        "id_intervencao": id_evento,
+        "motivo": "PARAM_INVALIDO",
+        "campos_invalidos": list(campos_invalidos),
+        "parametros": parametros,
     }
 
 
@@ -1893,7 +1927,9 @@ def registrar_decisao_kill(
 
 
 def preparar_intervencao_kill(
-    argumentos: Dict[str, Any], ferramenta: str = "matar_sessao_oracle"
+    argumentos: Dict[str, Any],
+    ferramenta: str = "matar_sessao_oracle",
+    caminho_log: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Etapa anterior à aprovação humana, comum à CLI (main.py) e à Web UI (app.py):
@@ -1955,6 +1991,47 @@ def preparar_intervencao_kill(
         }
 
     alvo = check_alvo["alvo"]
+
+    # A10, parte 2 (decisao_c1.md ponto 5): identidade do alvo fora do formato -> recusa antes do prompt,
+    # sem INTENCAO; evento próprio no JSONL (só nomes de campo). Montagem igual à de executar_kill_verificado.
+    fonte = alvo if isinstance(alvo, dict) else {}
+    identidade = {c: fonte[c] for c in CAMPOS_IDENTIDADE_ESPERADA if c in fonte}
+    campos_invalidos = campos_invalidos_identidade(identidade)
+    if campos_invalidos:
+        parametros = {"inst_id": inst_id_int, "sid": sid_int, "serial": serial_int}
+        id_evento = uuid.uuid4().hex
+        registro = _montar_registro_recusa_pre_hitl(parametros, campos_invalidos, id_evento)
+        try:
+            _gravar_linha_jsonl_duravel(_caminho_log_efetivo(caminho_log), registro)
+        except Exception as exc:
+            logger.error(
+                f"AUDITORIA HITL: FALHA AO GRAVAR {FASE_RECUSA_PRE_HITL} | id_intervencao={id_evento} | "
+                f"erro={type(exc).__name__} errno={getattr(exc, 'errno', None)} | registro="
+                + _serializar_para_log(registro)
+            )
+        logger.warning(
+            f"HITL RECUSADO LOCALMENTE: PARAM_INVALIDO (identidade do alvo) | inst_id={inst_id_int}, "
+            f"sid={sid_int}, serial={serial_int} | campos={campos_invalidos} | id_intervencao={id_evento}"
+        )
+        mensagem = (
+            "Identidade do alvo lida na GV$SESSION fora do formato esperado; aprovação não solicitada e "
+            f"encerramento NÃO executado. Campos inválidos: {', '.join(campos_invalidos)}."
+        )
+        return {
+            "requer_aprovacao": False,
+            "motivo": "PARAM_INVALIDO",
+            "mensagem": mensagem,
+            "resultado_tool": json.dumps(
+                {
+                    "status": "recusado",
+                    "motivo": "PARAM_INVALIDO",
+                    "status_banco": "PARAM_INVALIDO",
+                    "mensagem": mensagem,
+                },
+                ensure_ascii=False,
+            ),
+        }
+
     timestamp = datetime.now(timezone.utc).isoformat()
     payload, hash_identidade = gerar_payload_e_hash_aprovacao(
         ferramenta=ferramenta,
@@ -1992,7 +2069,7 @@ def conduzir_kill_hitl(
     pré-consulta (PARAM_INVALIDO, ALVO_NAO_ENCONTRADO, NAO_USUARIO, USUARIO_PROTEGIDO, ...)
     retornam sem prompt e sem chamada à conta KILL.
     """
-    prep = preparar_intervencao_kill(argumentos)
+    prep = preparar_intervencao_kill(argumentos, caminho_log=caminho_log)
     if not prep["requer_aprovacao"]:
         return {
             "prompt_exibido": False,

@@ -3,9 +3,10 @@ from src.tools.oracle_dba import (
     coletar_sessoes_ativas,
     coletar_top_sql,
     coletar_plano_execucao,
-    matar_sessao_oracle,
     oracle_tools_schema,
 )
+# A8 (revisão do Gemini; decisao_c1.md ponto 7): matar_sessao_oracle não é exportada. O kill só passa por
+# conduzir_kill_hitl / preparar_intervencao_kill + registrar_decisao_kill (src.tools.oracle_dba).
 from src.tools.os_tools import (
     coletar_metricas_hardware,
     verificar_espaco_disco,
@@ -27,7 +28,6 @@ __all__ = [
     "coletar_sessoes_ativas",
     "coletar_top_sql",
     "coletar_plano_execucao",
-    "matar_sessao_oracle",
     "oracle_tools_schema",
     "coletar_metricas_hardware",
     "verificar_espaco_disco",

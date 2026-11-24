@@ -796,6 +796,9 @@ CASOS_IDENTIDADE_INVALIDA = [
     pytest.param(_ident(username="u" * 129), REF_VALIDO, ("u" * 129,), id="username_129_caracteres"),
     pytest.param(_ident(program="p" * 129), REF_VALIDO, ("p" * 129,), id="program_129_caracteres"),
     pytest.param(_ident(machine="m" * 129), REF_VALIDO, ("m" * 129,), id="machine_129_caracteres"),
+    # K4/A10 parte 1 (mata m25): "" é inválido também onde None é aceito (no Oracle '' é NULL)
+    pytest.param(_ident(program=""), REF_VALIDO, (), id="program_vazio"),
+    pytest.param(_ident(machine=""), REF_VALIDO, (), id="machine_vazio"),
 ]
 
 
@@ -1048,11 +1051,19 @@ def _casos_t7():
     return [
         pytest.param(dict(linhas=base, fake=dict(status_pkg="ENCERRADA")), "ENCERRADA", id="encerrada"),
         pytest.param(dict(linhas=base, fake=dict(status_pkg="ALVO_DIVERGENTE")), "ALVO_DIVERGENTE", id="divergente"),
-        # logon_time com microssegundo na reconsulta: o hash bate e a validação local do kill recusa
+        # logon_time com microssegundo na DIAG: desde a correção A10 (parte 2) a recusa é antes do prompt HITL
         pytest.param(dict(linhas=[micro, micro], fake=dict(kill_permitido=False)), "PARAM_INVALIDO", id="param_invalido"),
         pytest.param(
             dict(linhas=base, fake=dict(erro_kill=oracledb.DatabaseError("ORA-00600: erro interno"))),
             "ERRO_ORACLE", id="erro_oracle",
+        ),
+        # A5 (só :935, ramo D8): o DSN fictício também não pode ir ao LLM
+        pytest.param(
+            dict(
+                linhas=base, fake=dict(status_pkg="ENCERRADA", erro_getvalue_status=RuntimeError("falha simulada")),
+                proibidos_extra=["host-teste:1521/TESTE", "instancia"],
+            ),
+            "RuntimeError", id="d8",
         ),
     ]
 
@@ -1063,18 +1074,168 @@ def test_t7_resultado_tool_sem_ref_credenciais_identidade_nem_sql(
 ):
     """T7: o JSON que volta ao LLM não traz id_intervencao/ref, senha ou usuário, valores de identidade nem SQL."""
     oracle_fake = _OracleFake(cenario_t7["linhas"], **cenario_t7["fake"])
-    desfecho, _ = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
+    desfecho, registros = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
 
-    assert desfecho["resultado_banco"] == esperado
+    if esperado == "PARAM_INVALIDO":
+        # Expectativa alterada, declarada (plano 8.10.2; correcao/decisao_c1.md ponto 5): a identidade inválida
+        # da DIAG é recusada antes do prompt, sem KILL; o JSONL só tem o evento RECUSA_PRE_HITL, e o id dele
+        # é o que não pode ir ao LLM. A cobertura do PARAM_INVALIDO de matar_sessao_oracle fica no T2.
+        assert desfecho["prompt_exibido"] is False and desfecho["motivo"] == "PARAM_INVALIDO"
+        assert oracle_fake.conexoes_kill == []
+        assert [r["fase"] for r in registros] == ["RECUSA_PRE_HITL"]
+        id_proibido = registros[0]["id_intervencao"]
+    else:
+        assert desfecho["resultado_banco"] == esperado
+        id_proibido = desfecho["id_intervencao"]
     tool = desfecho["resultado_tool"]
-    assert re.fullmatch(r"[0-9a-f]{32}", desfecho["id_intervencao"])
+    assert re.fullmatch(r"[0-9a-f]{32}", id_proibido)
     proibidos = [
-        desfecho["id_intervencao"], "senha-fake", USER_KILL_FAKE, USER_DIAG_FAKE,
+        id_proibido, "senha-fake", USER_KILL_FAKE, USER_DIAG_FAKE,
         "APP_USER", "app.exe", "srv-app01", "2026-11-23 10:00:00", "2026-11-23T10:00:00",
         "BEGIN", "=>", "p_ref_aprovacao", "ref_aprovacao",
-    ]
+    ] + cenario_t7.get("proibidos_extra", [])
     for texto in proibidos:
         assert texto not in tool, f"resultado_tool de {esperado} traz {texto!r}"
+
+
+# ---- K4 (A10 parte 2): identidade inválida da DIAG -> recusa antes do prompt, evento RECUSA_PRE_HITL ----
+# decisao_c1.md ponto 5 e secao 10 (linha A10-2). O logon_time vai no ano 2001 para nunca coincidir com o
+# timestamp (2026) do evento; os textos de identidade levam sentinelas que não são hexadecimais.
+
+_USR_K4, _PROG_K4, _MACH_K4 = "USR_K4_SENT", "prog_k4_sent.exe", "mach-k4-sent"
+_LOGON_MICRO_2001 = datetime(2001, 3, 4, 5, 6, 7, 123456)
+_CHAVES_RECUSA_PRE_HITL = {"timestamp", "fase", "id_intervencao", "motivo", "campos_invalidos", "parametros"}
+
+CASOS_RECUSA_PRE_HITL = [
+    pytest.param(dict(logon_time=_LOGON_MICRO_2001), ["logon_time"], id="logon_microsecond"),
+    pytest.param(dict(program=""), ["program"], id="program_vazio"),
+    pytest.param(dict(machine=""), ["machine"], id="machine_vazio"),
+    pytest.param(
+        dict(program="", machine="", logon_time=_LOGON_MICRO_2001), ["program", "machine", "logon_time"],
+        id="tres_campos_na_ordem_da_funcao",
+    ),
+]
+
+
+def _linha_diag_k4(**sobrescritas):
+    campos = dict(username=_USR_K4, program=_PROG_K4, machine=_MACH_K4, logon_time=datetime(2001, 3, 4, 5, 6, 7))
+    campos.update(sobrescritas)
+    return _linha_alvo(**campos)
+
+
+def _sem_valores_de_identidade(texto):
+    for proibido in (_USR_K4, _PROG_K4, _MACH_K4, "2001", "123456"):
+        assert proibido not in texto, f"valor de identidade {proibido!r} no texto"
+
+
+@pytest.mark.parametrize("sobrescritas, campos_esperados", CASOS_RECUSA_PRE_HITL)
+def test_k4_a10_2_identidade_invalida_na_diag_recusa_antes_do_prompt_so_com_o_evento_recusa_pre_hitl(
+    monkeypatch, tmp_path, ambiente_fake, caplog, sobrescritas, campos_esperados
+):
+    """K4/A10-2 (mata m31): µs ou '' na GV$SESSION -> sem prompt, sem KILL, sem e-mail; o JSONL só tem a linha
+    RECUSA_PRE_HITL, com as chaves exatas e sem valores de identidade; o reconciliador a ignora."""
+    linha = _linha_diag_k4(**sobrescritas)
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([linha, linha], kill_permitido=False))
+    log = tmp_path / "kill.log"
+
+    with caplog.at_level(logging.WARNING, logger=oracle_dba.logger.name):
+        desfecho = conduzir_kill_hitl(
+            dict(ARGS_ALVO), solicitar_aprovacao=_prompt_proibido, canal="TESTE", caminho_log=log
+        )
+
+    assert desfecho["prompt_exibido"] is False and desfecho["motivo"] == "PARAM_INVALIDO"
+    assert desfecho["id_intervencao"] is None
+    assert oracle_fake.conexoes_kill == [] and all(conta == "DIAG" for conta, _, _ in oracle_fake.sql_executado)
+    assert ambiente_fake == [], "recusa local não envia e-mail"
+    tool = json.loads(desfecho["resultado_tool"])
+    assert tool["status"] == "recusado" and tool["motivo"] == "PARAM_INVALIDO"
+    assert all(c in tool["mensagem"] for c in campos_esperados)
+
+    bruto = log.read_bytes()
+    registros = [json.loads(l) for l in bruto.decode("utf-8").splitlines()]
+    assert len(registros) == 1, "só a linha RECUSA_PRE_HITL (nenhuma INTENCAO nem RESULTADO)"
+    reg = registros[0]
+    assert set(reg) == _CHAVES_RECUSA_PRE_HITL
+    assert reg["fase"] == "RECUSA_PRE_HITL" and reg["motivo"] == "PARAM_INVALIDO"
+    assert reg["campos_invalidos"] == campos_esperados
+    assert reg["parametros"] == {"inst_id": 1, "sid": 101, "serial": 202}
+    assert re.fullmatch(r"[0-9a-f]{32}", reg["id_intervencao"])
+    assert datetime.fromisoformat(reg["timestamp"]).tzinfo is not None
+    # o id (hexadecimal) e o timestamp ficam fora da busca de "2001": o resto da linha não tem identidade
+    _sem_valores_de_identidade(json.dumps({k: v for k, v in reg.items() if k not in ("id_intervencao", "timestamp")}))
+    _sem_valores_de_identidade(json.dumps(tool))
+    for proibido in (_USR_K4, _PROG_K4, _MACH_K4):
+        assert proibido not in bruto.decode("utf-8")
+    assert reg["id_intervencao"] not in desfecho["resultado_tool"]
+
+    avisos = [r.getMessage() for r in caplog.records if "HITL RECUSADO LOCALMENTE" in r.getMessage()]
+    assert len(avisos) == 1 and reg["id_intervencao"] in avisos[0] and str(campos_esperados) in avisos[0]
+    _sem_valores_de_identidade(avisos[0].replace(reg["id_intervencao"], ""))
+
+    # o reconciliador ignora a linha: nada reconciliado, nada inválido, arquivo byte a byte igual
+    futuro = datetime.now(timezone.utc) + timedelta(days=1)
+    resumo = oracle_dba.reconciliar_intencoes_orfas(caminho_log=log, agora=lambda: futuro)
+    assert resumo["reconciliadas"] == [] and resumo["linhas_invalidas"] == 0
+    assert resumo["recentes"] == [] and resumo["timestamp_invalido"] == []
+    assert log.read_bytes() == bruto
+
+
+def test_k4_a10_2_recusa_pre_hitl_nao_e_fase_de_registrar_log_aprovacao_kill(tmp_path):
+    """K4/A10-2 (mata m31): a fase do evento fica FORA de FASES_REGISTRO_KILL; a API pública continua
+    recusando-a com ValueError e sem criar arquivo."""
+    assert "RECUSA_PRE_HITL" not in oracle_dba.FASES_REGISTRO_KILL
+    log = tmp_path / "kill.log"
+    with pytest.raises(ValueError):
+        registrar_log_aprovacao_kill(
+            "dba_teste", "APROVADO", "h" * 64, {"inst_id": 1, "sid": 101, "serial": 202},
+            caminho_log=log, fase="RECUSA_PRE_HITL", id_intervencao="0123456789abcdef0123456789abcdef",
+        )
+    assert not log.exists()
+
+
+def test_k4_a10_2_falha_ao_gravar_o_evento_da_logger_error_e_a_recusa_se_mantem(
+    monkeypatch, tmp_path, ambiente_fake, caplog
+):
+    """K4/A10-2 (mata m31): falha de E/S no evento -> logger.error (tipo, errno, registro serializado) e a
+    recusa segue: sem prompt, sem KILL, sem arquivo."""
+    linha = _linha_diag_k4(logon_time=_LOGON_MICRO_2001)
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([linha, linha], kill_permitido=False))
+    log = tmp_path / "kill.log"
+
+    def _gravar_falha(caminho_log, registro):
+        raise OSError(28, "disco cheio (simulado)")
+
+    monkeypatch.setattr(oracle_dba, "_gravar_linha_jsonl_duravel", _gravar_falha)
+    with caplog.at_level(logging.WARNING, logger=oracle_dba.logger.name):
+        desfecho = conduzir_kill_hitl(
+            dict(ARGS_ALVO), solicitar_aprovacao=_prompt_proibido, canal="TESTE", caminho_log=log
+        )
+
+    assert desfecho["prompt_exibido"] is False and desfecho["motivo"] == "PARAM_INVALIDO"
+    assert oracle_fake.conexoes_kill == [] and not log.exists()
+    erros = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(erros) == 1
+    texto = erros[0].getMessage()
+    assert "FALHA AO GRAVAR RECUSA_PRE_HITL" in texto and "OSError" in texto and "errno=28" in texto
+    assert '"campos_invalidos"' in texto and "logon_time" in texto
+    for proibido in (_USR_K4, _PROG_K4, _MACH_K4):
+        assert proibido not in texto
+    assert any("HITL RECUSADO LOCALMENTE" in r.getMessage() for r in caplog.records), "o warning também sai"
+
+
+# ---- K4 (A8): matar_sessao_oracle fora da exportação de src.tools ----------------
+
+def test_k4_a8_matar_sessao_oracle_nao_e_exportada_por_src_tools():
+    """K4/A8 (mata m23): src.tools não exporta matar_sessao_oracle (nem em __all__, nem como atributo, nem por
+    import *); a função continua em src.tools.oracle_dba, que é o caminho do conduzir_kill_hitl."""
+    import src.tools as pacote_tools
+
+    assert "matar_sessao_oracle" not in pacote_tools.__all__
+    assert not hasattr(pacote_tools, "matar_sessao_oracle")
+    espaco = {}
+    exec("from src.tools import *", espaco)
+    assert "matar_sessao_oracle" not in espaco
+    assert callable(oracle_dba.matar_sessao_oracle), "o teste seria vazio se a função tivesse sumido"
 
 
 # ---- T8: logon_time no SELECT DIAG, no hash e recalculável a partir do JSONL (D3) ----
