@@ -1777,6 +1777,43 @@ def test_k5_sandbox_kill_connect_e_close_em_try_finally(nome):
     assert conexoes == total_connect, f"{nome}: connect fora do padrão 'var = connect(); try/finally'"
 
 
+# ---- K6 (N4, N8): gate e argumentos dos sandbox (sem conexão; ORACLE_SANDBOX não é tocada) ----
+
+@pytest.mark.parametrize("nome", NOMES_SANDBOX_KILL_V2)
+def test_k6_n8_sandbox_kill_identidade_e_ref_nao_sao_literais(nome):
+    """K6/N8 (mata N8_SANDBOX_PASSA_NONE): em toda chamada a matar_sessao_oracle dos 4 sandbox, os valores de
+    identidade_esperada= e ref_aprovacao= não são literais (None, "" ou constante). O teste do K5 só olha os
+    nomes das keywords."""
+    funcao = next(f for f in _funcoes_sandbox_kill_v2() if f.name == nome)
+    chamadas = [
+        n for n in ast.walk(funcao)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "matar_sessao_oracle"
+    ]
+    assert chamadas, f"{nome}: nenhuma chamada a matar_sessao_oracle"
+    for chamada in chamadas:
+        valores = {k.arg: k.value for k in chamada.keywords}
+        for chave in ("identidade_esperada", "ref_aprovacao"):
+            assert not isinstance(valores[chave], ast.Constant), f"{nome}:{chamada.lineno}: {chave} literal"
+
+
+@pytest.mark.parametrize("valor", [None, "1", "", " 2", "v2"], ids=["ausente", "um", "vazio", "espaco", "v2"])
+def test_k6_n4_gate_pkg_v2_pula_sem_versao_2(monkeypatch, valor):
+    """K6/N4 (mata N4_GATE_SANDBOX_DESLIGADO): sem OPS_KILL_PKG_VERSAO == "2" exato, o gate dos sandbox pula.
+    Só OPS_KILL_PKG_VERSAO é alterada; ORACLE_SANDBOX não é tocada."""
+    if valor is None:
+        monkeypatch.delenv("OPS_KILL_PKG_VERSAO", raising=False)
+    else:
+        monkeypatch.setenv("OPS_KILL_PKG_VERSAO", valor)
+    with pytest.raises(pytest.skip.Exception, match="OPS_KILL_PKG_VERSAO=2"):
+        _exigir_pkg_kill_v2()
+
+
+def test_k6_n4_gate_pkg_v2_segue_com_versao_2(monkeypatch):
+    """K6/N4: com OPS_KILL_PKG_VERSAO == "2" o gate não pula (devolve None)."""
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
+    assert _exigir_pkg_kill_v2() is None
+
+
 # =============================================================================
 # B. TESTES EM AMBIENTE DE SANDBOX (REQUER ORACLE_SANDBOX=1)
 # =============================================================================
