@@ -82,7 +82,7 @@ RECONCILIACAO_IDADE_MINIMA_SEGUNDOS = APROVACAO_TTL_SEGUNDOS + 300
 RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = ("ENCERRADA", "MARCADA_PARA_KILL")
 
 # p_status do PKG_OPS_KILL v2 que provam que nenhuma sessão foi encerrada (ops_kill.sql:128-176; o
-# ALVO_NAO_ENCONTRADO também vem do ORA-00030 no ALTER SYSTEM, :193-194). Lista FECHADA: qualquer outro
+# ALVO_NAO_ENCONTRADO também vem do ORA-00030 no comando de encerramento do PKG, :193-194). Lista FECHADA: qualquer outro
 # p_status (ERRO_ORACLE, vazio, nulo, código novo) é resultado desconhecido (decisao_c1.md, ponto 1).
 RECUSAS_PKG_SEM_KILL: Tuple[str, ...] = (
     "PARAM_INVALIDO", "PROPRIA_SESSAO", "ALVO_NAO_ENCONTRADO",
