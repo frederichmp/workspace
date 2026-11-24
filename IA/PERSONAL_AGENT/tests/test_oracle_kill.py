@@ -221,6 +221,7 @@ def test_aprovacao_negada_ou_sem_identificacao_sem_chamada_kill(monkeypatch, tmp
         caminho_log=log_teste,
         fase="RESULTADO",
         id_intervencao="0" * 32,
+        resultado_desconhecido=False,
     )
     assert reg_recusa["decisao"] == "REJEITADO"
     assert reg_recusa["motivo"] == "SEM_IDENTIFICACAO"
@@ -239,6 +240,7 @@ def test_aprovacao_negada_ou_sem_identificacao_sem_chamada_kill(monkeypatch, tmp
         caminho_log=log_teste,
         fase="RESULTADO",
         id_intervencao="0" * 32,
+        resultado_desconhecido=False,
     )
     assert reg_negado["decisao"] == "REJEITADO"
     assert reg_negado["aprovador"] == "dba_marcos"
@@ -269,6 +271,7 @@ def test_hash_canonico_determinismo_e_formato_log(tmp_path):
         caminho_log=log_teste,
         fase="RESULTADO",
         id_intervencao="0" * 32,
+        resultado_desconhecido=False,
     )
     assert reg["resultado_banco"] == "ENCERRADA"
 
@@ -696,7 +699,7 @@ def test_caminho_padrao_redirecionado(isolar_log_aprovacao):
 
     registrar_log_aprovacao_kill(
         "dba_teste", "REJEITADO", "hash-fake", {"sid": 1}, motivo="TESTE",
-        fase="RESULTADO", id_intervencao="0" * 32,
+        fase="RESULTADO", id_intervencao="0" * 32, resultado_desconhecido=False,
     )
 
     assert isolar_log_aprovacao.exists()
@@ -1190,6 +1193,7 @@ def test_k4_a10_2_recusa_pre_hitl_nao_e_fase_de_registrar_log_aprovacao_kill(tmp
         registrar_log_aprovacao_kill(
             "dba_teste", "APROVADO", "h" * 64, {"inst_id": 1, "sid": 101, "serial": 202},
             caminho_log=log, fase="RECUSA_PRE_HITL", id_intervencao="0123456789abcdef0123456789abcdef",
+            resultado_desconhecido=None,
         )
     assert not log.exists()
 

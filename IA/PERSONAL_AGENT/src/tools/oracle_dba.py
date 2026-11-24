@@ -1304,8 +1304,14 @@ def _montar_registro_aprovacao_kill(
     *,
     fase: str,
     id_intervencao: str,
+    resultado_desconhecido: Optional[bool],
 ) -> Dict[str, Any]:
-    """Monta e valida uma linha do JSONL, sem tocar o disco. Entrada inválida -> ValueError."""
+    """
+    Monta e valida uma linha do JSONL, sem tocar o disco. Entrada inválida -> ValueError.
+
+    R-a (correcao/k6/decisao_ra.md): toda RESULTADO leva resultado_desconhecido bool (True ou False, nunca
+    None/0/1); a INTENCAO não leva a chave e exige None. Sem default: quem grava diz o valor.
+    """
     if decisao not in DECISOES_KILL:
         raise ValueError(f"Decisão inválida: {decisao!r}. Esperado um de {DECISOES_KILL}.")
     if fase not in FASES_REGISTRO_KILL:
@@ -1314,18 +1320,30 @@ def _montar_registro_aprovacao_kill(
         raise ValueError("id_intervencao fora do formato de 32 hexadecimais minúsculos.")
     if fase == "INTENCAO" and (decisao != "APROVADO" or resultado_banco is not None):
         raise ValueError("INTENCAO exige decisao=APROVADO e resultado_banco=None.")
-    return {
+    if fase == "RESULTADO":
+        if not isinstance(resultado_desconhecido, bool):
+            raise ValueError("RESULTADO exige resultado_desconhecido booleano (True ou False).")
+    elif resultado_desconhecido is not None:
+        raise ValueError("INTENCAO não leva resultado_desconhecido (passe None).")
+    registro: Dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "fase": fase,
         "id_intervencao": id_intervencao,
         "aprovador": aprovador,
         "decisao": decisao,
         "resultado_banco": resultado_banco,
-        "motivo": motivo,
-        "hash_payload": hash_payload,
-        "parametros": parametros,
-        "alvo": alvo or {},
     }
+    if fase == "RESULTADO":
+        registro["resultado_desconhecido"] = resultado_desconhecido
+    registro.update(
+        {
+            "motivo": motivo,
+            "hash_payload": hash_payload,
+            "parametros": parametros,
+            "alvo": alvo or {},
+        }
+    )
+    return registro
 
 
 def _montar_registro_recusa_pre_hitl(
@@ -1358,6 +1376,7 @@ def registrar_log_aprovacao_kill(
     *,
     fase: str,
     id_intervencao: str,
+    resultado_desconhecido: Optional[bool],
 ) -> Dict[str, Any]:
     """
     Registra uma linha no JSONL de aprovações (append-only), com durabilidade (fsync).
@@ -1368,12 +1387,14 @@ def registrar_log_aprovacao_kill(
       - decisao: decisão humana (APROVADO | REJEITADO | TIMEOUT);
       - resultado_banco: status devolvido pela execução (p_status de PKG_OPS_KILL ou
         recusa local anterior à chamada); None quando nada foi executado;
-      - motivo: justificativa de decisões não aprovadas (ex.: SEM_IDENTIFICACAO).
+      - motivo: justificativa de decisões não aprovadas (ex.: SEM_IDENTIFICACAO);
+      - resultado_desconhecido: keyword-only, sem default (R-a). Na RESULTADO, bool obrigatório (True: desfecho
+        no banco não confirmado, conferir OPS_KILL_AUDIT); na INTENCAO, None (a chave não é gravada).
     NUNCA armazena senhas, tokens ou dados sensíveis. Qualquer falha levanta exceção.
     """
     registro = _montar_registro_aprovacao_kill(
         aprovador, decisao, hash_payload, parametros, alvo, resultado_banco, motivo,
-        fase=fase, id_intervencao=id_intervencao,
+        fase=fase, id_intervencao=id_intervencao, resultado_desconhecido=resultado_desconhecido,
     )
     _gravar_linha_jsonl_duravel(_caminho_log_efetivo(caminho_log), registro)
     return registro
@@ -1452,6 +1473,7 @@ def reconciliar_intencoes_orfas(
                     MOTIVO_RECONCILIADO,
                     fase="RESULTADO",
                     id_intervencao=id_reg,
+                    resultado_desconhecido=True,
                 )
                 _anexar_linha_sem_lock(destino, _codificar_linha(registro))
                 resumo["reconciliadas"].append(id_reg)
@@ -1636,6 +1658,7 @@ def registrar_decisao_kill(
                 caminho_log=destino_log,
                 fase="RESULTADO",
                 id_intervencao=id_intervencao,
+                resultado_desconhecido=False,
             )
         except Exception as exc:
             registro = None
@@ -1651,6 +1674,7 @@ def registrar_decisao_kill(
                         "aprovador": aprovador_registro,
                         "decisao": decisao,
                         "resultado_banco": None,
+                        "resultado_desconhecido": False,
                         "motivo": motivo,
                         "hash_payload": hash_aprovado,
                         "parametros": parametros,
@@ -1712,6 +1736,7 @@ def registrar_decisao_kill(
             caminho_log=destino_log,
             fase="INTENCAO",
             id_intervencao=id_intervencao,
+            resultado_desconhecido=None,
         )
     except Exception as exc:
         # Sem a INTENCAO não há prova de que a aprovação foi registrada antes da ação: recusa.
@@ -1789,6 +1814,7 @@ def registrar_decisao_kill(
             "aprovador": aprovador_limpo,
             "decisao": "APROVADO",
             "resultado_banco": "INTERROMPIDO",
+            "resultado_desconhecido": True,
             "motivo": type(exc).__name__,
             "hash_payload": hash_aprovado,
             "parametros": parametros,
@@ -1806,6 +1832,7 @@ def registrar_decisao_kill(
                 caminho_log=destino_log,
                 fase="RESULTADO",
                 id_intervencao=id_intervencao,
+                resultado_desconhecido=True,
             )
             gravado = True
         except Exception:
@@ -1853,6 +1880,7 @@ def registrar_decisao_kill(
             caminho_log=destino_log,
             fase="RESULTADO",
             id_intervencao=id_intervencao,
+            resultado_desconhecido=resultado_desconhecido,
         )
     except Exception as exc:
         registro = None
@@ -1867,6 +1895,7 @@ def registrar_decisao_kill(
                     "aprovador": aprovador_limpo,
                     "decisao": "APROVADO",
                     "resultado_banco": resultado_banco,
+                    "resultado_desconhecido": resultado_desconhecido,
                     "motivo": motivo_resultado,
                     "hash_payload": hash_aprovado,
                     "parametros": parametros,
