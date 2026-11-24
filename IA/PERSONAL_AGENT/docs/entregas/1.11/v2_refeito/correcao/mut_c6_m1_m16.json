@@ -1,0 +1,82 @@
+[
+ {
+  "nome": "m1_assinatura_v1_4_binds",
+  "de": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n            p_username_esperado=identidade_esperada[\"username\"],\r\n            p_program_esperado=identidade_esperada[\"program\"],\r\n            p_machine_esperado=identidade_esperada[\"machine\"],\r\n            p_logon_time_esperado=logon_var,\r\n            p_ref_aprovacao=ref_aprovacao,\r\n",
+  "para": "                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n"
+ },
+ {
+  "nome": "m2_ordem_trocada_bloco_e_binds",
+  "de": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n            p_username_esperado=identidade_esperada[\"username\"],\r\n            p_program_esperado=identidade_esperada[\"program\"],\r\n            p_machine_esperado=identidade_esperada[\"machine\"],\r\n            p_logon_time_esperado=logon_var,\r\n            p_ref_aprovacao=ref_aprovacao,\r\n",
+  "para": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n            p_username_esperado=identidade_esperada[\"username\"],\r\n            p_machine_esperado=identidade_esperada[\"machine\"],\r\n            p_program_esperado=identidade_esperada[\"program\"],\r\n            p_logon_time_esperado=logon_var,\r\n            p_ref_aprovacao=ref_aprovacao,\r\n"
+ },
+ {
+  "nome": "m3_ordem_trocada_so_binds",
+  "de": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n            p_username_esperado=identidade_esperada[\"username\"],\r\n            p_program_esperado=identidade_esperada[\"program\"],\r\n            p_machine_esperado=identidade_esperada[\"machine\"],\r\n            p_logon_time_esperado=logon_var,\r\n            p_ref_aprovacao=ref_aprovacao,\r\n",
+  "para": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n            p_username_esperado=identidade_esperada[\"username\"],\r\n            p_machine_esperado=identidade_esperada[\"machine\"],\r\n            p_program_esperado=identidade_esperada[\"program\"],\r\n            p_logon_time_esperado=logon_var,\r\n            p_ref_aprovacao=ref_aprovacao,\r\n"
+ },
+ {
+  "nome": "m4_ref_aleatorio",
+  "de": "            p_ref_aprovacao=ref_aprovacao,",
+  "para": "            p_ref_aprovacao=uuid.uuid4().hex,"
+ },
+ {
+  "nome": "m5_logon_cru_sem_var_date",
+  "de": "            p_logon_time_esperado=logon_var,",
+  "para": "            p_logon_time_esperado=identidade_esperada[\"logon_time\"],"
+ },
+ {
+  "nome": "m6_ref_com_default_none",
+  "de": "    identidade_esperada: Dict[str, Any],\r\n    ref_aprovacao: str,\r\n",
+  "para": "    identidade_esperada: Dict[str, Any],\r\n    ref_aprovacao: str = None,\r\n"
+ },
+ {
+  "nome": "m7_sem_validacao_local",
+  "de": "    invalidos = campos_invalidos_identidade_e_ref(identidade_esperada, ref_aprovacao)\r\n",
+  "para": "    invalidos = []\r\n"
+ },
+ {
+  "nome": "m8_strip_no_username",
+  "de": "            p_username_esperado=identidade_esperada[\"username\"],",
+  "para": "            p_username_esperado=identidade_esperada[\"username\"].strip(),"
+ },
+ {
+  "nome": "m9_logon_fora_do_hash",
+  "de": "CAMPOS_IDENTIDADE_ALVO: Tuple[str, ...] = (\"inst_id\", \"sid\", \"serial#\") + CAMPOS_IDENTIDADE_ESPERADA",
+  "para": "CAMPOS_IDENTIDADE_ALVO: Tuple[str, ...] = (\"inst_id\", \"sid\", \"serial#\", \"username\", \"program\", \"machine\")"
+ },
+ {
+  "nome": "m10_divergente_como_executado",
+  "de": "RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = (\"ENCERRADA\", \"MARCADA_PARA_KILL\")",
+  "para": "RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = (\"ENCERRADA\", \"MARCADA_PARA_KILL\", \"ALVO_DIVERGENTE\")"
+ },
+ {
+  "nome": "m11_retentativa_v1_no_except_adaptada",
+  "de": "    except oracledb.Error as db_err:\r\n        # A3: o texto do erro passa por _descrever_erro, que nunca levanta; nenhuma exceção sai daqui.\r\n",
+  "para": "    except oracledb.Error as db_err:\r\n        if execute_iniciado and cursor is not None:\r\n            try:\r\n                cursor.execute(\"BEGIN OPS_OWNER.PKG_OPS_KILL.KILL_SESSION(p_inst_id => :p_inst_id, p_sid => :p_sid, p_serial => :p_serial, p_status => :p_status); END;\", p_inst_id=inst_id_int, p_sid=sid_int, p_serial=serial_int, p_status=status_var)\r\n            except Exception:\r\n                pass\r\n"
+ },
+ {
+  "nome": "m12_ecoa_ref_no_resultado_adaptada",
+  "de": "                \"resultado_desconhecido\": desconhecido,\r\n                \"inst_id\": inst_id_int,\r\n",
+  "para": "                \"resultado_desconhecido\": desconhecido,\r\n                \"ref\": ref_aprovacao,\r\n                \"inst_id\": inst_id_int,\r\n"
+ },
+ {
+  "nome": "m13_logon_fora_do_select",
+  "de": "                   type,\r\n                   logon_time\r\n            FROM GV$SESSION",
+  "para": "                   type\r\n            FROM GV$SESSION"
+ },
+ {
+  "nome": "m14_isoformat_com_T",
+  "de": "        return valor.isoformat(sep=\" \")",
+  "para": "        return valor.isoformat()"
+ },
+ {
+  "nome": "m15_d8_sem_resultado_desconhecido",
+  "de": "                \"motivo\": type(exc).__name__,\r\n                \"resultado_desconhecido\": execute_iniciado,\r\n",
+  "para": "                \"motivo\": type(exc).__name__,\r\n                \"resultado_desconhecido\": False,\r\n"
+ },
+ {
+  "nome": "m16_fallback_v1_no_divergente_adaptada",
+  "de": "        elif status_banco == \"ALVO_DIVERGENTE\":\r\n",
+  "para": "        elif status_banco == \"ALVO_DIVERGENTE\":\r\n            cursor.execute(\"BEGIN OPS_OWNER.PKG_OPS_KILL.KILL_SESSION(p_inst_id => :p_inst_id, p_sid => :p_sid, p_serial => :p_serial, p_status => :p_status); END;\", p_inst_id=inst_id_int, p_sid=sid_int, p_serial=serial_int, p_status=status_var)\r\n"
+ }
+]

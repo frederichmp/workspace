@@ -1,0 +1,5 @@
+[
+ {"nome": "m29m30_ramo_desconhecido_revertido",
+  "de": "    elif desfecho.get(\"resultado_desconhecido\"):\r\n",
+  "para": "    elif False and desfecho.get(\"resultado_desconhecido\"):\r\n"}
+]

@@ -1,0 +1,42 @@
+[
+ {
+  "nome": "m25_vazio_aceito_onde_none_e_aceito",
+  "de": "return len(valor) > LIMITE_TEXTO_IDENTIDADE or len(valor) < 1",
+  "para": "return len(valor) > LIMITE_TEXTO_IDENTIDADE or (not aceita_none and len(valor) < 1)"
+ },
+ {
+  "nome": "m31a_sem_validacao_pre_hitl",
+  "de": "campos_invalidos = campos_invalidos_identidade(identidade)",
+  "para": "campos_invalidos = []"
+ },
+ {
+  "nome": "m31b_fase_dentro_de_fases_registro_kill",
+  "de": "FASES_REGISTRO_KILL: Tuple[str, ...] = (\"INTENCAO\", \"RESULTADO\")",
+  "para": "FASES_REGISTRO_KILL: Tuple[str, ...] = (\"INTENCAO\", \"RESULTADO\", \"RECUSA_PRE_HITL\")"
+ },
+ {
+  "nome": "m31c_chave_id_renomeada",
+  "de": "\"id_intervencao\": id_evento,",
+  "para": "\"id_evento\": id_evento,"
+ },
+ {
+  "nome": "m31d_chave_extra_no_evento",
+  "de": "\"campos_invalidos\": list(campos_invalidos),",
+  "para": "\"campos_invalidos\": list(campos_invalidos), \"aprovador\": \"x\","
+ },
+ {
+  "nome": "m31e_warning_com_valor_de_identidade",
+  "de": "| campos={campos_invalidos} | id_intervencao={id_evento}\"",
+  "para": "| campos={campos_invalidos} | usuario={identidade.get('username')} | id_intervencao={id_evento}\""
+ },
+ {
+  "nome": "m31f_erro_sem_o_nome_da_fase",
+  "de": "f\"AUDITORIA HITL: FALHA AO GRAVAR {FASE_RECUSA_PRE_HITL} | id_intervencao={id_evento} | \"",
+  "para": "f\"AUDITORIA HITL: FALHA AO GRAVAR RECUSA | id_intervencao={id_evento} | \""
+ },
+ {
+  "nome": "m31g_erro_sem_errno",
+  "de": "f\"erro={type(exc).__name__} errno={getattr(exc, 'errno', None)} | registro=\"\r\n                + _serializar_para_log(registro)\r\n            )\r\n        logger.warning(\r\n            f\"HITL RECUSADO",
+  "para": "f\"erro={type(exc).__name__} | registro=\"\r\n                + _serializar_para_log(registro)\r\n            )\r\n        logger.warning(\r\n            f\"HITL RECUSADO"
+ }
+]

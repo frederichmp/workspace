@@ -1,0 +1,5 @@
+[
+ {"nome": "m22_dsn_de_volta_no_d8",
+  "de": "                # A5 (só este ramo, D8): sem \"instancia\": dsn; os demais ramos ficam para a tarefa R1 ampliada.\r\n",
+  "para": "                \"instancia\": dsn,\r\n"}
+]

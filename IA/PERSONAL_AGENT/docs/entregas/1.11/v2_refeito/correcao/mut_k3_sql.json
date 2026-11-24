@@ -1,0 +1,8 @@
+[
+ {"nome": "m26_formal_trocado_na_spec",
+  "de": "    p_program_esperado    IN  VARCHAR2,\n    p_machine_esperado    IN  VARCHAR2,\n    p_logon_time_esperado IN  DATE,\n    p_ref_aprovacao       IN  VARCHAR2,\n    p_status              OUT VARCHAR2\n  );",
+  "para": "    p_machine_esperado    IN  VARCHAR2,\n    p_program_esperado    IN  VARCHAR2,\n    p_logon_time_esperado IN  DATE,\n    p_ref_aprovacao       IN  VARCHAR2,\n    p_status              OUT VARCHAR2\n  );"},
+ {"nome": "m26b_logon_time_varchar_no_body",
+  "de": "    p_logon_time_esperado IN  DATE,\n    p_ref_aprovacao       IN  VARCHAR2,\n    p_status              OUT VARCHAR2\n  ) IS",
+  "para": "    p_logon_time_esperado IN  VARCHAR2,\n    p_ref_aprovacao       IN  VARCHAR2,\n    p_status              OUT VARCHAR2\n  ) IS"}
+]
