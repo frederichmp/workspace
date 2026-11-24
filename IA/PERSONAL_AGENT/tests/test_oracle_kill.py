@@ -34,6 +34,7 @@ import oracledb
 
 import logging
 import re
+import uuid
 
 from src.tools import oracle_dba
 from src.tools.oracle_dba import (
@@ -1591,44 +1592,194 @@ def test_k2_email_do_desconhecido_no_fluxo_sem_erro_do_oracle(monkeypatch, tmp_p
     assert "erro do Oracle" not in corpo
 
 
+NOMES_SANDBOX_KILL_V2 = (
+    "test_sandbox_kill_sessao_valida_encerrada",
+    "test_sandbox_kill_alvo_nao_encontrado",
+    "test_sandbox_kill_param_invalido",
+    "test_sandbox_kill_propria_sessao_ou_usuario_protegido",
+)
+
+
+def _funcoes_sandbox_kill_v2():
+    """Nós AST dos 4 test_sandbox_kill_* deste arquivo (lidos do código-fonte, sem executar nada)."""
+    arvore = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    por_nome = {n.name: n for n in arvore.body if isinstance(n, ast.FunctionDef)}
+    return [por_nome[nome] for nome in NOMES_SANDBOX_KILL_V2]
+
+
+def _eh_chamada_connect(no) -> bool:
+    return (
+        isinstance(no, ast.Call)
+        and isinstance(no.func, ast.Attribute)
+        and no.func.attr == "connect"
+        and isinstance(no.func.value, ast.Name)
+        and no.func.value.id == "oracledb"
+    )
+
+
+def _corpo_sem_docstring(funcao):
+    corpo = list(funcao.body)
+    if corpo and isinstance(corpo[0], ast.Expr) and isinstance(getattr(corpo[0], "value", None), ast.Constant) \
+            and isinstance(corpo[0].value.value, str):
+        corpo = corpo[1:]
+    return corpo
+
+
+@pytest.mark.parametrize("nome", NOMES_SANDBOX_KILL_V2)
+def test_k5_sandbox_kill_gate_v2_primeiro_comando_e_antes_de_qualquer_connect(nome):
+    """K5 (A6; mata m28): o 1º comando do corpo (depois da docstring) é _exigir_pkg_kill_v2(), antes de qualquer
+    oracledb.connect."""
+    funcao = next(f for f in _funcoes_sandbox_kill_v2() if f.name == nome)
+    corpo = _corpo_sem_docstring(funcao)
+    primeiro = corpo[0]
+    assert (
+        isinstance(primeiro, ast.Expr)
+        and isinstance(primeiro.value, ast.Call)
+        and isinstance(primeiro.value.func, ast.Name)
+        and primeiro.value.func.id == "_exigir_pkg_kill_v2"
+        and not primeiro.value.args
+        and not primeiro.value.keywords
+    ), f"{nome}: o 1º comando não é _exigir_pkg_kill_v2()"
+    linhas_connect = [n.lineno for n in ast.walk(funcao) if _eh_chamada_connect(n)]
+    assert all(primeiro.lineno < linha for linha in linhas_connect), f"{nome}: connect antes do gate"
+
+
+@pytest.mark.parametrize("nome", NOMES_SANDBOX_KILL_V2)
+def test_k5_sandbox_kill_chamadas_trazem_identidade_e_ref(nome):
+    """K5 (A6; mata m28): toda chamada a matar_sessao_oracle traz identidade_esperada= e ref_aprovacao=."""
+    funcao = next(f for f in _funcoes_sandbox_kill_v2() if f.name == nome)
+    chamadas = [
+        n for n in ast.walk(funcao)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "matar_sessao_oracle"
+    ]
+    assert chamadas, f"{nome}: nenhuma chamada a matar_sessao_oracle"
+    for chamada in chamadas:
+        palavras = {k.arg for k in chamada.keywords}
+        assert {"identidade_esperada", "ref_aprovacao"} <= palavras, f"{nome}: faltam keywords na linha {chamada.lineno}"
+
+
+@pytest.mark.parametrize("nome", NOMES_SANDBOX_KILL_V2)
+def test_k5_sandbox_kill_connect_e_close_em_try_finally(nome):
+    """K5 (A6; mata m28): cada oracledb.connect é atribuído a uma variável, e o comando seguinte é um try cujo
+    finally chama .close() nessa variável."""
+    funcao = next(f for f in _funcoes_sandbox_kill_v2() if f.name == nome)
+    conexoes = 0
+    for pai in ast.walk(funcao):
+        for campo in ("body", "orelse", "finalbody", "handlers"):
+            comandos = getattr(pai, campo, None)
+            if not isinstance(comandos, list):
+                continue
+            for i, comando in enumerate(comandos):
+                if not (isinstance(comando, ast.Assign) and _eh_chamada_connect(comando.value)):
+                    continue
+                conexoes += 1
+                variavel = comando.targets[0].id
+                seguinte = comandos[i + 1] if i + 1 < len(comandos) else None
+                assert isinstance(seguinte, ast.Try) and seguinte.finalbody, \
+                    f"{nome}: {variavel} não é seguido de try/finally"
+                fecha = any(
+                    isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "close"
+                    and isinstance(n.func.value, ast.Name) and n.func.value.id == variavel
+                    for stmt in seguinte.finalbody for n in ast.walk(stmt)
+                )
+                assert fecha, f"{nome}: o finally não fecha {variavel}"
+    total_connect = sum(1 for n in ast.walk(funcao) if _eh_chamada_connect(n))
+    assert conexoes == total_connect, f"{nome}: connect fora do padrão 'var = connect(); try/finally'"
+
+
 # =============================================================================
 # B. TESTES EM AMBIENTE DE SANDBOX (REQUER ORACLE_SANDBOX=1)
 # =============================================================================
 
+def _exigir_pkg_kill_v2() -> None:
+    """Gate do ensaio 4.1 (A6). Não substitui o ORACLE_SANDBOX, que o conftest confere antes."""
+    if os.getenv("OPS_KILL_PKG_VERSAO") != "2":
+        pytest.skip("Teste ignorado: requer OPS_KILL_PKG_VERSAO=2 (PKG_OPS_KILL v2 instalado)")
+
+
+def _ler_identidade_gv_session(conn, inst_id, sid, serial):
+    """Identidade (username, program, machine, logon_time) lida da GV$SESSION pela conexão recebida.
+    Não abre nem fecha a conexão; fecha o próprio cursor."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT username, program, machine, logon_time FROM GV$SESSION "
+            "WHERE inst_id = :inst AND sid = :sid AND serial# = :serial",
+            inst=inst_id, sid=sid, serial=serial,
+        )
+        username, program, machine, logon_time = cur.fetchone()
+    finally:
+        cur.close()
+    return {"username": username, "program": program, "machine": machine, "logon_time": logon_time}
+
+
+def _ler_propria_sessao(conn):
+    """(inst_id, sid, serial) da própria sessão da conexão recebida."""
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT SYS_CONTEXT('USERENV', 'SID'), SYS_CONTEXT('USERENV', 'INSTANCE') FROM DUAL")
+        row = cur.fetchone()
+        sid = int(row[0])
+        inst_id = int(row[1])
+        cur.execute("SELECT serial# FROM GV$SESSION WHERE inst_id = :inst AND sid = :sid", inst=inst_id, sid=sid)
+        serial = int(cur.fetchone()[0])
+    finally:
+        cur.close()
+    return inst_id, sid, serial
+
+
 @pytest.mark.sandbox_only
 def test_sandbox_kill_sessao_valida_encerrada():
     """Reproduz caso validado no MODELO: encerramento de sessão de STARTUP_DIAG (retorna ENCERRADA)."""
+    _exigir_pkg_kill_v2()
     user_diag = os.getenv("ORACLE_USER_DIAG")
     pass_diag = os.getenv("ORACLE_PASSWORD_DIAG")
     dsn = os.getenv("ORACLE_DSN")
 
     # 1. Abre sessão descartável com STARTUP_DIAG para servir de alvo
     conn_alvo = oracledb.connect(user=user_diag, password=pass_diag, dsn=dsn)
-    cur_alvo = conn_alvo.cursor()
-    cur_alvo.execute("SELECT SYS_CONTEXT('USERENV', 'SID'), SYS_CONTEXT('USERENV', 'INSTANCE') FROM DUAL")
-    row = cur_alvo.fetchone()
-    sid_alvo = int(row[0])
-    inst_alvo = int(row[1])
-
-    cur_alvo.execute("SELECT serial# FROM GV$SESSION WHERE inst_id = :inst AND sid = :sid", inst=inst_alvo, sid=sid_alvo)
-    serial_alvo = int(cur_alvo.fetchone()[0])
-
-    # 2. Executa encerramento via matar_sessao_oracle (conta KILL acionando PKG_OPS_KILL)
-    res_json = matar_sessao_oracle(sid=sid_alvo, serial=serial_alvo, inst_id=inst_alvo)
-    res = json.loads(res_json)
-
-    assert res.get("status_banco") in ("ENCERRADA", "MARCADA_PARA_KILL"), f"Esperado ENCERRADA, obtido: {res}"
-
     try:
-        conn_alvo.close()
-    except Exception:
-        pass
+        inst_alvo, sid_alvo, serial_alvo = _ler_propria_sessao(conn_alvo)
+        identidade = _ler_identidade_gv_session(conn_alvo, inst_alvo, sid_alvo, serial_alvo)
+
+        # 2. Executa encerramento via matar_sessao_oracle (conta KILL acionando PKG_OPS_KILL v2)
+        res_json = matar_sessao_oracle(
+            sid=sid_alvo, serial=serial_alvo, inst_id=inst_alvo,
+            identidade_esperada=identidade, ref_aprovacao=uuid.uuid4().hex,
+        )
+        res = json.loads(res_json)
+
+        assert res.get("status_banco") in ("ENCERRADA", "MARCADA_PARA_KILL"), f"Esperado ENCERRADA, obtido: {res}"
+    finally:
+        try:
+            conn_alvo.close()
+        except Exception:
+            pass
 
 
 @pytest.mark.sandbox_only
 def test_sandbox_kill_alvo_nao_encontrado():
     """Reproduz caso validado no MODELO: SID 999999 / serial 1 retorna ALVO_NAO_ENCONTRADO."""
-    res_json = matar_sessao_oracle(sid=999999, serial=1, inst_id=1)
+    _exigir_pkg_kill_v2()
+    user_diag = os.getenv("ORACLE_USER_DIAG")
+    pass_diag = os.getenv("ORACLE_PASSWORD_DIAG")
+    dsn = os.getenv("ORACLE_DSN")
+
+    # A identidade (formato válido) vem da própria sessão DIAG; o alvo inexistente é só o par sid/serial.
+    conn = oracledb.connect(user=user_diag, password=pass_diag, dsn=dsn)
+    try:
+        inst_id, sid, serial = _ler_propria_sessao(conn)
+        identidade = _ler_identidade_gv_session(conn, inst_id, sid, serial)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    res_json = matar_sessao_oracle(
+        sid=999999, serial=1, inst_id=1,
+        identidade_esperada=identidade, ref_aprovacao=uuid.uuid4().hex,
+    )
     res = json.loads(res_json)
     assert res.get("status_banco") == "ALVO_NAO_ENCONTRADO"
 
@@ -1636,7 +1787,26 @@ def test_sandbox_kill_alvo_nao_encontrado():
 @pytest.mark.sandbox_only
 def test_sandbox_kill_param_invalido():
     """Reproduz caso validado no MODELO: SID -1 retorna PARAM_INVALIDO."""
-    res_json = matar_sessao_oracle(sid=-1, serial=1, inst_id=1)
+    _exigir_pkg_kill_v2()
+    user_diag = os.getenv("ORACLE_USER_DIAG")
+    pass_diag = os.getenv("ORACLE_PASSWORD_DIAG")
+    dsn = os.getenv("ORACLE_DSN")
+
+    # Identidade e ref válidos: o PARAM_INVALIDO vem do SID -1, não da identidade.
+    conn = oracledb.connect(user=user_diag, password=pass_diag, dsn=dsn)
+    try:
+        inst_id, sid, serial = _ler_propria_sessao(conn)
+        identidade = _ler_identidade_gv_session(conn, inst_id, sid, serial)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    res_json = matar_sessao_oracle(
+        sid=-1, serial=1, inst_id=1,
+        identidade_esperada=identidade, ref_aprovacao=uuid.uuid4().hex,
+    )
     res = json.loads(res_json)
     assert res.get("status_banco") == "PARAM_INVALIDO"
 
@@ -1644,25 +1814,27 @@ def test_sandbox_kill_param_invalido():
 @pytest.mark.sandbox_only
 def test_sandbox_kill_propria_sessao_ou_usuario_protegido():
     """Reproduz caso validado no MODELO: tentar matar sessão STARTUPADMIN retorna USUARIO_PROTEGIDO."""
+    _exigir_pkg_kill_v2()
     user_mut = os.getenv("ORACLE_USER_MUT")
     pass_mut = os.getenv("ORACLE_PASSWORD_MUT")
     dsn = os.getenv("ORACLE_DSN")
 
     # Conecta com a conta administrativa de mutação (STARTUPADMIN) e obtém seu SID dinamicamente
     conn = oracledb.connect(user=user_mut, password=pass_mut, dsn=dsn)
-    cur = conn.cursor()
-    cur.execute("SELECT SYS_CONTEXT('USERENV', 'SID'), SYS_CONTEXT('USERENV', 'INSTANCE') FROM DUAL")
-    row = cur.fetchone()
-    sid_admin = int(row[0])
-    inst_admin = int(row[1])
-
-    cur.execute("SELECT serial# FROM GV$SESSION WHERE inst_id = :inst AND sid = :sid", inst=inst_admin, sid=sid_admin)
-    serial_admin = int(cur.fetchone()[0])
-    cur.close()
-    conn.close()
+    try:
+        inst_admin, sid_admin, serial_admin = _ler_propria_sessao(conn)
+        identidade = _ler_identidade_gv_session(conn, inst_admin, sid_admin, serial_admin)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     # Tentativa de encerramento contra conta protegida
-    res_json = matar_sessao_oracle(sid=sid_admin, serial=serial_admin, inst_id=inst_admin)
+    res_json = matar_sessao_oracle(
+        sid=sid_admin, serial=serial_admin, inst_id=inst_admin,
+        identidade_esperada=identidade, ref_aprovacao=uuid.uuid4().hex,
+    )
     res = json.loads(res_json)
     assert res.get("status_banco") in ("USUARIO_PROTEGIDO", "PROPRIA_SESSAO"), f"Esperado USUARIO_PROTEGIDO, obtido: {res}"
 
