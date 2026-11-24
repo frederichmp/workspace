@@ -1242,6 +1242,22 @@ def test_ra_encerrada_sem_a_flag_grava_desconhecido_true(monkeypatch, tmp_path, 
     assert fake.conexoes_kill == []
 
 
+def test_ra_alvo_alterado_local_grava_desconhecido_false(monkeypatch, tmp_path, ambiente_fake):
+    """R-a ponto 1, caso recomendado na conferência K6.5 §1: a reconsulta DIAG diverge da pré-consulta ->
+    ALVO_ALTERADO local, sem conta KILL; a RESULTADO do JSONL grava False. Único teste que confere o campo do JSONL
+    neste caso; o mutante M_ALVO_ALTERADO_DESCONHECIDO_TRUE também cai em 3 testes já existentes (k6/k65_aa_neg.md)."""
+    desfecho, registros, fake = _fluxo_ra(
+        monkeypatch, tmp_path, [_linha_alvo(), _linha_alvo(machine="outra-maquina")], kill_permitido=False,
+    )
+
+    intencao, resultado = registros
+    assert "resultado_desconhecido" not in intencao
+    assert resultado["resultado_banco"] == "ALVO_ALTERADO"
+    assert resultado["resultado_desconhecido"] is False
+    assert desfecho["resultado_desconhecido"] is False and desfecho["executado"] is False
+    assert fake.conexoes_kill == []
+
+
 @pytest.mark.parametrize("decisao", ["REJEITADO", "TIMEOUT"])
 def test_ra_recusa_humana_grava_desconhecido_false(monkeypatch, tmp_path, ambiente_fake, decisao):
     """R-a ponto 1 (mata R-a7): recusa humana -> RESULTADO com resultado_desconhecido False (sem conta KILL)."""
