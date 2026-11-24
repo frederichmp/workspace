@@ -1,0 +1,12 @@
+# Controle de mutação `mut_c5_n1_n5_n6`
+
+Alvo `src/tools/oracle_dba.py`; testes `tests/test_oracle_kill.py`, `tests/test_item1_intencao.py`, `tests/test_fluxo_cli.py`, `tests/test_fluxo_web.py`; cópia `git archive HEAD` + `tests/test_oracle_kill.py`.
+
+| Mutação | Troca | Contagem | Resultado | Status |
+|---|---|---|---|---|
+| m0 | sem mutação | - | 283 passed, 6 skipped, 13 warnings in 54.89s | OK |
+| N1_D8_VAZA_STR_EXC | Erro a partir da chamada ao PKG: {type(exc).__name__}"\n -> Erro a p… | 1 substituição | 1 failed, 282 passed, 6 skipped, 13 warnings in 55.41s \| caíram: tes… | DETECTADA |
+| N5_SEM_STATUS_PKG_VAZIO_EM_MATAR |             status_banco = status_banco or STATUS_PKG_VAZIO\n ->  | 1 substituição | 1 failed, 282 passed, 6 skipped, 13 warnings in 56.04s \| caíram: tes… | DETECTADA |
+| N6_PARAM_INST_DESCONHECIDO_TRUE |     validados = validar_parametros_kill(inst_id, sid, serial)\n    i… | 1 substituição | 9 failed, 274 passed, 6 skipped, 13 warnings in 56.29s \| caíram: tes… | DETECTADA |
+
+Resultado: todas DETECTADAS.

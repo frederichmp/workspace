@@ -1,0 +1,14 @@
+# Controle de mutação `r_mec_k3`
+
+Alvo `src/tools/oracle_dba.py`; testes `tests/test_oracle_kill.py`, `tests/test_item1_intencao.py`, `tests/test_fluxo_cli.py`, `tests/test_fluxo_web.py`; cópia `git archive HEAD`.
+
+| Mutação | Troca | Contagem | Resultado | Status |
+|---|---|---|---|---|
+| m0 | sem mutação | - | 293 passed, 6 skipped, 13 warnings in 48.67s | OK |
+| M_LIMITE_GE_128 | len(valor) > LIMITE_TEXTO_IDENTIDADE -> len(valor) >= LIMITE_TEXTO_ID… | 1 substituição | 6 failed, 287 passed, 6 skipped, 13 warnings in 48.70s \| caíram: tes… | DETECTADA |
+| M_EXEC_KILL_GET_DEFAULT | {c: alvo_reconsulta[c] for c in CAMPOS_IDENTIDADE_ESPERADA if c in al… | 1 substituição | 3 failed, 290 passed, 6 skipped, 13 warnings in 48.41s \| caíram: tes… | DETECTADA |
+| X_REGEX_ID_0_9A_Z | _REGEX_ID_INTERVENCAO = re.compile(r"[0-9a-f]{32}") -> _REGEX_ID_INTE… | 1 substituição | 1 failed, 292 passed, 6 skipped, 13 warnings in 48.55s \| caíram: tes… | DETECTADA |
+| m27_limite_em_bytes_utf8 | len(valor) > LIMITE_TEXTO_IDENTIDADE -> len(valor.encode("utf-8")) > … | 1 substituição | 3 failed, 290 passed, 6 skipped, 13 warnings in 48.98s \| caíram: tes… | DETECTADA |
+
+Resultado: todas DETECTADAS.
+Relatório: docs/entregas/1.11/v2_refeito/correcao/k6/regressao/r_mec_k3.md

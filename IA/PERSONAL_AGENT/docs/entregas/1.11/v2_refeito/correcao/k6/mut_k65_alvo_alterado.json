@@ -1,0 +1,7 @@
+[
+ {
+  "nome": "M_ALVO_ALTERADO_DESCONHECIDO_TRUE",
+  "de": "                \"status_banco\": \"ALVO_ALTERADO\",\r\n                \"resultado_desconhecido\": False,\r\n",
+  "para": "                \"status_banco\": \"ALVO_ALTERADO\",\r\n                \"resultado_desconhecido\": True,\r\n"
+ }
+]

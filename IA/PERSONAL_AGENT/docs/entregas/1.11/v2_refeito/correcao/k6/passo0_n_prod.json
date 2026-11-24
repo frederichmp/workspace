@@ -1,0 +1,32 @@
+[
+ {
+  "nome": "N1_D8_VAZA_STR_EXC",
+  "de": "Erro a partir da chamada ao PKG: {type(exc).__name__}\"\r\n",
+  "para": "Erro a partir da chamada ao PKG: {_descrever_erro(exc)}\"\r\n"
+ },
+ {
+  "nome": "N2_PREP_GET_DEFAULT",
+  "de": "    identidade = {c: fonte[c] for c in CAMPOS_IDENTIDADE_ESPERADA if c in fonte}\r\n",
+  "para": "    identidade = {c: fonte.get(c) for c in CAMPOS_IDENTIDADE_ESPERADA}\r\n"
+ },
+ {
+  "nome": "N3_PRE_HITL_IGNORA_CAMINHO_EFETIVO",
+  "de": "            _gravar_linha_jsonl_duravel(_caminho_log_efetivo(caminho_log), registro)\r\n",
+  "para": "            _gravar_linha_jsonl_duravel(Path(caminho_log), registro)\r\n"
+ },
+ {
+  "nome": "N5_SEM_STATUS_PKG_VAZIO_EM_MATAR",
+  "de": "            status_banco = status_banco or STATUS_PKG_VAZIO\r\n",
+  "para": ""
+ },
+ {
+  "nome": "N6_PARAM_INST_DESCONHECIDO_TRUE",
+  "de": "    validados = validar_parametros_kill(inst_id, sid, serial)\r\n    if validados is None:\r\n        return json.dumps(\r\n            {\r\n                \"status\": \"recusado\",\r\n                \"motivo\": \"PARAM_INVALIDO\",\r\n                \"status_banco\": \"PARAM_INVALIDO\",\r\n                \"resultado_desconhecido\": False,\r\n",
+  "para": "    validados = validar_parametros_kill(inst_id, sid, serial)\r\n    if validados is None:\r\n        return json.dumps(\r\n            {\r\n                \"status\": \"recusado\",\r\n                \"motivo\": \"PARAM_INVALIDO\",\r\n                \"status_banco\": \"PARAM_INVALIDO\",\r\n                \"resultado_desconhecido\": True,\r\n"
+ },
+ {
+  "nome": "N7_BLOCO_COMENTARIO_PLSQL_V1",
+  "de": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n",
+  "para": "                    /*\r\n                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    */\r\n"
+ }
+]

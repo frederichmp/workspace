@@ -1,0 +1,22 @@
+[
+ {
+  "nome": "M_LIMITE_GE_128",
+  "de": "len(valor) > LIMITE_TEXTO_IDENTIDADE",
+  "para": "len(valor) >= LIMITE_TEXTO_IDENTIDADE"
+ },
+ {
+  "nome": "M_EXEC_KILL_GET_DEFAULT",
+  "de": "{c: alvo_reconsulta[c] for c in CAMPOS_IDENTIDADE_ESPERADA if c in alvo_reconsulta}",
+  "para": "{c: alvo_reconsulta.get(c) for c in CAMPOS_IDENTIDADE_ESPERADA}"
+ },
+ {
+  "nome": "X_REGEX_ID_0_9A_Z",
+  "de": "_REGEX_ID_INTERVENCAO = re.compile(r\"[0-9a-f]{32}\")",
+  "para": "_REGEX_ID_INTERVENCAO = re.compile(r\"[0-9a-z]{32}\")"
+ },
+ {
+  "nome": "m27_limite_em_bytes_utf8",
+  "de": "len(valor) > LIMITE_TEXTO_IDENTIDADE",
+  "para": "len(valor.encode(\"utf-8\")) > LIMITE_TEXTO_IDENTIDADE"
+ }
+]
