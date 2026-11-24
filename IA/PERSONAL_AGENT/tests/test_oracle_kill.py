@@ -791,6 +791,7 @@ CASOS_IDENTIDADE_INVALIDA = [
     pytest.param(dict(IDENTIDADE_VALIDA), "f" * 31, ("f" * 31,), id="ref_31_hex"),
     pytest.param(dict(IDENTIDADE_VALIDA), "F" * 32, ("F" * 32,), id="ref_maiusculo"),
     pytest.param(dict(IDENTIDADE_VALIDA), "f" * 33, ("f" * 33,), id="ref_33_hex"),
+    pytest.param(dict(IDENTIDADE_VALIDA), "g" * 32, ("g" * 32,), id="ref_32_nao_hex"),
     pytest.param(dict(IDENTIDADE_VALIDA), REF_VALIDO + "\n", (), id="ref_hex_newline"),
     pytest.param(_ident(username="u" * 129), REF_VALIDO, ("u" * 129,), id="username_129_caracteres"),
     pytest.param(_ident(program="p" * 129), REF_VALIDO, ("p" * 129,), id="program_129_caracteres"),
@@ -846,6 +847,7 @@ def test_t3_nove_binds_valores_exatos(monkeypatch, ambiente_fake, program, machi
     sql, binds = execucoes[0]
     assert list(binds) == ORDEM_V2
     assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_V2
+    assert re.findall(r"\b(p_\w+)\s*=>\s*:(\w+)\b", sql) == [(n, n) for n in ORDEM_V2]
     assert binds["p_inst_id"] == 3 and binds["p_sid"] == 101 and binds["p_serial"] == 202
     assert binds["p_username_esperado"] == "App_User " and type(binds["p_username_esperado"]) is str
     assert binds["p_program_esperado"] == program and (program is None) == (binds["p_program_esperado"] is None)
@@ -855,6 +857,143 @@ def test_t3_nove_binds_valores_exatos(monkeypatch, ambiente_fake, program, machi
     assert binds["p_logon_time_esperado"].getvalue() == LOGON_TIME_PADRAO
     assert type(binds["p_logon_time_esperado"].getvalue()) is datetime
     assert binds["p_status"].tipo is oracledb.DB_TYPE_VARCHAR
+
+
+# ---- K3 (correcao/decisao_c1.md §10; plano 8.2 e 8.5): limite em caracteres x bytes, erro antes do execute,
+#      chave ausente na reconsulta e identidade de 1 caractere ----
+
+CAMPOS_TEXTO_IDENTIDADE = ["username", "program", "machine"]
+
+
+@pytest.mark.parametrize("campo", CAMPOS_TEXTO_IDENTIDADE)
+@pytest.mark.parametrize(
+    "valor, status_esperado",
+    [
+        ("é" * 128, "PARAM_INVALIDO"),  # 128 caracteres = 256 bytes: o limite local (caracteres) aceita; o PKG não
+        ("é" * 64, "ENCERRADA"),  # 128 bytes: passa nos dois
+        ("a" * 128, "ENCERRADA"),  # exatamente no limite: passa (>= 128 seria erro de fronteira)
+    ],
+    ids=["e_128_caracteres_256_bytes", "e_64_caracteres_128_bytes", "a_128_caracteres"],
+)
+def test_k3_a44_limite_local_em_caracteres_e_limite_do_pkg_em_bytes(monkeypatch, ambiente_fake, campo, valor, status_esperado):
+    """K3 (A4.4; mata M_LIMITE_GE_128 e m27): o valor passa pela validação local (1 execute na conta KILL, bind
+    idêntico ao valor) e o status vem do fake, que simula o LENGTHB > 128 do PKG com a premissa de charset
+    AL32UTF8 (NÃO VERIFICADA, L7). O caso "é"*128 é recusa do PKG: desconhecido False e nada executado."""
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([], status_pkg="ENCERRADA"))
+    ident = _ident(**{campo: valor})
+
+    res = json.loads(
+        matar_sessao_oracle(sid=101, serial=202, inst_id=1, identidade_esperada=ident, ref_aprovacao=REF_VALIDO)
+    )
+
+    execucoes = _binds_kill(oracle_fake)
+    assert len(execucoes) == 1, "a validação local deve aceitar o valor (limite em caracteres): 1 execute KILL"
+    assert execucoes[0][1][f"p_{campo}_esperado"] == valor
+    assert res["status_banco"] == status_esperado
+    assert res["resultado_desconhecido"] is False
+    if status_esperado == "PARAM_INVALIDO":
+        assert "executado para" not in res["mensagem"]
+
+
+@pytest.mark.parametrize("erro_fake", ["erro_var_kill", "erro_setvalue"])
+@pytest.mark.parametrize(
+    "excecao, motivo_esperado",
+    [
+        (oracledb.DatabaseError("ORA-00600: erro fake antes do execute"), "ERRO_ORACLE"),
+        (RuntimeError("falha fake antes do execute"), "RuntimeError"),
+    ],
+    ids=["oracle_error", "excecao_generica"],
+)
+def test_k3_a7a_erro_antes_do_execute_nao_e_desconhecido_e_nao_executa(
+    monkeypatch, ambiente_fake, erro_fake, excecao, motivo_esperado
+):
+    """K3 (A7a; mata M_EXEC_INICIADO_ANTES_VAR): erro no cursor.var ou no setvalue, antes do execute, prova que o
+    PKG não rodou: resultado_desconhecido False e 0 execute na conta KILL."""
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([], status_pkg="ENCERRADA", **{erro_fake: excecao}))
+
+    res = json.loads(
+        matar_sessao_oracle(
+            sid=101, serial=202, inst_id=1, identidade_esperada=dict(IDENTIDADE_VALIDA), ref_aprovacao=REF_VALIDO,
+        )
+    )
+
+    assert oracle_fake.conexoes_kill == [USER_KILL_FAKE], "a conexão KILL abriu e o erro veio depois dela"
+    assert _binds_kill(oracle_fake) == [], "0 execute na conta KILL"
+    assert res["motivo"] == motivo_esperado
+    assert res["resultado_desconhecido"] is False
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO not in res["mensagem"]
+
+
+def _reconsulta_diag(**sobrescritas):
+    """Retorno de consultar_alvo_sessao_diag com o alvo completo e program/machine None (valores aceitos)."""
+    alvo = {
+        "inst_id": 1, "sid": 101, "serial#": 202, "username": "APP_USER", "program": None, "machine": None,
+        "logon_time": LOGON_TIME_PADRAO,
+    }
+    alvo.update(sobrescritas)
+    return {"encontrado": True, "elegivel": True, "alvo": alvo}
+
+
+def _executar_verificado(hash_aprovado):
+    return oracle_dba.executar_kill_verificado(
+        inst_id=1, sid=101, serial=202, hash_aprovado=hash_aprovado,
+        aprovacao_expirada=lambda: False, ref_aprovacao=REF_VALIDO,
+    )
+
+
+@pytest.mark.parametrize(
+    "chaves_ausentes", [("program",), ("machine",), ("program", "machine")],
+    ids=["sem_program", "sem_machine", "sem_program_nem_machine"],
+)
+def test_k3_a7b_reconsulta_sem_a_chave_com_hash_igual_e_param_invalido_sem_conexao_kill(
+    monkeypatch, ambiente_fake, chaves_ausentes
+):
+    """K3 (A7b; mata M_EXEC_KILL_GET_DEFAULT): a reconsulta não traz a chave program/machine e o hash bate (o hash
+    lê a falta como None). A identidade enviada ao PKG só leva as chaves presentes; a falta de chave vira
+    PARAM_INVALIDO na validação local, sem conexão KILL (um .get(c) a transformaria em None, que é aceito)."""
+    hash_aprovado = oracle_dba.calcular_hash_identidade(_reconsulta_diag()["alvo"])
+    reconsulta = _reconsulta_diag()
+    for chave in chaves_ausentes:
+        del reconsulta["alvo"][chave]
+    assert oracle_dba.calcular_hash_identidade(reconsulta["alvo"]) == hash_aprovado
+    monkeypatch.setattr(oracle_dba, "consultar_alvo_sessao_diag", lambda **kwargs: reconsulta)
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([], status_pkg="ENCERRADA", kill_permitido=False))
+
+    res = json.loads(_executar_verificado(hash_aprovado))
+
+    assert res["motivo"] == "PARAM_INVALIDO" and res["status"] == "recusado"
+    assert res["resultado_desconhecido"] is False
+    assert oracle_fake.conexoes_kill == [], "sem conexão KILL"
+    assert _binds_kill(oracle_fake) == []
+
+
+def test_k3_a7b_controle_reconsulta_com_as_chaves_none_executa(monkeypatch, ambiente_fake):
+    """K3 (A7b, controle): com as chaves presentes (valor None) a mesma reconsulta executa. Sem isto, o teste
+    acima passaria também se qualquer reconsulta fosse recusada."""
+    reconsulta = _reconsulta_diag()
+    hash_aprovado = oracle_dba.calcular_hash_identidade(reconsulta["alvo"])
+    monkeypatch.setattr(oracle_dba, "consultar_alvo_sessao_diag", lambda **kwargs: reconsulta)
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([], status_pkg="ENCERRADA"))
+
+    res = json.loads(_executar_verificado(hash_aprovado))
+
+    assert res["status_banco"] == "ENCERRADA"
+    assert len(_binds_kill(oracle_fake)) == 1
+
+
+@pytest.mark.parametrize("campo", CAMPOS_TEXTO_IDENTIDADE)
+def test_k3_a7d_texto_de_identidade_de_1_caractere_e_aceito(monkeypatch, ambiente_fake, campo):
+    """K3 (A7d): len 1 é o mínimo aceito (A10 recusa só o vazio) nos 3 campos de texto."""
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([], status_pkg="ENCERRADA"))
+
+    res = json.loads(
+        matar_sessao_oracle(
+            sid=101, serial=202, inst_id=1, identidade_esperada=_ident(**{campo: "x"}), ref_aprovacao=REF_VALIDO,
+        )
+    )
+
+    assert res["status_banco"] == "ENCERRADA"
+    assert len(_binds_kill(oracle_fake)) == 1
 
 
 # ---- T4: logon_time entra no hash (D3) ---------------------------------------

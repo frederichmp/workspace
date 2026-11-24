@@ -59,6 +59,11 @@ ORDEM_BINDS_KILL_V2 = [
     "p_inst_id", "p_sid", "p_serial", "p_username_esperado", "p_program_esperado", "p_machine_esperado",
     "p_logon_time_esperado", "p_ref_aprovacao", "p_status",
 ]
+# A2 (revisão do Gemini): cada formal ligado ao placeholder de mesmo nome, à direita de "=>".
+PARES_BINDS_KILL_V2 = [(nome, nome) for nome in ORDEM_BINDS_KILL_V2]
+REGEX_PAR_FORMAL_PLACEHOLDER = r"\b(p_\w+)\s*=>\s*:(\w+)\b"
+# Spec proposta do PKG v2 (A4.4): fonte dos formais, tipos e direções.
+SQL_PKG_KILL_V2 = RAIZ / "docs" / "entregas" / "1.11" / "item6" / "ops_kill.sql"
 ID_A = "a" * 32
 ID_B = "b" * 32
 ID_C = "c" * 32
@@ -218,6 +223,7 @@ def test_intencao_gravada_antes_da_conta_kill(monkeypatch, tmp_path, ambiente_fa
     (_, sql, binds), = [s for s in fake.sql_executado if s[0] == "KILL"]
     assert list(binds) == ORDEM_BINDS_KILL_V2
     assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2
+    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, sql) == PARES_BINDS_KILL_V2, "placeholder trocado (A2)"
     assert binds["p_ref_aprovacao"] == intencao["id_intervencao"]
     assert binds["p_ref_aprovacao"] == resultado["id_intervencao"]
     assert binds["p_logon_time_esperado"].tipo is oracledb.DB_TYPE_DATE
@@ -571,6 +577,15 @@ def test_pls00306_no_execute_e_resultado_desconhecido(monkeypatch, tmp_path, amb
         ("encerrada", {"status_pkg": "ENCERRADA"}, "ENCERRADA"),
         ("alvo_divergente", {"status_pkg": "ALVO_DIVERGENTE"}, "ALVO_DIVERGENTE"),
         ("erro_no_execute", {"erro_kill": oracledb.DatabaseError("ORA-00600: erro interno")}, "ERRO_ORACLE"),
+        # A7c (revisão do Gemini): todo p_status do PKG v2, com 1 execute só (casos acrescentados)
+        ("marcada_para_kill", {"status_pkg": "MARCADA_PARA_KILL"}, "MARCADA_PARA_KILL"),
+        ("param_invalido", {"status_pkg": "PARAM_INVALIDO"}, "PARAM_INVALIDO"),
+        ("propria_sessao", {"status_pkg": "PROPRIA_SESSAO"}, "PROPRIA_SESSAO"),
+        ("alvo_nao_encontrado", {"status_pkg": "ALVO_NAO_ENCONTRADO"}, "ALVO_NAO_ENCONTRADO"),
+        ("nao_usuario", {"status_pkg": "NAO_USUARIO"}, "NAO_USUARIO"),
+        ("usuario_protegido", {"status_pkg": "USUARIO_PROTEGIDO"}, "USUARIO_PROTEGIDO"),
+        ("status_erro_oracle", {"status_pkg": "ERRO_ORACLE"}, "ERRO_ORACLE"),
+        ("status_vazio", {"status_pkg": ""}, "DESCONHECIDO"),
     ],
 )
 def test_kill_ponto_unico_de_chamada(monkeypatch, tmp_path, ambiente_fake, cenario, fake_kw, resultado_esperado):
@@ -589,7 +604,31 @@ def test_kill_ponto_unico_de_chamada(monkeypatch, tmp_path, ambiente_fake, cenar
     sql, binds = execucoes[0]
     assert "OPS_OWNER.PKG_OPS_KILL.KILL_SESSION" in sql
     assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2
+    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, sql) == PARES_BINDS_KILL_V2, f"{cenario}: placeholder trocado (A2)"
     assert list(binds) == ORDEM_BINDS_KILL_V2
+
+
+def _formais_do_procedure(texto_sql):
+    """Lista (nome, direção, tipo) de cada PROCEDURE kill_session do SQL (spec e body), na ordem."""
+    blocos = re.findall(r"PROCEDURE\s+kill_session\s*\((.*?)\)\s*(?:;|IS\b)", texto_sql, flags=re.IGNORECASE | re.DOTALL)
+    return [
+        [tuple(m) for m in re.findall(r"\b(p_\w+)\s+(IN|OUT|IN\s+OUT)\s+(\w+)", bloco, flags=re.IGNORECASE)]
+        for bloco in blocos
+    ]
+
+
+def test_ordem_binds_kill_v2_igual_aos_formais_da_spec_sql():
+    """A4.4 (revisão do Gemini): ORDEM_BINDS_KILL_V2 (cópia manual) amarrada aos formais da spec e do body do PKG v2
+    proposto (docs/entregas/1.11/item6/ops_kill.sql:56-66 e :92-102): mesmos nomes, mesma ordem; logon_time é
+    IN DATE; p_status é OUT VARCHAR2; os demais são IN."""
+    formais = _formais_do_procedure(SQL_PKG_KILL_V2.read_text(encoding="utf-8"))
+    assert len(formais) == 2, "spec e body do kill_session"
+    for lista in formais:
+        assert [nome.lower() for nome, _, _ in lista] == ORDEM_BINDS_KILL_V2
+        tipos = {nome.lower(): (direcao.upper(), tipo.upper()) for nome, direcao, tipo in lista}
+        assert tipos["p_logon_time_esperado"] == ("IN", "DATE")
+        assert tipos["p_status"] == ("OUT", "VARCHAR2")
+        assert all(d == "IN" for n, (d, _) in tipos.items() if n != "p_status")
 
 
 def test_t6_v2_contra_pkg_v1_falha_fechado_sem_fallback(monkeypatch, tmp_path, ambiente_fake):
@@ -611,6 +650,7 @@ def test_t6_v2_contra_pkg_v1_falha_fechado_sem_fallback(monkeypatch, tmp_path, a
     sql, binds = execucoes[0]
     assert list(binds) == ORDEM_BINDS_KILL_V2
     assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2, "nenhum bloco v1 de 4 formais"
+    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, sql) == PARES_BINDS_KILL_V2, "placeholder trocado (A2)"
     assert desfecho["resultado_banco"] == "ERRO_ORACLE"
     assert desfecho["resultado_desconhecido"] is True
     assert desfecho["executado"] is False
