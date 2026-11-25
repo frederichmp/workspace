@@ -1,0 +1,32 @@
+[
+ {
+  "nome": "m17_erro_oracle_como_recusa",
+  "de": "    \"ALVO_DIVERGENTE\", \"NAO_USUARIO\", \"USUARIO_PROTEGIDO\",\r\n)",
+  "para": "    \"ALVO_DIVERGENTE\", \"NAO_USUARIO\", \"USUARIO_PROTEGIDO\", \"ERRO_ORACLE\",\r\n)"
+ },
+ {
+  "nome": "m18_status_vazio_como_recusa",
+  "de": "        elif status_banco in RECUSAS_PKG_SEM_KILL:\r\n",
+  "para": "        elif status_banco in RECUSAS_PKG_SEM_KILL or not status_banco:\r\n"
+ },
+ {
+  "nome": "m19_erro_interno_nao_desconhecido",
+  "de": "                \"status_banco\": \"ERRO_INTERNO\",\r\n                \"resultado_desconhecido\": True,\r\n",
+  "para": "                \"status_banco\": \"ERRO_INTERNO\",\r\n                \"resultado_desconhecido\": False,\r\n"
+ },
+ {
+  "nome": "m20_flag_por_bool_sem_parse_ok",
+  "de": "    resultado_desconhecido = not (parse_ok and dados_exec.get(\"resultado_desconhecido\") is False)\r\n",
+  "para": "    resultado_desconhecido = bool(dados_exec.get(\"resultado_desconhecido\"))\r\n"
+ },
+ {
+  "nome": "m24_corpo_erro_do_oracle",
+  "de": "            f\"foi aprovado por {aprovador} ({canal}); {MENSAGEM_DESFECHO_NAO_CONFIRMADO}.\\n\"\r\n",
+  "para": "            f\"foi aprovado por {aprovador} ({canal}); a chamada ao PKG_OPS_KILL retornou erro do Oracle.\\n\"\r\n"
+ },
+ {
+  "nome": "m17b_executado_ignora_desconhecido",
+  "de": "    executado = resultado_banco in RESULTADOS_KILL_EXECUTADO and not resultado_desconhecido\r\n",
+  "para": "    executado = resultado_banco in RESULTADOS_KILL_EXECUTADO\r\n"
+ }
+]

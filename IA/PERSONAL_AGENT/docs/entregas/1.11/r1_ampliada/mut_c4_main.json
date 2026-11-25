@@ -1,0 +1,27 @@
+[
+ {
+  "nome": "M_R1_CLI_V8A_CATALOGO_COM_ORACLE",
+  "de": "            tools=todas_ferramentas if local else ferramentas_nuvem,\r\n",
+  "para": "            tools=todas_ferramentas,\r\n"
+ },
+ {
+  "nome": "M_R1_CLI_V8B_SEM_RECUSA_NO_DESPACHO",
+  "de": "                if not local and nome_funcao in NOMES_FERRAMENTAS_ORACLE:\r\n",
+  "para": "                if False:\r\n"
+ },
+ {
+  "nome": "M_R1_CLI_V8C_SEM_TRAVA_NO_LOOP",
+  "de": "        if not local and historico_tem_dado_do_banco(messages):\r\n",
+  "para": "        if False:\r\n"
+ },
+ {
+  "nome": "M_R1_CLI_V9B_ANALISAR_NA_AUDITORIA",
+  "de": "                nome_funcao.startswith(\"coletar_\")\r\n                or nome_funcao == \"matar_sessao_oracle\"\r\n                or nome_funcao == \"buscar_script_interno\"\r\n            ):\r\n                logging.info(f\"AGENTE",
+  "para": "                nome_funcao.startswith(\"coletar_\")\r\n                or nome_funcao == \"analisar_log_complexo\"\r\n                or nome_funcao == \"matar_sessao_oracle\"\r\n                or nome_funcao == \"buscar_script_interno\"\r\n            ):\r\n                logging.info(f\"AGENTE"
+ },
+ {
+  "nome": "M_R1_CLI_V3_ERRO_EXECUCAO_COM_TEXTO",
+  "de": "                        {\"erro_execucao\": type(e).__name__}, ensure_ascii=False\r\n",
+  "para": "                        {\"erro_execucao\": str(e)}, ensure_ascii=False\r\n"
+ }
+]

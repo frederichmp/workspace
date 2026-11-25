@@ -1,0 +1,11 @@
+# Controle de mutação `r_k65_t3`
+
+Alvo `src/tools/oracle_dba.py`; testes `tests/test_oracle_kill.py::test_t3_nove_binds_valores_exatos`; cópia `git archive HEAD`.
+
+| Mutação | Troca | Contagem | Resultado | Status |
+|---|---|---|---|---|
+| m0 | sem mutação | - | 2 passed, 13 warnings in 1.41s | OK |
+| M_T3_COMENTARIO_COM_FORMAL |                     p_status              => :p_status\n ->         … | 1 substituição | 2 failed, 13 warnings in 1.58s \| caíram: tests/test_oracle_kill.py::… | DETECTADA |
+
+Resultado: todas DETECTADAS.
+Relatório: docs/entregas/1.11/r1_ampliada/regressao/r_k65_t3.md

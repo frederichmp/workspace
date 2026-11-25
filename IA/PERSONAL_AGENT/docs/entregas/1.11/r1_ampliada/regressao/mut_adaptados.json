@@ -1,0 +1,17 @@
+[
+ {
+  "nome": "m11_retentativa_v1_no_except_r1",
+  "de": "    except oracledb.Error as db_err:\r\n        # A3: _codigo_erro e _registrar_erro_local nunca levantam; nenhuma exceção sai daqui.\r\n",
+  "para": "    except oracledb.Error as db_err:\r\n        if execute_iniciado and cursor is not None:\r\n            try:\r\n                cursor.execute(\"BEGIN OPS_OWNER.PKG_OPS_KILL.KILL_SESSION(p_inst_id => :p_inst_id, p_sid => :p_sid, p_serial => :p_serial, p_status => :p_status); END;\", p_inst_id=inst_id_int, p_sid=sid_int, p_serial=serial_int, p_status=status_var)\r\n            except Exception:\r\n                pass\r\n"
+ },
+ {
+  "nome": "m21_str_db_err_sem_helper_r1",
+  "de": "                f\"{_codigo_erro(db_err)}\"\r\n",
+  "para": "                f\"{db_err}\"\r\n"
+ },
+ {
+  "nome": "m22_dsn_de_volta_no_d8_r1",
+  "de": "                # R1 ampliada V1: nenhum ramo leva \"instancia\" (o DSN) ao LLM.\r\n",
+  "para": "                \"instancia\": dsn,\r\n"
+ }
+]

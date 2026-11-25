@@ -1,0 +1,42 @@
+[
+ {
+  "nome": "M_R1_WEB_V8A_CATALOGO_COM_ORACLE",
+  "de": "            tools=TODAS_FERRAMENTAS if local else FERRAMENTAS_NUVEM,\r\n",
+  "para": "            tools=TODAS_FERRAMENTAS,\r\n"
+ },
+ {
+  "nome": "M_R1_WEB_V8B_SEM_RECUSA_NO_DESPACHO",
+  "de": "            if not local and nome_funcao in NOMES_FERRAMENTAS_ORACLE:\r\n",
+  "para": "            if False:\r\n"
+ },
+ {
+  "nome": "M_R1_WEB_V8C_SEM_TRAVA_NO_LOOP",
+  "de": "        if not local and historico_tem_dado_do_banco(st.session_state.llm_messages):\r\n",
+  "para": "        if False:\r\n"
+ },
+ {
+  "nome": "M_R1_WEB_V8C_SEM_TRAVA_NO_FECHAMENTO",
+  "de": "    if not coordenador_e_local(client) and historico_tem_dado_do_banco(st.session_state.llm_messages):\r\n",
+  "para": "    if False:\r\n"
+ },
+ {
+  "nome": "M_R1_WEB_V8D_SINAL_PELA_SONDA",
+  "de": "    local = coordenador_e_local(client)\r\n",
+  "para": "    local = verificar_status_ollama()\r\n"
+ },
+ {
+  "nome": "M_R1_WEB_V9A_GEMINI_NO_CATALOGO",
+  "de": "TODAS_FERRAMENTAS = os_tools_schema + oracle_tools_schema + rag_tools_schema\r\n",
+  "para": "TODAS_FERRAMENTAS = os_tools_schema + oracle_tools_schema + tools.gemini_router.gemini_tools_schema + rag_tools_schema\r\n"
+ },
+ {
+  "nome": "M_R1_WEB_V9C_REGRA_DE_OURO",
+  "de": "- Para problemas simples, responda no formato: Diagnóstico, Evidências, Possíveis Causas e Próximo Passo.\r\n",
+  "para": "- Para problemas simples, responda no formato: Diagnóstico, Evidências, Possíveis Causas e Próximo Passo.\r\n- REGRA DE OURO: Se você extrair um plano de execução (DBMS_XPLAN) ou quando o usuário pedir uma análise profunda do plano de execução, acione IMEDIATAMENTE a ferramenta 'analisar_log_complexo' passando o plano extraído para terceirizar a análise. Não tente adivinhar.\r\n"
+ },
+ {
+  "nome": "M_R1_WEB_V3_ERRO_EXECUCAO_COM_TEXTO",
+  "de": "                    {\"erro_execucao\": type(exc).__name__}, ensure_ascii=False\r\n",
+  "para": "                    {\"erro_execucao\": str(exc)}, ensure_ascii=False\r\n"
+ }
+]

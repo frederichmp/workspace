@@ -1,0 +1,32 @@
+[
+ {
+  "nome": "M_R1_EXEC_V1_INSTANCIA_NO_SELECT",
+  "de": "                    \"sha256_verificado\": sha256_calculado,\r\n                    \"inst_id\": inst_id,\r\n                    \"tipo\": registro.tipo,\r\n                    \"linhas_afetadas\": len(registros_saida),\r\n",
+  "para": "                    \"sha256_verificado\": sha256_calculado,\r\n                    \"instancia\": dsn,\r\n                    \"inst_id\": inst_id,\r\n                    \"tipo\": registro.tipo,\r\n                    \"linhas_afetadas\": len(registros_saida),\r\n"
+ },
+ {
+  "nome": "M_R1_EXEC_V3_TEXTO_DO_ORACLE",
+  "de": "                \"mensagem\": f\"Erro do Oracle {_codigo_erro(db_err)}.\",\r\n",
+  "para": "                \"mensagem\": str(db_err),\r\n"
+ },
+ {
+  "nome": "M_R1_EXEC_V3_TEXTO_DA_EXCECAO",
+  "de": "                \"mensagem\": f\"Erro inesperado durante execução: {_codigo_erro(exc)}.\",\r\n",
+  "para": "                \"mensagem\": f\"Erro inesperado durante execução: {str(exc)}\",\r\n"
+ },
+ {
+  "nome": "M_R1_EXEC_CAMINHO_DO_DIRETORIO",
+  "de": "                        \"ao diretório de scripts.\"\r\n",
+  "para": "                        f\"a '{scripts_dir}'.\"\r\n"
+ },
+ {
+  "nome": "M_R1_EXEC_PATH_COM_TEXTO",
+  "de": "                \"mensagem\": f\"Falha na validação do caminho do arquivo: {type(e).__name__}.\",\r\n",
+  "para": "                \"mensagem\": f\"Falha na validação do caminho do arquivo: {str(e)}\",\r\n"
+ },
+ {
+  "nome": "M_R1_EXEC_LOB_COM_TEXTO",
+  "de": "            return f\"<Erro ao ler LOB: {type(e).__name__}>\"\r\n",
+  "para": "            return f\"<Erro ao ler LOB: {str(e)}>\"\r\n"
+ }
+]

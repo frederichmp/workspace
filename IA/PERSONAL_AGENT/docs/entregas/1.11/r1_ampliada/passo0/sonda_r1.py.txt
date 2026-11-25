@@ -1,0 +1,191 @@
+"""
+P0 da R1 ampliada (docs/plans/1.11-R1-ampliada.md §4): reproduz V1-V7 e V8 com sentinelas, só leitura.
+Sem Oracle: oracledb.connect é substituído por fakes; credenciais fictícias; ORACLE_SANDBOX nunca é tocada.
+Cada caso grava uma linha "SONDA|<caso>|<sentinelas achadas no resultado_tool>" em stdout.
+"""
+import json
+from datetime import datetime
+
+import oracledb
+import pytest
+
+from src.tools import oracle_dba as od
+from tests.fakes_oracle import USER_DIAG_FAKE, USER_KILL_FAKE, _OracleFake, _linha_alvo
+
+DSN = "host-sentinela-r1:1599/SVC_SENTINELA"
+SENT = {
+    "dsn": DSN,
+    "host": "host-sentinela-r1",
+    "porta": "1599",
+    "erro_rede": "erro-rede-sentinela",
+    "texto_ora": "texto-ora-sentinela",
+    "texto_exc": "excecao-sentinela",
+    "protegido": "STARTUPADMIN",
+    "aprovador": "aprovador-sentinela",
+    "sql": "sql-sentinela",
+    "literal_plano": "literal-plano-sentinela",
+    "pkg": "OPS_OWNER.PKG_OPS_KILL",
+    "hash": "hash_aprovado",
+    "maquina": "maquina-sentinela",
+    "programa": "programa-sentinela",
+    "usuario_sessao": "USUARIO_SENTINELA",
+}
+ORA = oracledb.DatabaseError("ORA-99999: texto-ora-sentinela")
+EXC = RuntimeError("excecao-sentinela")
+
+
+def _achadas(texto):
+    return sorted(nome for nome, valor in SENT.items() if valor in texto)
+
+
+def _reportar(caso, texto):
+    print(f"\nSONDA|{caso}|{','.join(_achadas(texto)) or '-'}")
+
+
+@pytest.fixture
+def amb(monkeypatch):
+    monkeypatch.setenv("ORACLE_USER_DIAG", USER_DIAG_FAKE)
+    monkeypatch.setenv("ORACLE_PASSWORD_DIAG", "senha-ficticia")
+    monkeypatch.setenv("ORACLE_USER_KILL", USER_KILL_FAKE)
+    monkeypatch.setenv("ORACLE_PASSWORD_KILL", "senha-ficticia")
+    monkeypatch.setenv("ORACLE_DSN", DSN)
+    estado = {"acessivel": True}
+
+    def sonda(dsn, timeout=3.0):
+        ok = estado["acessivel"]
+        return {"acessivel": ok, "host": "host-sentinela-r1", "porta": 1599, "latencia_ms": 0.1,
+                "erro_rede": None if ok else "erro-rede-sentinela"}
+
+    monkeypatch.setattr(od, "verificar_acessibilidade_host", sonda)
+    monkeypatch.setattr(od, "enviar_alerta_email", lambda assunto, corpo: (True, "mock"))
+    return estado
+
+
+class _CurDiag:
+    def __init__(self, cfg):
+        self.cfg, self.description, self._sql = cfg, None, ""
+
+    def execute(self, sql, **binds):
+        self._sql = sql
+        if "COUNT(*)" in sql:
+            self.description = [("COUNT(*)",)]
+        elif "gv$sqlarea" in sql.lower():
+            self.description = [(c,) for c in ("SQL_ID", "EXECUTIONS", "ELAPSED_SEG_TOTAL", "ELAPSED_POR_EXEC", "SQL_TEXT_CURTO")]
+        elif "DBMS_XPLAN" in sql:
+            self.description = [("PLAN_TABLE_OUTPUT",)]
+        else:
+            self.description = [(c,) for c in ("INST_ID", "SID", "serial#", "SERIAL", "USERNAME", "PROGRAM", "MACHINE", "STATUS", "SQL_ID", "EVENT")]
+
+    def fetchone(self):
+        return (3,)
+
+    def fetchall(self):
+        if "gv$sqlarea" in self._sql.lower():
+            return [("abc123def4567", 10, 1.5, 0.15, "SELECT * FROM t WHERE c = 'sql-sentinela'")]
+        if "DBMS_XPLAN" in self._sql:
+            return [("Plan hash value: 1",), ("   1 - filter(\"C\"='literal-plano-sentinela')",)]
+        return [(1, 101, 202, 202, "USUARIO_SENTINELA", "programa-sentinela", "maquina-sentinela", "ACTIVE", "abc123def4567", "ev")]
+
+    def close(self):
+        pass
+
+
+class _ConDiag:
+    def __init__(self, cfg):
+        self.cfg = cfg
+
+    def cursor(self):
+        if self.cfg.get("erro_cursor"):
+            raise self.cfg["erro_cursor"]
+        return _CurDiag(self.cfg)
+
+    def close(self):
+        pass
+
+
+def _instalar_diag(monkeypatch, **cfg):
+    def connect(*a, **k):
+        if cfg.get("erro_connect"):
+            raise cfg["erro_connect"]
+        return _ConDiag(cfg)
+    monkeypatch.setattr(oracledb, "connect", connect)
+
+
+FERRAMENTAS_DIAG = {
+    "sessoes": lambda: od.coletar_sessoes_ativas(),
+    "top_sql": lambda: od.coletar_top_sql(),
+    "plano": lambda: od.coletar_plano_execucao("abc123def4567"),
+}
+
+
+@pytest.mark.parametrize("ferramenta", list(FERRAMENTAS_DIAG))
+@pytest.mark.parametrize("ramo", ["sucesso", "erro_config", "rede", "erro_oracle", "excecao"])
+def test_diag(monkeypatch, amb, ferramenta, ramo):
+    if ramo == "erro_config":
+        monkeypatch.delenv("ORACLE_USER_DIAG")
+    if ramo == "rede":
+        amb["acessivel"] = False
+    _instalar_diag(monkeypatch, erro_connect=ORA if ramo == "erro_oracle" else None,
+                   erro_cursor=EXC if ramo == "excecao" else None)
+    _reportar(f"V-diag:{ferramenta}:{ramo}", FERRAMENTAS_DIAG[ferramenta]())
+
+
+IDENT = {"username": "APP_USER", "program": "app.exe", "machine": "srv-app01", "logon_time": datetime(2026, 11, 23, 10, 0, 0)}
+REF = "0123456789abcdef0123456789abcdef"
+
+
+@pytest.mark.parametrize("ramo", ["erro_config", "rede", "erro_oracle_antes", "erro_oracle_depois", "d8", "encerrada"])
+def test_kill_matar(monkeypatch, amb, ramo):
+    fake = {"erro_oracle_antes": dict(erro_connect_kill=ORA), "erro_oracle_depois": dict(erro_kill=ORA),
+            "d8": dict(status_pkg="ENCERRADA", erro_getvalue_status=EXC)}.get(ramo, dict(status_pkg="ENCERRADA"))
+    monkeypatch.setattr(oracledb, "connect", _OracleFake([], **fake).connect)
+    if ramo == "erro_config":
+        monkeypatch.delenv("ORACLE_USER_KILL")
+    if ramo == "rede":
+        amb["acessivel"] = False
+    _reportar(f"V-kill:matar:{ramo}", od.matar_sessao_oracle(sid=101, serial=202, inst_id=1,
+                                                             identidade_esperada=dict(IDENT), ref_aprovacao=REF))
+
+
+ARGS = {"inst_id": 1, "sid": 101, "serial": 202}
+
+
+@pytest.mark.parametrize("ramo", ["protegido", "erro_oracle", "excecao", "rede"])
+def test_kill_preparar(monkeypatch, amb, ramo):
+    linhas = [_linha_alvo(username="STARTUPADMIN")] if ramo == "protegido" else [_linha_alvo()]
+    fake = _OracleFake(linhas, kill_permitido=False)
+    connect = fake.connect
+    if ramo in ("erro_oracle", "excecao"):
+        erro = ORA if ramo == "erro_oracle" else EXC
+
+        def connect(*a, **k):
+            raise erro
+    if ramo == "rede":
+        amb["acessivel"] = False
+    monkeypatch.setattr(oracledb, "connect", connect)
+    prep = od.preparar_intervencao_kill(dict(ARGS), caminho_log=None)
+    _reportar(f"V-kill:preparar:{ramo}", prep.get("resultado_tool") or json.dumps(prep, default=str))
+
+
+def test_kill_rejeitado_aprovador(monkeypatch, amb, tmp_path):
+    monkeypatch.setattr(oracledb, "connect", _OracleFake([]).connect)
+    alvo = dict(zip(["inst_id", "sid", "serial#", "username", "program", "machine", "status", "type", "logon_time"],
+                    _linha_alvo()))
+    d = od.registrar_decisao_kill(decisao="REJEITADO", aprovador="aprovador-sentinela", inst_id=1, sid=101, serial=202,
+                                  alvo=alvo, hash_aprovado="h", canal="SONDA", preparado_em=None,
+                                  caminho_log=tmp_path / "k.log")
+    _reportar("V-kill:registrar:rejeitado", d["resultado_tool"])
+
+
+@pytest.mark.parametrize("ramo", ["alvo_alterado", "encerrada", "erro_oracle_depois"])
+def test_kill_fluxo(monkeypatch, amb, tmp_path, ramo):
+    linhas = [_linha_alvo(), _linha_alvo(machine="outra-maquina")] if ramo == "alvo_alterado" else [_linha_alvo(), _linha_alvo()]
+    fake = {"encerrada": dict(status_pkg="ENCERRADA"), "erro_oracle_depois": dict(erro_kill=ORA)}.get(ramo, {})
+    monkeypatch.setattr(oracledb, "connect", _OracleFake(linhas, **fake).connect)
+    d = od.conduzir_kill_hitl(dict(ARGS), solicitar_aprovacao=lambda prep: ("APROVADO", "aprovador-sentinela", None),
+                              canal="SONDA", caminho_log=tmp_path / "k.log")
+    _reportar(f"V-kill:fluxo:{ramo}", d["resultado_tool"])
+
+
+def test_schema_das_ferramentas():
+    _reportar("V6:schema", json.dumps(od.oracle_tools_schema, ensure_ascii=False))

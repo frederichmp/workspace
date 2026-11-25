@@ -1,0 +1,28 @@
+HEAD e1d4ce6 | inicio 2026-11-24 23:04:57 -0300
+r_m1_m16 | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 1305 s
+r_gemini_a43 | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 1063 s
+r_k2_dba | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 586 s
+r_m29_main | alvo src/main.py | rc=0 | Resultado: todas DETECTADAS. | 143 s
+r_m30_app | alvo app.py | rc=0 | Resultado: todas DETECTADAS. | 144 s
+r_k3_sql | alvo docs/entregas/1.11/item6/ops_kill.sql | rc=0 | Resultado: todas DETECTADAS. | 258 s
+r_k4_dba | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 992 s
+r_k4_init | alvo src/tools/__init__.py | rc=0 | Resultado: todas DETECTADAS. | 340 s
+r_k5 | alvo tests/test_oracle_kill.py | rc=0 | Resultado: todas DETECTADAS. | 454 s
+r_mec_k3 | alvo src/tools/oracle_dba.py | rc=1 |  | 29318 s
+r_mec_k3b | alvo src/tools/oracle_dba.py | rc=0 |  | 36 s
+retomada (bateria acabou ~00:30) | HEAD e1d4ce6 | inicio 2026-11-25 08:45:27 -0300
+r_mec_k3 | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 431 s
+r_mec_k3b | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 281 s
+r_ra | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 1187 s
+r_ra9 | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 7 s
+r_n_prod | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 492 s
+r_n_testes | alvo tests/test_oracle_kill.py | rc=0 | Resultado: todas DETECTADAS. | 210 s
+r_k65_t3 | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 7 s
+r_k65_aa | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 142 s
+r_adaptados | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 280 s
+r_r1_c2 | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 1201 s
+r_r1_c3 | alvo src/tools/executor.py | rc=0 | Resultado: todas DETECTADAS. | 25 s
+r_r1_c4_app | alvo app.py | rc=0 | Resultado: todas DETECTADAS. | 540 s
+r_r1_c4_main | alvo src/main.py | rc=0 | Resultado: todas DETECTADAS. | 361 s
+r_r1_c4_dba | alvo src/tools/oracle_dba.py | rc=0 | Resultado: todas DETECTADAS. | 120 s
+fim 2026-11-25 10:13:31 -0300

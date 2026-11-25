@@ -1,0 +1,7 @@
+[
+ {
+  "nome": "M_R1_D8_PKG_DE_VOLTA",
+  "de": "                f\"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro a partir da chamada de encerramento: {type(exc).__name__}\"\r\n",
+  "para": "                f\"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro a partir da chamada ao PKG: {type(exc).__name__}\"\r\n"
+ }
+]
