@@ -51,19 +51,19 @@ class _ToolCall:
     id = "call_1"
     type = "function"
 
-    def __init__(self):
-        self.function = _Fn("matar_sessao_oracle", json.dumps(ARGS_KILL))
+    def __init__(self, nome="matar_sessao_oracle", argumentos=None):
+        self.function = _Fn(nome, json.dumps(ARGS_KILL if argumentos is None else argumentos))
 
 
 class _Msg:
-    def __init__(self, com_tool_call):
+    def __init__(self, com_tool_call, chamada=None):
         self.content = None if com_tool_call else "Laudo final fake."
-        self.tool_calls = [_ToolCall()] if com_tool_call else None
+        self.tool_calls = [_ToolCall(*(chamada or ()))] if com_tool_call else None
 
 
 class _Resp:
-    def __init__(self, com_tool_call):
-        self.choices = [types.SimpleNamespace(message=_Msg(com_tool_call))]
+    def __init__(self, com_tool_call, chamada=None):
+        self.choices = [types.SimpleNamespace(message=_Msg(com_tool_call, chamada))]
 
 
 class _Ambiente:
@@ -142,7 +142,7 @@ _AUSENTE = object()
 _ATRIBUTO_ESTADO_ENV = "_personal_agent_estado_env"
 
 
-def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=True):
+def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=True, ollama="local"):
     monkeypatch.syspath_prepend(str(RAIZ / "src"))
     monkeypatch.syspath_prepend(str(RAIZ))
     monkeypatch.setenv("ORACLE_USER_DIAG", USER_DIAG_FAKE)
@@ -163,11 +163,18 @@ def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=
     null = logging.NullHandler()
     raiz_log.addHandler(null)
 
-    # Rede: Ollama (11434) offline; qualquer outro destino é erro
+    # Rede: a sonda do Ollama (11434) responde ("local") ou falha ("nuvem"), sem socket real; qualquer outro
+    # destino é erro. Expectativa alterada, declarada (R1 ampliada, r1_ampliada/decisao_c1.md §8.5): o padrão
+    # passa de Ollama offline para local, porque com a nuvem as ferramentas Oracle (e o kill) são recusadas
+    # (decisão 5.2.1 do responsável). Os casos de nuvem são os testes W1-W6 no fim do arquivo.
     destinos_inesperados = []
+    estado_rede = {"ollama": ollama}
 
     def _create_connection(endereco, *a, **k):
         if isinstance(endereco, tuple) and endereco[1] == 11434:
+            if estado_rede["ollama"] == "local":
+                import contextlib
+                return contextlib.nullcontext()
             raise OSError("neutralizado no teste")
         destinos_inesperados.append(endereco)
         raise AssertionError(f"rede inesperada: {endereco}")
@@ -198,14 +205,25 @@ def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=
 
     monkeypatch.setattr(od, "enviar_alerta_email", _email)
 
+    amb.estado_rede = estado_rede
+    amb.chamada = None  # (nome, argumentos) da 1ª tool_call; None = matar_sessao_oracle com ARGS_KILL
+    amb.base_url_forcado = None  # W6: cliente que diz um base_url diferente do pedido
+    amb.bases_llm, amb.tools_llm = [], []
+
     class _Completions:
+        def __init__(self, cliente):
+            self.cliente = cliente
+
         def create(self, **kwargs):
             amb.mensagens_llm.append([dict(m) for m in kwargs["messages"]])
-            return _Resp(len(amb.mensagens_llm) == 1)
+            amb.bases_llm.append(self.cliente.base_url)
+            amb.tools_llm.append(kwargs.get("tools"))
+            return _Resp(len(amb.mensagens_llm) == 1, amb.chamada)
 
     class _OpenAIFalso:
         def __init__(self, *a, **k):
-            self.chat = types.SimpleNamespace(completions=_Completions())
+            self.base_url = amb.base_url_forcado or k.get("base_url")
+            self.chat = types.SimpleNamespace(completions=_Completions(self))
 
     monkeypatch.setattr(openai, "OpenAI", _OpenAIFalso)
 
@@ -229,9 +247,9 @@ def montar_web(monkeypatch, tmp_path, snapshot_logs_reais):
     criados = []
     estado_env_antes = vars(sys).get(_ATRIBUTO_ESTADO_ENV, _AUSENTE)
 
-    def _fabrica(linhas_diag, status_pkg=None, kill_permitido=True):
+    def _fabrica(linhas_diag, status_pkg=None, kill_permitido=True, ollama="local"):
         vars(sys).pop(_ATRIBUTO_ESTADO_ENV, None)
-        amb = _montar(monkeypatch, tmp_path, linhas_diag, status_pkg, kill_permitido)
+        amb = _montar(monkeypatch, tmp_path, linhas_diag, status_pkg, kill_permitido, ollama)
         criados.append(amb)
         return amb
 
@@ -557,3 +575,146 @@ def test_web_reconciliador_falha_nao_quebra_o_app(montar_web, monkeypatch):
     assert not amb.at.exception
     assert any("Reconciliação do log de aprovações NÃO executada" in w for w in amb.avisos())
     assert amb.at.session_state.reconciliacao_kill["erro"] == "LockLogAprovacaoIndisponivel"
+
+
+# =============================================================================
+# R1 ampliada V8/V9 (r1_ampliada/decisao_c1.md §8.3): coordenador em nuvem na Web (W1-W6) e V3 (C3)
+# =============================================================================
+
+NOMES_ORACLE = {"coletar_sessoes_ativas", "coletar_top_sql", "coletar_plano_execucao", "matar_sessao_oracle"}
+URL_GEMINI = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def _nomes(tools):
+    return {f["function"]["name"] for f in (tools or [])}
+
+
+def _pedir(amb, texto=PEDIDO):
+    at = amb.at
+    at.run()
+    assert not at.exception
+    at.chat_input[0].set_value(texto).run()
+    assert not at.exception
+
+
+def _tools_vistas(amb, indice=-1):
+    return [m for m in amb.mensagens_llm[indice] if m.get("role") == "tool"]
+
+
+def test_web_w1_catalogo_local_tem_oracle_e_nuvem_nao(montar_web):
+    """W1 (mata V8a, V9a): com o coordenador local o catálogo tem as ferramentas Oracle; com a nuvem, nenhuma.
+    Em nenhum dos dois o analisar_log_complexo é oferecido."""
+    local = montar_web([_linha_alvo()], kill_permitido=False)
+    local.chamada = ("ferramenta_inexistente", {})
+    _pedir(local)
+    assert local.bases_llm[0] == "http://localhost:11434/v1"
+    assert NOMES_ORACLE <= _nomes(local.tools_llm[0])
+    assert "analisar_log_complexo" not in _nomes(local.tools_llm[0])
+
+    nuvem = montar_web([_linha_alvo()], kill_permitido=False, ollama="nuvem")
+    nuvem.chamada = ("ferramenta_inexistente", {})
+    _pedir(nuvem)
+    assert nuvem.bases_llm[0] == URL_GEMINI
+    nomes = _nomes(nuvem.tools_llm[0])
+    assert nomes, "o catálogo da nuvem não pode vir vazio (SO + RAG)"
+    assert not (nomes & NOMES_ORACLE) and "analisar_log_complexo" not in nomes
+
+
+def test_web_w2_nuvem_chamada_inventada_a_ferramenta_oracle_e_recusada_sem_consultar(montar_web, monkeypatch):
+    """W2 (mata V8b): com a nuvem, o LLM chama coletar_plano_execucao mesmo sem ela no catálogo: devolve a recusa
+    fixa, sem chamar a ferramenta, sem sonda e sem conexão."""
+    amb = montar_web([_linha_alvo()], kill_permitido=False, ollama="nuvem")
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    # coletar_plano_execucao: só o despacho do LLM a chama (a barra lateral chama coletar_sessoes_ativas e
+    # coletar_top_sql direto, para a tela, a cada execução do script)
+    chamadas = []
+    monkeypatch.setattr(od, "coletar_plano_execucao", lambda *a, **k: chamadas.append(1) or "{}")
+    amb.chamada = ("coletar_plano_execucao", {"sql_id": "abc123def4567"})
+    _pedir(amb)
+
+    assert chamadas == [] and amb.oracle.conexoes == []
+    (tool,) = _tools_vistas(amb)
+    assert tool["name"] == "coletar_plano_execucao" and tool["content"] == od.RESULTADO_ORACLE_SO_LOCAL
+    assert amb.destinos_inesperados == []
+
+
+def test_web_w3_nuvem_kill_inventado_nao_gera_pre_consulta_nem_painel(montar_web):
+    """W3 (mata V8b): com a nuvem, matar_sessao_oracle não gera pré-consulta DIAG nem painel HITL."""
+    amb = montar_web([_linha_alvo()], kill_permitido=False, ollama="nuvem")
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    _pedir(amb)
+
+    assert amb.at.session_state.hitl_pendente is None
+    assert amb.oracle.conexoes == []
+    (tool,) = _tools_vistas(amb)
+    assert tool["content"] == od.RESULTADO_ORACLE_SO_LOCAL
+    assert amb.registros() == []
+
+
+def test_web_w4_historico_com_dado_do_banco_nao_vai_a_nuvem(montar_web, monkeypatch):
+    """W4 (mata V8c): turno 1 com o coordenador local traz dado do banco; o Ollama cai; no turno 2 a nuvem não
+    recebe o histórico (nenhuma chamada nova) e a tela mostra o texto fixo."""
+    amb = montar_web([_linha_alvo()], kill_permitido=False)
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    # depois do montar_web, que também substitui coletar_sessoes_ativas
+    monkeypatch.setattr(od, "coletar_sessoes_ativas", lambda *a, **k: json.dumps({"sessoes": ["dado-sentinela"]}))
+    amb.chamada = ("coletar_sessoes_ativas", {})
+    _pedir(amb)
+    assert len(amb.mensagens_llm) == 2  # tool_call + laudo, os dois com o coordenador local
+    assert any("dado-sentinela" in t["content"] for t in _tools_vistas(amb))
+
+    amb.estado_rede["ollama"] = "nuvem"
+    amb.at.chat_input[0].set_value("e agora?").run()
+    assert not amb.at.exception
+
+    assert len(amb.mensagens_llm) == 2, "o histórico com dado do banco foi à nuvem"
+    assert URL_GEMINI not in amb.bases_llm
+    assert any(od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in t for t in amb.textos_tela())
+
+
+def test_web_w5_ollama_cai_entre_o_painel_e_o_clique(montar_web):
+    """W5 (mata V8c): o painel HITL abre com o coordenador local; o Ollama cai antes do clique. O kill é decidido e
+    gravado (INTENCAO e RESULTADO), mas o fechamento não vai à nuvem."""
+    linha = _linha_alvo()
+    amb = montar_web([linha, linha], status_pkg="ENCERRADA")
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    _ate_painel_hitl(amb)
+    amb.estado_rede["ollama"] = "nuvem"
+
+    _decidir(amb, "btn_hitl_approve", "dba_teste")
+
+    resultado = amb.par_intencao_resultado()
+    assert resultado["resultado_banco"] == "ENCERRADA"
+    assert len(amb.mensagens_llm) == 1, "o fechamento pós-HITL foi à nuvem"
+    assert any(od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in t for t in amb.textos_tela())
+
+
+def test_web_w6_sinal_e_o_base_url_do_cliente_e_nao_o_bool(montar_web):
+    """W6 (mata V8d): a sonda diz que o Ollama está ativo, mas o cliente aponta para o Gemini; vale o base_url do
+    cliente que envia: catálogo sem Oracle e kill recusado."""
+    amb = montar_web([_linha_alvo()], kill_permitido=False)
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    amb.base_url_forcado = URL_GEMINI
+    _pedir(amb)
+
+    assert amb.bases_llm[0] == URL_GEMINI
+    assert not (_nomes(amb.tools_llm[0]) & NOMES_ORACLE)
+    assert amb.at.session_state.hitl_pendente is None and amb.oracle.conexoes == []
+    assert _tools_vistas(amb)[0]["content"] == od.RESULTADO_ORACLE_SO_LOCAL
+
+
+def test_web_c3_erro_execucao_so_com_o_tipo(montar_web, monkeypatch):
+    """C3, Web (mata V3 na interface): exceção numa ferramenta vira {"erro_execucao": <tipo>} ao LLM, sem o texto."""
+    def _quebra(*a, **k):
+        raise RuntimeError("exc-sentinela")
+
+    amb = montar_web([_linha_alvo()], kill_permitido=False)
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    # coletar_plano_execucao: só o LLM a chama (a barra lateral chama coletar_top_sql direto, fora do loop)
+    monkeypatch.setattr(od, "coletar_plano_execucao", _quebra)
+    amb.chamada = ("coletar_plano_execucao", {"sql_id": "abc123def4567"})
+    _pedir(amb)
+
+    (tool,) = _tools_vistas(amb)
+    assert json.loads(tool["content"]) == {"erro_execucao": "RuntimeError"}
+    assert not any("exc-sentinela" in json.dumps(m, default=str) for msgs in amb.mensagens_llm for m in msgs)

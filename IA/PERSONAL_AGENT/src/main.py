@@ -146,13 +146,19 @@ from tools.oracle_dba import (
     APROVACAO_TTL_SEGUNDOS,
     MENSAGEM_RESULTADO_DESCONHECIDO,
     MENSAGEM_DESFECHO_NAO_CONFIRMADO,
+    NOMES_FERRAMENTAS_ORACLE,
+    RESULTADO_ORACLE_SO_LOCAL,
+    TEXTO_HISTORICO_COM_DADO_DO_BANCO,
+    _registrar_erro_local,
+    coordenador_e_local,
+    historico_tem_dado_do_banco,
 )
 
-# 3. Importando a Ferramenta de Nuvem (Gemini), o Notificador SMTP e a Busca RAG Local
-from tools.gemini_router import (
-    gemini_tools_schema,
-    analisar_log_complexo,
-)
+# 3. Gemini e Busca RAG Local
+# R1 ampliada V9 (docs/plans/1.11-R1-ampliada.md §5.2.2; decisão do responsável de 2026-11-24, opção a): o
+# analisar_log_complexo não é oferecido nem despachado ao coordenador. O import fica, sem uso, porque o
+# tools.gemini_router lê GEMINI_API_KEY no import e é a sonda do test_d63 (carga do .env antes de tools.*).
+import tools.gemini_router  # noqa: F401  (sonda da carga do .env; nenhuma função é usada)
 from tools.rag_search import (
     rag_tools_schema,
     buscar_script_interno,
@@ -184,10 +190,10 @@ def _inicializar_cliente_coordenador() -> tuple[OpenAI, str]:
 
 client, MODELO = _inicializar_cliente_coordenador()
 
-# 4. Unificando o Catálogo de Ferramentas (Agora com 4 frentes: SO + Oracle + Gemini Cloud + RAG Local)
-todas_ferramentas = (
-    os_tools_schema + oracle_tools_schema + gemini_tools_schema + rag_tools_schema
-)
+# 4. Catálogo de Ferramentas (R1 ampliada V8, falha fechada; decisao_c1.md §3.2): com o coordenador local,
+# SO + Oracle + RAG; com o coordenador em nuvem, só SO + RAG (as ferramentas Oracle não são oferecidas).
+todas_ferramentas = os_tools_schema + oracle_tools_schema + rag_tools_schema
+ferramentas_nuvem = os_tools_schema + rag_tools_schema
 
 # 5. System Prompt do Coordenador
 SYSTEM_PROMPT = """Você é o Agente Coordenador, o cérebro central de um sistema autônomo local de administração de TI e Banco de Dados.
@@ -198,7 +204,6 @@ Seus princípios absolutos são:
 DIRETRIZES DE COMPORTAMENTO E DELEGAÇÃO:
 - Nunca invente métricas, queries, logs ou estados do sistema. Chame as ferramentas.
 - Para problemas simples, responda no formato: Diagnóstico, Evidências, Possíveis Causas e Próximo Passo.
-- REGRA DE OURO: Se você extrair um plano de execução (DBMS_XPLAN) ou quando o usuário pedir uma análise profunda do plano de execução, acione IMEDIATAMENTE a ferramenta 'analisar_log_complexo' passando o plano extraído para terceirizar a análise. Não tente adivinhar.
 - SEGURANÇA (HITL): Apenas acione 'matar_sessao_oracle' quando o usuário solicitar explicitamente para matar ou encerrar uma sessão informando SID e SERIAL.
 """
 
@@ -311,16 +316,23 @@ def executar_agente(prompt_usuario: str) -> None:
         {"role": "user", "content": prompt_usuario},
     ]
 
+    # R1 ampliada V8 (decisao_c1.md §3.1): o sinal é o base_url do próprio cliente que envia.
+    local = coordenador_e_local(client)
+
     # Loop de Tool Calling
     max_passos = 6
     passo = 0
 
     while passo < max_passos:
         passo += 1
+        # V8, trava de histórico (decisao_c1.md §3.4): dado do banco nunca vai à nuvem.
+        if not local and historico_tem_dado_do_banco(messages):
+            print(f"\n[Sistema]: {TEXTO_HISTORICO_COM_DADO_DO_BANCO}")
+            return
         response = client.chat.completions.create(
             model=MODELO,
             messages=messages,
-            tools=todas_ferramentas,
+            tools=todas_ferramentas if local else ferramentas_nuvem,
         )
 
         mensagem_resposta = response.choices[0].message
@@ -344,7 +356,6 @@ def executar_agente(prompt_usuario: str) -> None:
             # 2. Auditoria: Registra a intenção do LLM (O que ele decidiu fazer)
             if (
                 nome_funcao.startswith("coletar_")
-                or nome_funcao == "analisar_log_complexo"
                 or nome_funcao == "matar_sessao_oracle"
                 or nome_funcao == "buscar_script_interno"
             ):
@@ -352,8 +363,13 @@ def executar_agente(prompt_usuario: str) -> None:
 
             # 3. Roteamento Dinâmico (Switch Case / If-Elif) com Barreira HITL + Notificador SMTP
             try:
+                # V8, despacho (decisao_c1.md §3.3): o LLM pode chamar ferramenta que não foi oferecida; com o
+                # coordenador em nuvem, ferramenta Oracle devolve a recusa fixa, sem consultar nada.
+                if not local and nome_funcao in NOMES_FERRAMENTAS_ORACLE:
+                    resultado_tool = RESULTADO_ORACLE_SO_LOCAL
+
                 # Rotas do Windows
-                if nome_funcao == "coletar_metricas_hardware":
+                elif nome_funcao == "coletar_metricas_hardware":
                     resultado_tool = coletar_metricas_hardware()
                 elif nome_funcao == "verificar_espaco_disco":
                     resultado_tool = verificar_espaco_disco(
@@ -378,16 +394,6 @@ def executar_agente(prompt_usuario: str) -> None:
                     )
                     resultado_tool = desfecho["resultado_tool"]
                     _exibir_desfecho_kill_cli(desfecho)
-
-                # Rota: Nuvem / Gemini
-                elif nome_funcao == "analisar_log_complexo":
-                    resultado_tool = analisar_log_complexo(
-                        dados_brutos=argumentos.get("dados_brutos", ""),
-                        contexto_solicitacao=argumentos.get(
-                            "contexto_solicitacao",
-                            "Análise de performance solicitada pelo DBA.",
-                        ),
-                    )
 
                 # Rota: Base de Conhecimento RAG Local (Scripts DBA Homologados)
                 elif nome_funcao == "buscar_script_interno":
@@ -415,14 +421,15 @@ def executar_agente(prompt_usuario: str) -> None:
                         ensure_ascii=False,
                     )
                 else:
+                    # R1 ampliada V3 (decisao_c1.md §2.3): ao LLM só o tipo; o texto cru vai ao log local.
+                    _registrar_erro_local(nome_funcao, "erro_execucao", exc=e)
                     resultado_tool = json.dumps(
-                        {"erro_execucao": str(e)}, ensure_ascii=False
+                        {"erro_execucao": type(e).__name__}, ensure_ascii=False
                     )
 
             # 4. Auditoria: Registra a evidência/resultado retornado pelo banco ou pelo bloqueio HITL
             if (
                 nome_funcao.startswith("coletar_")
-                or nome_funcao == "analisar_log_complexo"
                 or nome_funcao == "matar_sessao_oracle"
                 or nome_funcao == "buscar_script_interno"
             ):
@@ -439,6 +446,9 @@ def executar_agente(prompt_usuario: str) -> None:
             )
 
     # Caso atinja o limite de passos de ferramentas, gera o laudo final com o que foi coletado
+    if not local and historico_tem_dado_do_banco(messages):
+        print(f"\n[Sistema]: {TEXTO_HISTORICO_COM_DADO_DO_BANCO}")
+        return
     resposta_final = client.chat.completions.create(
         model=MODELO,
         messages=messages,

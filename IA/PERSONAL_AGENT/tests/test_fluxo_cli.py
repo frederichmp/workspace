@@ -31,18 +31,25 @@ ARGS_KILL = {"inst_id": 1, "sid": 101, "serial": 202}
 
 
 class _LLMFalso:
-    """Substitui main.client: 1ª chamada pede matar_sessao_oracle; 2ª devolve texto final."""
+    """Substitui main.client: 1ª chamada pede matar_sessao_oracle (ou `nome`); 2ª devolve texto final.
 
-    def __init__(self):
+    Expectativa alterada, declarada (R1 ampliada, r1_ampliada/decisao_c1.md §8.5): o falso ganha base_url, local
+    por padrão, porque com o coordenador em nuvem as ferramentas Oracle (e o kill) são recusadas (decisão 5.2.1)."""
+
+    def __init__(self, base_url="http://localhost:11434/v1", nome="matar_sessao_oracle", argumentos=None):
+        self.base_url = base_url
+        self.nome, self.argumentos = nome, (ARGS_KILL if argumentos is None else argumentos)
         self.chamadas = []  # cópia da lista de mensagens recebida em cada chamada
+        self.tools = []  # catálogo recebido em cada chamada
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
     def _create(self, model=None, messages=None, tools=None, **kwargs):
         self.chamadas.append(list(messages))
+        self.tools.append(tools)
         if len(self.chamadas) == 1:
             tool_call = SimpleNamespace(
                 id="call_1",
-                function=SimpleNamespace(name="matar_sessao_oracle", arguments=json.dumps(ARGS_KILL)),
+                function=SimpleNamespace(name=self.nome, arguments=json.dumps(self.argumentos)),
             )
             msg = SimpleNamespace(content=None, tool_calls=[tool_call])
         else:
@@ -412,3 +419,84 @@ def test_cli_reconciliador_falha_nao_derruba(main_cli, monkeypatch, capsys):
     monkeypatch.setattr(main_cli, "reconciliar_intencoes_orfas", _lock_indisponivel)
     main_cli._reconciliar_na_subida_cli()  # não levanta
     assert "Reconciliação do log de aprovações NÃO executada" in capsys.readouterr().out
+
+
+# =============================================================================
+# R1 ampliada V8/V3 (r1_ampliada/decisao_c1.md §8.3): coordenador em nuvem na CLI (C1, C2) e erro (C3)
+# =============================================================================
+
+NOMES_ORACLE = {"coletar_sessoes_ativas", "coletar_top_sql", "coletar_plano_execucao", "matar_sessao_oracle"}
+URL_GEMINI = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def _nomes(tools):
+    return {f["function"]["name"] for f in (tools or [])}
+
+
+def _tools_vistas(llm, indice=-1):
+    return [m for m in llm.chamadas[indice] if isinstance(m, dict) and m.get("role") == "tool"]
+
+
+def _rodar(main_cli, monkeypatch, llm):
+    monkeypatch.setattr(main_cli, "client", llm)
+    main_cli.executar_agente("pedido de teste")
+    return llm
+
+
+def test_cli_c1_catalogo_local_tem_oracle_e_nuvem_nao(main_cli, monkeypatch):
+    """C1 (mata V8a, V9a): catálogo local com as ferramentas Oracle; da nuvem, sem nenhuma; nunca o
+    analisar_log_complexo."""
+    local = _rodar(main_cli, monkeypatch, _LLMFalso(nome="ferramenta_inexistente", argumentos={}))
+    assert NOMES_ORACLE <= _nomes(local.tools[0]) and "analisar_log_complexo" not in _nomes(local.tools[0])
+
+    nuvem = _rodar(main_cli, monkeypatch, _LLMFalso(base_url=URL_GEMINI, nome="ferramenta_inexistente", argumentos={}))
+    nomes = _nomes(nuvem.tools[0])
+    assert nomes and not (nomes & NOMES_ORACLE) and "analisar_log_complexo" not in nomes
+
+
+@pytest.mark.parametrize("ferramenta", sorted(NOMES_ORACLE))
+def test_cli_c2_nuvem_chamada_inventada_a_ferramenta_oracle_e_recusada(main_cli, monkeypatch, ferramenta):
+    """C2 (mata V8b): com a nuvem, chamada a qualquer ferramenta Oracle devolve a recusa fixa, sem conexão."""
+    import tools.oracle_dba as od
+
+    conexoes = []
+    monkeypatch.setattr(od.oracledb, "connect", lambda *a, **k: conexoes.append(1))
+    monkeypatch.setattr(od, "verificar_acessibilidade_host", lambda *a, **k: pytest.fail("sonda chamada"))
+    monkeypatch.setattr("builtins.input", lambda *a, **k: pytest.fail("prompt HITL exibido"))
+    llm = _rodar(main_cli, monkeypatch, _LLMFalso(base_url=URL_GEMINI, nome=ferramenta, argumentos=dict(ARGS_KILL)))
+
+    assert conexoes == []
+    (tool,) = _tools_vistas(llm)
+    assert tool["content"] == od.RESULTADO_ORACLE_SO_LOCAL
+
+
+def test_cli_c3_erro_execucao_so_com_o_tipo(main_cli, monkeypatch, caplog):
+    """C3, CLI (mata V3 na interface): exceção numa ferramenta vira {"erro_execucao": <tipo>} ao LLM; o texto
+    cru vai só ao log local."""
+    def _quebra(*a, **k):
+        raise RuntimeError("exc-sentinela")
+
+    monkeypatch.setattr(main_cli, "coletar_top_sql", _quebra)
+    caplog.set_level(logging.WARNING)
+    llm = _rodar(main_cli, monkeypatch, _LLMFalso(nome="coletar_top_sql", argumentos={"limite": 3}))
+
+    (tool,) = _tools_vistas(llm)
+    assert json.loads(tool["content"]) == {"erro_execucao": "RuntimeError"}
+    assert not any("exc-sentinela" in json.dumps(m, default=str) for msgs in llm.chamadas for m in msgs)
+    assert "exc-sentinela" in caplog.text
+
+
+def test_cli_historico_com_dado_do_banco_nao_vai_a_nuvem(main_cli, monkeypatch, capsys):
+    """V8c na CLI: com a nuvem e uma mensagem de ferramenta Oracle já no histórico (simulada), a chamada não é feita.
+    Hoje a CLI cria `messages` por chamada (decisao_c1.md §3.4); o teste fixa a checagem mesmo assim."""
+    import tools.oracle_dba as od
+
+    llm = _LLMFalso(base_url=URL_GEMINI, nome="coletar_sessoes_ativas", argumentos={})
+    monkeypatch.setattr(main_cli, "client", llm)
+    original = od.historico_tem_dado_do_banco
+    monkeypatch.setattr(main_cli, "historico_tem_dado_do_banco", lambda msgs: True)
+    main_cli.executar_agente("pedido de teste")
+
+    assert llm.chamadas == [], "a nuvem recebeu o histórico com dado do banco"
+    assert od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in capsys.readouterr().out
+    assert original([{"role": "tool", "name": "coletar_sessoes_ativas", "content": "{}"}]) is True

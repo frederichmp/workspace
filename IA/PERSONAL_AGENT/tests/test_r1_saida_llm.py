@@ -407,7 +407,7 @@ def test_r1_nomes_sem_dado_do_banco_iguais_aos_schemas_de_so_e_rag():
 
 # ---- AST (decisao_c1.md §8.4) ----
 
-ARQUIVOS_AST = ["src/tools/oracle_dba.py", "src/tools/executor.py"]
+ARQUIVOS_AST = ["src/tools/oracle_dba.py", "src/tools/executor.py", "app.py", "src/main.py"]
 CHAVES_PROIBIDAS_AST = {"instancia", "hash_aprovado", "hash_atual", "detalhe_rede"}
 FUNCOES_PERMITIDAS_COM_EXCECAO = {"type", "isinstance", "getattr", "_codigo_erro", "_registrar_erro_local"}
 FUNCOES_QUE_PODEM_DESCREVER = {"_codigo_erro", "_registrar_erro_local"}
@@ -620,3 +620,43 @@ def test_r1_executor_path_invalido_sem_o_diretorio_de_scripts(monkeypatch, ambie
     diretorio = str(obter_caminho_scripts_dir())
     assert diretorio not in texto and diretorio.replace("\\", "\\\\") not in texto
     assert str(RAIZ) not in texto and str(RAIZ).replace("\\", "\\\\") not in texto
+
+
+# ---- C4: interfaces (V8 catálogo e despacho, V9 e prompt; decisao_c1.md §3-§4 e §8.4 A4) ----
+
+def test_r1_nomes_ferramentas_oracle_iguais_ao_schema():
+    """O despacho das interfaces recusa, com a nuvem, todo nome de oracle_tools_schema (inclusive o kill, §3.5)."""
+    assert od.NOMES_FERRAMENTAS_ORACLE == frozenset(f["function"]["name"] for f in od.oracle_tools_schema)
+    assert "matar_sessao_oracle" in od.NOMES_FERRAMENTAS_ORACLE
+    assert od.NOMES_FERRAMENTAS_ORACLE.isdisjoint(od.NOMES_FERRAMENTAS_SEM_DADO_DO_BANCO)
+
+
+@pytest.mark.parametrize("rel", ["app.py", "src/main.py"])
+def test_r1_ast_a4_coordenador_sem_analisar_log_complexo(rel):
+    """A4, ajustada pela opção (a) do responsável (2026-11-24): o import de tools.gemini_router fica, sem uso, como
+    sonda do test_d63; o coordenador não recebe gemini_tools_schema e nenhuma constante de texto nem nome do código
+    usa analisar_log_complexo (nem catálogo, nem despacho, nem prompt)."""
+    arvore = _arvore(rel)
+    nomes = {no.id for no in ast.walk(arvore) if isinstance(no, ast.Name)}
+    atributos = {no.attr for no in ast.walk(arvore) if isinstance(no, ast.Attribute)}
+    textos = [no.value for no in ast.walk(arvore) if isinstance(no, ast.Constant) and isinstance(no.value, str)]
+    importados = {a.asname or a.name for no in ast.walk(arvore) if isinstance(no, ast.ImportFrom) for a in no.names}
+    assert "gemini_tools_schema" not in nomes | atributos | importados
+    assert "analisar_log_complexo" not in nomes | atributos | importados
+    assert not any("analisar_log_complexo" in t for t in textos)
+    assert any(isinstance(no, ast.Import) and any(a.name == "tools.gemini_router" for a in no.names)
+               for no in ast.walk(arvore)), "a sonda do test_d63 (import de tools.gemini_router) sumiu"
+
+
+@pytest.mark.parametrize("rel", ["app.py", "src/main.py"])
+def test_r1_system_prompt_sem_regra_de_ouro(rel):
+    """V9 (decisao_c1.md §4): o prompt não manda o LLM terceirizar o plano ao Gemini."""
+    arvore = _arvore(rel)
+    prompts = [
+        no.value.value for no in ast.walk(arvore)
+        if isinstance(no, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "SYSTEM_PROMPT" for t in no.targets)
+        and isinstance(no.value, ast.Constant)
+    ]
+    assert len(prompts) == 1
+    assert "REGRA DE OURO" not in prompts[0] and "analisar_log_complexo" not in prompts[0]
+    assert "matar_sessao_oracle" in prompts[0], "o prompt perdeu a regra de HITL"

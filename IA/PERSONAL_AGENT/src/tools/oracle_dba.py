@@ -2338,3 +2338,7 @@ oracle_tools_schema: List[Dict[str, Any]] = [
         },
     },
 ]
+
+# R1 ampliada V8 (decisao_c1.md §1 e §3.3): nomes das ferramentas Oracle, recusadas no despacho das interfaces
+# quando o coordenador é em nuvem (inclusive o kill, §3.5).
+NOMES_FERRAMENTAS_ORACLE = frozenset(f["function"]["name"] for f in oracle_tools_schema)
