@@ -895,3 +895,37 @@ def test_web_k5_t5_fechamento_pos_hitl_pelo_base_url_e_nao_pelo_bool(montar_web)
     assert amb.par_intencao_resultado()["resultado_banco"] == "ENCERRADA"
     assert len(amb.mensagens_llm) == 1, "o fechamento pós-HITL foi à nuvem com a sonda dizendo local"
     assert any(od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in t for t in amb.textos_tela())
+
+
+# =============================================================================
+# R1 ampliada fase 2, K7 (fase2/decisao_c1.md §8.6): tela sem o Gemini analisando o plano e C3 no log local
+# =============================================================================
+
+def test_web_k7_t3_tela_nao_promete_o_gemini_para_o_plano(montar_web):
+    """K7-T3 (A7.3; mata M_K7_TELA_*): a mensagem de boas-vindas e os botões de atalho não citam o Gemini."""
+    amb = montar_web([_linha_alvo()], kill_permitido=False)
+    amb.at.run()
+    assert not amb.at.exception
+    boas_vindas = amb.at.session_state.messages[0]["content"]
+    assert "Gemini" not in boas_vindas and "DBMS_XPLAN" in boas_vindas
+    rotulos = [b.label for b in amb.at.button]
+    assert "📈 Analisar Top SQL" in rotulos
+    assert not any("Gemini" in r for r in rotulos), rotulos
+
+
+def test_web_k7_t6_c3_detalhe_no_log_local(montar_web, monkeypatch, caplog):
+    """K7-T6 (mata R1_M10): como o test_cli_c3, a exceção de uma ferramenta na Web vai ao log local com o texto,
+    e ao LLM só o tipo."""
+    def _quebra(*a, **k):
+        raise RuntimeError("exc-sentinela")
+
+    amb = montar_web([_linha_alvo()], kill_permitido=False)
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    monkeypatch.setattr(od, "coletar_plano_execucao", _quebra)
+    amb.chamada = ("coletar_plano_execucao", {"sql_id": "abc123def4567"})
+    caplog.set_level(logging.WARNING)
+    _pedir(amb)
+
+    (tool,) = _tools_vistas(amb)
+    assert json.loads(tool["content"]) == {"erro_execucao": "RuntimeError"}
+    assert "exc-sentinela" in caplog.text

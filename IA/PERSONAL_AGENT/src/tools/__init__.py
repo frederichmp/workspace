@@ -14,10 +14,8 @@ from src.tools.os_tools import (
     coletar_disco_local,
     os_tools_schema,
 )
-from src.tools.gemini_router import (
-    analisar_log_complexo,
-    gemini_tools_schema,
-)
+# R1 ampliada fase 2, K7 (A7.3): analisar_log_complexo e gemini_tools_schema não são exportados (V9: o coordenador
+# não os recebe; o tools.gemini_router fica só como sonda do test_d63, importado pelas entradas).
 from src.tools.notificador import enviar_alerta_email
 from src.tools.rag_search import (
     buscar_script_interno,
@@ -34,8 +32,6 @@ __all__ = [
     "coletar_hardware_base",
     "coletar_disco_local",
     "os_tools_schema",
-    "analisar_log_complexo",
-    "gemini_tools_schema",
     "enviar_alerta_email",
     "buscar_script_interno",
     "rag_tools_schema",

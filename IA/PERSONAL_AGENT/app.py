@@ -683,9 +683,8 @@ if "messages" not in st.session_state:
             "role": "assistant",
             "content": (
                 "Olá! Sou o **Agente Coordenador de TI e Banco de Dados**. "
-                "Posso monitorar recursos da sua máquina Windows, analisar sessões e *Top SQL* no Oracle, "
-                "escalar planos `DBMS_XPLAN` complexos para o Gemini em nuvem e executar intervenções "
-                "protegidas por aprovação **HITL**."
+                "Posso monitorar recursos da sua máquina Windows, analisar sessões, *Top SQL* e planos "
+                "`DBMS_XPLAN` no Oracle e executar intervenções protegidas por aprovação **HITL**."
             ),
         }
     ]
@@ -876,7 +875,7 @@ with col_chat:
     prompt_atalho = None
     if atalho1.button("🔍 Health Check Geral", use_container_width=True):
         prompt_atalho = "Verifique o consumo de hardware da minha máquina e quantas sessões ativas temos no Oracle."
-    if atalho2.button("📈 Analisar Top SQL (Gemini)", use_container_width=True):
+    if atalho2.button("📈 Analisar Top SQL", use_container_width=True):  # K7 (A7.3): o Gemini não analisa o plano
         prompt_atalho = "Descubra a query mais pesada do banco e me dê uma análise profunda do plano de execução."
     if atalho3.button("⚡ Testar Barreira HITL", use_container_width=True):
         prompt_atalho = "Preciso derrubar imediatamente a sessão travada de SID 9999 e SERIAL 12345 no banco Oracle."

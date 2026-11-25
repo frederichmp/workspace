@@ -1082,3 +1082,234 @@ def test_k5_t4_sonda_e_fabrica_no_mesmo_destino(rel):
             "HOST_COORDENADOR_LOCAL", "PORTA_COORDENADOR_LOCAL"], ast.unparse(sonda)
     assert od.URL_COORDENADOR_LOCAL == f"http://{od.HOST_COORDENADOR_LOCAL}:{od.PORTA_COORDENADOR_LOCAL}/v1"
     assert od.URL_COORDENADOR_LOCAL == "http://127.0.0.1:11434/v1"
+
+
+# =============================================================================
+# R1 ampliada fase 2, K7 (fase2/decisao_c1.md §8.6): histórico, executor, restos do V9 e reforço da fase 1
+# =============================================================================
+
+class _MensagemObjeto:
+    def __init__(self, role, name=None, content=None):
+        self.role, self.name, self.content = role, name, content
+
+
+class _DictQueLevanta(dict):
+    def get(self, *a, **k):
+        raise RuntimeError("leitura quebrada")
+
+
+@pytest.mark.parametrize(
+    "mensagens, esperado",
+    [
+        ([_MensagemObjeto("tool", "coletar_sessoes_ativas", "{}")], True),
+        ([_MensagemObjeto("tool", "coletar_metricas_hardware", "{}")], False),
+        ([_MensagemObjeto("assistant", None, "texto")], False),
+        ([_MensagemObjeto(None)], True),
+        ([object()], True),
+        ([{"role": "desconhecido", "content": "x"}], True),
+        ([{"content": "x"}], True),
+        ([{"role": ["tool"], "content": "x"}], True),
+        ([_DictQueLevanta(role="tool")], True),
+        ([{"role": "tool", "name": "coletar_sessoes_ativas", "content": '{"x": "COORDENADOR_NUVEM"}'}], True),
+        ([{"role": "tool", "name": "coletar_sessoes_ativas", "content": od.RESULTADO_ORACLE_SO_LOCAL}], False),
+        ([{"role": "system", "content": "p"}, {"role": "user", "content": "u"}], False),
+    ],
+    ids=["objeto_tool_oracle", "objeto_tool_liberada", "objeto_assistant", "objeto_sem_role", "objeto_qualquer",
+         "role_desconhecido", "sem_role", "role_lista", "leitura_levanta", "literal_no_conteudo", "recusa_exata",
+         "system_user"],
+)
+def test_k7_t1_historico_falha_fechado(mensagens, esperado):
+    """K7-T1 (A7.1; mata R1_M7, R1_M8 e M_K7_*): objeto com role "tool" vale como dict; role desconhecido ou ausente,
+    e leitura que levanta, dão True; o salto da recusa é por igualdade exata (o literal COORDENADOR_NUVEM dentro de um
+    dado do banco não salta a trava)."""
+    assert od.historico_tem_dado_do_banco(mensagens) is esperado
+
+
+def test_k7_t2_executor_falha_de_leitura_sem_o_caminho(monkeypatch, ambiente_executor, caplog):
+    """K7-T2 (A7.2; mata M_K7_EXEC_SEM_TRY e M_K7_EXEC_SEM_LOG): o open do arquivo homologado levanta PermissionError
+    com o caminho; o retorno só tem o tipo, e o detalhe vai ao log local."""
+    import builtins
+    from src.tools import executor
+
+    original = builtins.open
+
+    def _open(arquivo, modo="r", *a, **k):
+        if "b" in modo and str(arquivo).endswith(".sql"):
+            raise PermissionError(13, "Permission denied", "C:\\dir-sentinela-scripts\\bloqueado.sql")
+        return original(arquivo, modo, *a, **k)
+
+    monkeypatch.setattr(executor, "open", _open, raising=False)
+    monkeypatch.setattr(oracledb, "connect", lambda *a, **k: pytest.fail("connect com o arquivo ilegível"))
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        texto = executor.executar_script("verificar_dual", {})
+
+    assert "dir-sentinela-scripts" not in texto
+    resultado = json.loads(texto)
+    assert resultado["motivo"] == "ERRO_LEITURA_ARQUIVO"
+    assert resultado["mensagem"] == "Falha ao ler o arquivo homologado: PermissionError."
+    assert "dir-sentinela-scripts" in caplog.text
+
+
+def test_k7_t3_pacote_e_prompt_sem_analisar_log_complexo():
+    """K7-T3 (A7.3; mata M_K7_INIT_* e M_K7_PROMPT_REGRA): src.tools não exporta analisar_log_complexo nem
+    gemini_tools_schema, e o system_prompt.txt não manda terceirizar o plano ao Gemini."""
+    import src.tools as pacote
+
+    for nome in ("analisar_log_complexo", "gemini_tools_schema"):
+        assert nome not in pacote.__all__ and not hasattr(pacote, nome)
+    espaco = {}
+    exec("from src.tools import *", espaco)
+    assert "analisar_log_complexo" not in espaco and "gemini_tools_schema" not in espaco
+    prompt = (RAIZ / "src" / "prompts" / "system_prompt.txt").read_text(encoding="utf-8")
+    assert "analisar_log_complexo" not in prompt and "REGRA DE OURO" not in prompt
+
+
+def test_k7_t4_erro_config_na_pre_consulta_sem_o_dsn(monkeypatch, rede):
+    """K7-T4 (mata R1_M4): ERRO_CONFIG de consultar_alvo_sessao_diag na pré-consulta, sem DSN e sem conexão."""
+    monkeypatch.delenv("ORACLE_USER_DIAG")
+    monkeypatch.setattr(oracledb, "connect", lambda *a, **k: pytest.fail("connect sem credencial DIAG"))
+    prep = od.preparar_intervencao_kill(dict(ARGS), caminho_log=None)
+
+    _sem_vazamento(prep["resultado_tool"], "preparar:erro_config")
+    assert json.loads(prep["resultado_tool"])["motivo"] == "ERRO_CONFIG"
+
+
+def test_k7_t4_erro_config_na_reconsulta_sem_o_dsn(monkeypatch, rede, tmp_path):
+    """K7-T4 (mata R1_M4 pela reconsulta): a conta DIAG some entre o prompt e a reconsulta; o ERRO_CONFIG da
+    reconsulta vai ao LLM sem o DSN, e a conta KILL não é conectada."""
+    fake = _OracleFake([_linha_alvo(), _linha_alvo()], kill_permitido=False)
+    monkeypatch.setattr(oracledb, "connect", fake.connect)
+
+    def _aprovar_e_tirar_diag(prep):
+        monkeypatch.delenv("ORACLE_USER_DIAG")
+        return "APROVADO", APROVADOR_SENTINELA, None
+
+    desfecho = od.conduzir_kill_hitl(dict(ARGS), solicitar_aprovacao=_aprovar_e_tirar_diag, canal="TESTE",
+                                     caminho_log=tmp_path / "k.log")
+
+    _sem_vazamento(desfecho["resultado_tool"], "reconsulta:erro_config")
+    assert desfecho["resultado_banco"] == "ERRO_CONFIG"
+    assert fake.conexoes_kill == []
+
+
+def test_k7_t5_executor_ddl_sem_o_dsn(monkeypatch, ambiente_executor, tmp_path):
+    """K7-T5 (mata R1_M5): o ramo DDL do executor não leva o DSN. Registro fake por monkeypatch (obter_script e
+    obter_caminho_scripts_dir), com o sha256 calculado aqui: registry/ não é tocado."""
+    import hashlib
+    from src.tools import executor
+    from src.tools.registry import obter_script
+
+    sql = b"CREATE TABLE t_k7_sentinela (id NUMBER)\n"
+    (tmp_path / "ddl_k7.sql").write_bytes(sql)
+    entrada = obter_script("verificar_dual").model_copy(
+        update={"script_id": "ddl_k7", "arquivo": "ddl_k7.sql", "sha256": hashlib.sha256(sql).hexdigest(),
+                "tipo": "DDL", "binds": []}
+    )
+    monkeypatch.setattr(executor, "obter_script", lambda script_id: entrada)
+    monkeypatch.setattr(executor, "obter_caminho_scripts_dir", lambda: tmp_path)
+    monkeypatch.setattr(oracledb, "connect", lambda *a, **k: _ConexaoExecutor())
+    texto = executor.executar_script("ddl_k7", {})
+    resultado = json.loads(texto)
+
+    assert resultado["status"] == "sucesso" and resultado["tipo"] == "DDL", texto
+    _sem_vazamento(texto.replace(resultado["sha256_verificado"], ""), "executor:ddl")
+
+
+def test_k7_t5_executor_excecao_no_caminho_sem_o_diretorio(monkeypatch, ambiente_executor, caplog):
+    """K7-T5 (mata R1_M6): uma exceção no resolve() do caminho do script (ramo except, não o is_relative_to) dá
+    PATH_INVALIDO só com o tipo; o diretório vai ao log local."""
+    from src.tools import executor
+
+    class _Alvo:
+        def resolve(self):
+            raise OSError("falha em C:\\dir-sentinela-scripts\\x.sql")
+
+    class _Diretorio:
+        def resolve(self):
+            return self
+
+        def __truediv__(self, outro):
+            return _Alvo()
+
+        def __str__(self):
+            return "C:\\dir-sentinela-scripts"
+
+    monkeypatch.setattr(executor, "obter_caminho_scripts_dir", lambda: _Diretorio())
+    monkeypatch.setattr(oracledb, "connect", lambda *a, **k: pytest.fail("connect com caminho inválido"))
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        texto = executor.executar_script("verificar_dual", {})
+
+    assert "dir-sentinela-scripts" not in texto
+    resultado = json.loads(texto)
+    assert resultado["motivo"] == "PATH_INVALIDO" and resultado["mensagem"].endswith("OSError.")
+    assert "dir-sentinela-scripts" in caplog.text
+
+
+SENTINELA_DO_RAMO_K7 = {"erro_oracle": "texto-sentinela", "excecao": "exc-sentinela", "rede": "rede-sentinela"}
+
+
+@pytest.mark.parametrize("ferramenta", list(FERRAMENTAS_DIAG))
+@pytest.mark.parametrize("ramo", ["erro_oracle", "excecao", "rede"])
+def test_k7_t6_diagnostico_leva_o_detalhe_ao_log_local(monkeypatch, rede, caplog, ferramenta, ramo):
+    """K7-T6 (mata R1_M11): o texto que sai do retorno ao LLM chega ao log local (_registrar_erro_local), em cada
+    ramo de erro das 3 ferramentas de diagnóstico."""
+    if ramo == "rede":
+        rede["falha_em"] = "sempre"
+    _instalar_diag(monkeypatch, erro_connect=ERRO_ORA if ramo == "erro_oracle" else None,
+                   erro_cursor=ERRO_EXC if ramo == "excecao" else None)
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        texto = FERRAMENTAS_DIAG[ferramenta]()
+
+    _sem_vazamento(texto, f"{ferramenta}:{ramo}")
+    detalhes = [r.getMessage() for r in caplog.records if "DETALHE LOCAL" in r.getMessage()]
+    assert any(SENTINELA_DO_RAMO_K7[ramo] in m for m in detalhes), detalhes
+
+
+@pytest.mark.parametrize("ramo", ["erro_oracle", "excecao", "rede", "protegido"])
+def test_k7_t6_pre_consulta_leva_o_detalhe_ao_log_local(monkeypatch, rede, caplog, ramo):
+    """K7-T6 (mata R1_M11 na pré-consulta): o detalhe do erro, ou o usuário protegido, fica no log local."""
+    linhas = [_linha_alvo(username="STARTUPADMIN")] if ramo == "protegido" else [_linha_alvo()]
+    fake = _OracleFake(linhas, kill_permitido=False)
+    connect = fake.connect
+    if ramo in ("erro_oracle", "excecao"):
+        connect = _connect_diag_falhando_na(fake, 1, ERRO_ORA if ramo == "erro_oracle" else ERRO_EXC)
+    if ramo == "rede":
+        rede["falha_em"] = "sempre"
+    monkeypatch.setattr(oracledb, "connect", connect)
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        prep = od.preparar_intervencao_kill(dict(ARGS), caminho_log=None)
+
+    _sem_vazamento(prep["resultado_tool"], f"preparar:{ramo}")
+    assert ({**SENTINELA_DO_RAMO_K7, "protegido": "STARTUPADMIN"}[ramo]) in caplog.text
+
+
+def test_k7_t6_reconsulta_de_usuario_protegido_leva_o_username_ao_log_local(monkeypatch, rede, caplog):
+    """K7-T6 (mata R1_M11 no log de usuário protegido da reconsulta): o username fica no log local, nunca no LLM."""
+    alvo = dict(zip([c.lower() for c in COLUNAS_ALVO], _linha_alvo(username="STARTUPADMIN")))
+    monkeypatch.setattr(oracledb, "connect", _OracleFake([_linha_alvo(username="STARTUPADMIN")]).connect)
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        texto = od.executar_kill_verificado(
+            inst_id=1, sid=101, serial=202, hash_aprovado=calcular_hash_identidade(alvo),
+            aprovacao_expirada=lambda: False, ref_aprovacao=REF,
+        )
+
+    _sem_vazamento(texto, "reconsulta:protegido")
+    assert "STARTUPADMIN" in caplog.text
+
+
+@pytest.mark.parametrize("ramo", ["erro_oracle", "excecao"])
+def test_k7_t6_executor_leva_o_detalhe_ao_log_local(monkeypatch, ambiente_executor, caplog, ramo):
+    """K7-T6 (mata R1_M11 no executor): o texto do erro do Oracle ou da exceção fica no log local."""
+    from src.tools.executor import executar_script
+
+    def connect(*a, **k):
+        if ramo == "erro_oracle":
+            raise ERRO_ORA
+        return _ConexaoExecutor(ERRO_EXC)
+
+    monkeypatch.setattr(oracledb, "connect", connect)
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        texto = executar_script("verificar_dual", {})
+
+    assert SENTINELA_DO_RAMO_K7[ramo] not in texto
+    assert SENTINELA_DO_RAMO_K7[ramo] in caplog.text

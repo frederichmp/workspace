@@ -262,21 +262,33 @@ def coordenador_e_local(client: Any) -> bool:
         return False
 
 
+_PAPEIS_DE_MENSAGEM = frozenset({"system", "user", "assistant", "tool"})
+
+
 def historico_tem_dado_do_banco(mensagens: Any) -> bool:
     """
-    V8, trava de histórico (decisao_c1.md §3.4; fase 2, K2): True se alguma mensagem role "tool" (fora a recusa fixa
-    RESULTADO_ORACLE_SO_LOCAL) veio de ferramenta não liberada para a nuvem (ferramenta_liberada_nuvem). Lista de
-    permissão: nome ausente ou desconhecido, RAG e recusa do kill contam como dado local. Entrada que não é lista: True.
+    V8, trava de histórico (decisao_c1.md §3.4; fase 2, K2 e K7): True se alguma mensagem role "tool" (fora a recusa
+    fixa RESULTADO_ORACLE_SO_LOCAL) veio de ferramenta não liberada para a nuvem (ferramenta_liberada_nuvem). Lista de
+    permissão: nome ausente ou desconhecido, RAG e recusa do kill contam como dado local. Dict ou objeto (role, name e
+    content por getattr, como o ChatCompletionMessage que a CLI anexa) valem igual; role fora de system/user/assistant/
+    tool, entrada que não é lista ou exceção: True (falha fechada, K7).
     """
     try:
         if not isinstance(mensagens, (list, tuple)):
             return True
         for mensagem in mensagens:
-            if not isinstance(mensagem, dict) or mensagem.get("role") != "tool":
+            if isinstance(mensagem, dict):
+                papel, nome, conteudo = mensagem.get("role"), mensagem.get("name"), mensagem.get("content")
+            else:
+                papel = getattr(mensagem, "role", None)
+                nome, conteudo = getattr(mensagem, "name", None), getattr(mensagem, "content", None)
+            if papel not in _PAPEIS_DE_MENSAGEM:
+                return True
+            if papel != "tool":
                 continue
-            if mensagem.get("content") == RESULTADO_ORACLE_SO_LOCAL:
+            if conteudo == RESULTADO_ORACLE_SO_LOCAL:
                 continue
-            if not ferramenta_liberada_nuvem(mensagem.get("name")):
+            if not ferramenta_liberada_nuvem(nome):
                 return True
         return False
     except Exception:

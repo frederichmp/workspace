@@ -645,8 +645,22 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
     # -------------------------------------------------------------------------
     # REGRA 4: Calcular sha256 dos bytes brutos
     # -------------------------------------------------------------------------
-    with open(caminho_arquivo, "rb") as f:
-        bytes_brutos = f.read()
+    # R1 ampliada fase 2, K7 (A7.2): falha de leitura (lock, permissão) não propaga o caminho; o detalhe vai ao log.
+    try:
+        with open(caminho_arquivo, "rb") as f:
+            bytes_brutos = f.read()
+    except OSError as e:
+        _registrar_erro_local("executar_script", "ERRO_LEITURA_ARQUIVO", exc=e)
+        return json.dumps(
+            {
+                "status": "recusado",
+                "motivo": "ERRO_LEITURA_ARQUIVO",
+                "script_id": script_id,
+                "sha256_verificado": None,
+                "mensagem": f"Falha ao ler o arquivo homologado: {type(e).__name__}.",
+            },
+            ensure_ascii=False,
+        )
     sha256_calculado = hashlib.sha256(bytes_brutos).hexdigest()
 
     if sha256_calculado != registro.sha256:

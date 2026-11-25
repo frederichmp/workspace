@@ -52,7 +52,9 @@ class _LLMFalso:
                 id="call_1",
                 function=SimpleNamespace(name=self.nome, arguments=json.dumps(self.argumentos)),
             )
-            msg = SimpleNamespace(content=None, tool_calls=[tool_call])
+            # Fase 2, K7 (falso fiel ao ChatCompletionMessage; declarado em decisao_c1.md §8.6): com o role, a
+            # trava de histórico (que agora falha fechado para role desconhecido) vê o assistant como no real.
+            msg = SimpleNamespace(role="assistant", content=None, tool_calls=[tool_call])
         else:
             msg = SimpleNamespace(content="Resposta final do agente falso.", tool_calls=None)
         return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
