@@ -146,11 +146,14 @@ from tools.oracle_dba import (
     APROVACAO_TTL_SEGUNDOS,
     MENSAGEM_RESULTADO_DESCONHECIDO,
     MENSAGEM_DESFECHO_NAO_CONFIRMADO,
+    HOST_COORDENADOR_LOCAL,
     NOME_FERRAMENTA_KILL,
+    PORTA_COORDENADOR_LOCAL,
     RESULTADO_KILL_DESABILITADO,
     RESULTADO_ORACLE_SO_LOCAL,
     TEXTO_HISTORICO_COM_DADO_DO_BANCO,
     _registrar_erro_local,
+    criar_cliente_coordenador_local,
     ferramenta_liberada_nuvem,
     ferramentas_do_coordenador,
     kill_habilitado,
@@ -171,14 +174,15 @@ from tools.rag_search import (
 
 def _inicializar_cliente_coordenador() -> tuple[OpenAI, str]:
     """
-    Conecta prioritariamente ao Ollama local (http://localhost:11434/v1 com qwen2.5:7b).
+    Conecta prioritariamente ao Ollama local (URL_COORDENADOR_LOCAL, http://127.0.0.1:11434/v1, com qwen2.5:7b),
+    pela fábrica única (K5: sem proxy e sem redirect).
     Caso o serviço local do Ollama não esteja ativo na máquina no momento do teste,
     ativa automaticamente o endpoint compatível OpenAI usando a GEMINI_API_KEY do .env.
     """
     try:
-        with socket.create_connection(("127.0.0.1", 11434), timeout=0.5):
+        with socket.create_connection((HOST_COORDENADOR_LOCAL, PORTA_COORDENADOR_LOCAL), timeout=0.5):
             return (
-                OpenAI(base_url="http://localhost:11434/v1", api_key="local"),
+                criar_cliente_coordenador_local(),
                 "qwen2.5:7b",
             )
     except OSError:

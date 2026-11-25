@@ -155,11 +155,14 @@ from tools.oracle_dba import (
     APROVACAO_TTL_SEGUNDOS,
     MENSAGEM_RESULTADO_DESCONHECIDO,
     MENSAGEM_DESFECHO_NAO_CONFIRMADO,
+    HOST_COORDENADOR_LOCAL,
     NOME_FERRAMENTA_KILL,
+    PORTA_COORDENADOR_LOCAL,
     RESULTADO_KILL_DESABILITADO,
     RESULTADO_ORACLE_SO_LOCAL,
     TEXTO_HISTORICO_COM_DADO_DO_BANCO,
     _registrar_erro_local,
+    criar_cliente_coordenador_local,
     ferramenta_liberada_nuvem,
     ferramentas_do_coordenador,
     kill_habilitado,
@@ -196,9 +199,10 @@ DIRETRIZES DE COMPORTAMENTO E DELEGAÇÃO:
 # 2. CONEXÃO COM O MOTOR LLM E VERIFICAÇÕES DE STATUS
 # ==============================================================================
 def verificar_status_ollama() -> bool:
-    """Verifica via socket rápido se o serviço Ollama local está respondendo na porta 11434."""
+    """Verifica via socket rápido se o serviço Ollama local está respondendo na porta 11434 (mesmo destino do
+    cliente local; K5)."""
     try:
-        with socket.create_connection(("127.0.0.1", 11434), timeout=0.4):
+        with socket.create_connection((HOST_COORDENADOR_LOCAL, PORTA_COORDENADOR_LOCAL), timeout=0.4):
             return True
     except OSError:
         return False
@@ -211,7 +215,7 @@ def obter_cliente_llm() -> tuple[OpenAI, str, bool]:
     """
     if verificar_status_ollama():
         return (
-            OpenAI(base_url="http://localhost:11434/v1", api_key="local"),
+            criar_cliente_coordenador_local(),  # K5: 127.0.0.1, sem proxy e sem redirect
             os.getenv("MODEL_NAME", "qwen2.5:7b"),
             True,
         )

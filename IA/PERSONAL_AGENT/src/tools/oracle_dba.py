@@ -177,7 +177,29 @@ def ferramenta_liberada_nuvem(nome: Any) -> bool:
     except Exception:
         return False
 
-_HOSTS_COORDENADOR_LOCAL = frozenset({"localhost", "127.0.0.1", "::1"})
+# R1 ampliada fase 2, K5 (fase2/decisao_c1.md §8.4; A3 e A4 da revisão adversarial): o coordenador local é um só
+# destino, em IP literal (sem resolução de nome), o mesmo da sonda. "localhost" deixa de ser aceito.
+HOST_COORDENADOR_LOCAL = "127.0.0.1"
+PORTA_COORDENADOR_LOCAL = 11434
+URL_COORDENADOR_LOCAL = f"http://{HOST_COORDENADOR_LOCAL}:{PORTA_COORDENADOR_LOCAL}/v1"
+_HOSTS_COORDENADOR_LOCAL = frozenset({"127.0.0.1", "::1"})
+_CAMINHOS_COORDENADOR_LOCAL = frozenset({"/v1", "/v1/"})
+
+
+def criar_cliente_coordenador_local() -> Any:
+    """
+    Fábrica única do cliente do coordenador local (K5), usada por app.py e src/main.py: base_url em
+    URL_COORDENADOR_LOCAL e cliente HTTP sem proxy de ambiente ou do sistema (trust_env=False) e sem seguir
+    redirecionamento (follow_redirects=False). O openai é importado aqui (o módulo não depende dele no import, e o
+    monkeypatch de openai.OpenAI dos testes continua valendo).
+    """
+    import openai
+
+    return openai.OpenAI(
+        base_url=URL_COORDENADOR_LOCAL,
+        api_key="local",
+        http_client=openai.DefaultHttpxClient(trust_env=False, follow_redirects=False),
+    )
 
 
 def _codigo_erro(exc: BaseException) -> str:
@@ -218,15 +240,24 @@ def _registrar_erro_local(
 
 def coordenador_e_local(client: Any) -> bool:
     """
-    V8 (decisao_c1.md §3.1): o coordenador é local só se o base_url do próprio cliente que envia aponta para
-    localhost, 127.0.0.1 ou ::1 (hostname exato, sem substring). Sem atributo, exceção ou outro host: False
-    (falha fechada).
+    V8 (decisao_c1.md §3.1), estrito desde o K5 (fase2/decisao_c1.md §8.4): o coordenador é local só se o base_url
+    do próprio cliente que envia é http, host 127.0.0.1 ou ::1 (hostname exato; "localhost" não), porta 11434, sem
+    usuário nem senha, caminho /v1 e sem query nem fragmento. Não lê atributo privado do openai nem do httpx2 (o
+    transporte sem proxy e sem redirect vem da fábrica). Sem atributo, exceção ou qualquer outra forma: False.
     """
     try:
         from urllib.parse import urlsplit
 
-        host = urlsplit(str(client.base_url)).hostname
-        return host in _HOSTS_COORDENADOR_LOCAL
+        partes = urlsplit(str(client.base_url))
+        return (
+            partes.scheme == "http"
+            and partes.hostname in _HOSTS_COORDENADOR_LOCAL
+            and partes.port == PORTA_COORDENADOR_LOCAL
+            and "@" not in partes.netloc  # sem userinfo (usuário e/ou senha), inclusive "@" vazio
+            and partes.path in _CAMINHOS_COORDENADOR_LOCAL
+            and not partes.query
+            and not partes.fragment
+        )
     except Exception:
         return False
 

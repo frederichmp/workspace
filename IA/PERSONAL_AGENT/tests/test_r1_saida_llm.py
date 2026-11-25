@@ -349,7 +349,8 @@ def test_r1_registrar_erro_local_leva_o_detalhe_ao_log_e_nunca_levanta(caplog):
 @pytest.mark.parametrize(
     "base_url, esperado",
     [
-        ("http://localhost:11434/v1", True), ("http://127.0.0.1:11434/v1", True), ("http://[::1]:11434/v1", True),
+        # Fase 2, K5 (expectativa alterada, declarada; decisao_c1.md §8.4): o cliente local é 127.0.0.1, não localhost.
+        ("http://localhost:11434/v1", False), ("http://127.0.0.1:11434/v1", True), ("http://[::1]:11434/v1", True),
         ("https://generativelanguage.googleapis.com/v1beta/openai/", False),
         ("http://localhost.evil.com/v1", False), ("http://127.0.0.1.nip.io/v1", False), ("", False),
     ],
@@ -974,3 +975,110 @@ def test_k3_t4_rag_excecao_so_com_o_tipo(monkeypatch, caplog, tmp_path):
     assert SENTINELA_RC not in texto and "sentinela-dir" not in texto
     assert json.loads(texto) == {"status": "erro", "consulta": "tema", "mensagem": "Erro RuntimeError."}
     assert SENTINELA_RC in caplog.text and "sentinela-dir" in caplog.text
+
+
+# =============================================================================
+# R1 ampliada fase 2, K5 (fase2/decisao_c1.md §8.4; A3 e A4 da revisão adversarial): cliente local
+# =============================================================================
+
+PROXY_SENTINELA = "http://proxy-sentinela.invalid:3128"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://localhost:80/v1", "http://localhost:9999/v1", "https://localhost/v1", "ftp://localhost/v1",
+     "http://user:pass@127.0.0.1:11434/v1", "http://@127.0.0.1:11434/v1", "//127.0.0.1:11434/v1",
+     "http://evil-localhost:11434/v1", "http://notlocalhost:11434/v1", "http://localhost:11434/v1",
+     "http://127.0.0.1:99999/v1", "http://127.0.0.1:11434/v1?x=1", "http://127.0.0.1:11434/v1#x",
+     "http://127.0.0.1:11434/outro", "http://127.0.0.1/v1", "https://127.0.0.1:11434/v1", "HTTP://127.0.0.2:11434/v1"],
+)
+def test_k5_t1_coordenador_e_local_estrito_recusa(base_url):
+    """K5-T1 (mata R1_M12 e M_K5_SEM_*): esquema, porta, userinfo, caminho, query, fragmento e host (inclusive
+    localhost e sufixo/prefixo de localhost) fora do exato dão False."""
+    class _Cliente:
+        pass
+
+    cliente = _Cliente()
+    cliente.base_url = base_url
+    assert od.coordenador_e_local(cliente) is False
+
+
+@pytest.mark.parametrize("base_url", ["http://127.0.0.1:11434/v1", "http://127.0.0.1:11434/v1/", "http://[::1]:11434/v1"])
+def test_k5_t1_coordenador_e_local_estrito_aceita(base_url):
+    class _Cliente:
+        pass
+
+    cliente = _Cliente()
+    cliente.base_url = base_url
+    assert od.coordenador_e_local(cliente) is True
+
+
+def test_k5_t2_fabrica_ignora_proxy_do_ambiente_e_nao_segue_redirect(monkeypatch):
+    """K5-T2 (mata M_K5_TRUST_ENV, M_K5_REDIRECT e M_K5_SEM_HTTP_CLIENT): com HTTP_PROXY, HTTPS_PROXY e ALL_PROXY
+    (e minúsculas) no ambiente, a chamada do cliente da fábrica só tenta 127.0.0.1:11434, nunca o proxy; o cliente
+    HTTP tem trust_env e follow_redirects desligados (propriedades públicas). Sem rede: create_connection levanta."""
+    import socket
+    import openai
+
+    for nome in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        monkeypatch.setenv(nome, PROXY_SENTINELA)
+    criados = []
+    original = openai.DefaultHttpxClient
+
+    def _registrar(*a, **k):
+        cliente_http = original(*a, **k)
+        criados.append(cliente_http)
+        return cliente_http
+
+    monkeypatch.setattr(openai, "DefaultHttpxClient", _registrar)
+    destinos = []
+
+    def _create_connection(endereco, *a, **k):
+        destinos.append(tuple(endereco)[:2])
+        raise OSError("rede neutralizada no teste")
+
+    monkeypatch.setattr(socket, "create_connection", _create_connection)
+    cliente = od.criar_cliente_coordenador_local()
+    assert od.coordenador_e_local(cliente) is True
+    with pytest.raises(openai.APIConnectionError):
+        cliente.with_options(max_retries=0).chat.completions.create(model="x", messages=[{"role": "user", "content": "x"}])
+
+    assert destinos == [("127.0.0.1", 11434)], destinos
+    assert len(criados) == 1
+    assert criados[0].trust_env is False and criados[0].follow_redirects is False
+
+
+def _literais_de_loopback(no):
+    return [
+        c.value for c in ast.walk(no)
+        if isinstance(c, ast.Constant) and isinstance(c.value, str)
+        and any(x in c.value for x in ("localhost", "127.0.0.1", "::1", "11434"))
+    ]
+
+
+@pytest.mark.parametrize("rel", ["app.py", "src/main.py"])
+def test_k5_t3_cliente_local_so_pela_fabrica(rel):
+    """K5-T3, AST (mata M_K5_*_CLIENTE_DIRETO): nenhum OpenAI( nas interfaces recebe base_url de loopback; o cliente
+    local vem só de criar_cliente_coordenador_local()."""
+    arvore = _arvore(rel)
+    chamadas = [no for no in ast.walk(arvore) if isinstance(no, ast.Call)]
+    openai_locais = [
+        ast.unparse(no)[:80] for no in chamadas
+        if _nome_da_chamada(no) == "OpenAI" and any(_literais_de_loopback(k.value) for k in no.keywords)
+    ]
+    assert openai_locais == []
+    assert any(_nome_da_chamada(no) == "criar_cliente_coordenador_local" for no in chamadas)
+
+
+@pytest.mark.parametrize("rel", ["app.py", "src/main.py"])
+def test_k5_t4_sonda_e_fabrica_no_mesmo_destino(rel):
+    """K5-T4 (mata M_K5_*_SONDA_LITERAL e M_K5_URL_LOCALHOST): a sonda usa (HOST_COORDENADOR_LOCAL,
+    PORTA_COORDENADOR_LOCAL), sem literal; e a URL da fábrica é feita dessas mesmas constantes."""
+    sondas = [no for no in ast.walk(_arvore(rel)) if isinstance(no, ast.Call) and _nome_da_chamada(no) == "create_connection"]
+    assert sondas
+    for sonda in sondas:
+        alvo = sonda.args[0]
+        assert isinstance(alvo, ast.Tuple) and [getattr(e, "id", None) for e in alvo.elts] == [
+            "HOST_COORDENADOR_LOCAL", "PORTA_COORDENADOR_LOCAL"], ast.unparse(sonda)
+    assert od.URL_COORDENADOR_LOCAL == f"http://{od.HOST_COORDENADOR_LOCAL}:{od.PORTA_COORDENADOR_LOCAL}/v1"
+    assert od.URL_COORDENADOR_LOCAL == "http://127.0.0.1:11434/v1"

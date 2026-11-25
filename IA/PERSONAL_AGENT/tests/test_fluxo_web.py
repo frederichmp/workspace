@@ -613,7 +613,7 @@ def test_web_w1_catalogo_local_tem_oracle_e_nuvem_nao(montar_web):
     local = montar_web([_linha_alvo()], kill_permitido=False)
     local.chamada = ("ferramenta_inexistente", {})
     _pedir(local)
-    assert local.bases_llm[0] == "http://localhost:11434/v1"
+    assert local.bases_llm[0] == "http://127.0.0.1:11434/v1"  # Fase 2, K5 (expectativa alterada, declarada; decisao_c1.md §8.4): o cliente local é 127.0.0.1, não localhost.
     assert NOMES_ORACLE <= _nomes(local.tools_llm[0])
     assert "analisar_log_complexo" not in _nomes(local.tools_llm[0])
 
@@ -745,7 +745,7 @@ def test_web_k1_t3_sem_gate_kill_fora_do_catalogo_e_despacho_recusa(montar_web, 
     monkeypatch.setattr(od, "preparar_intervencao_kill", _preparar_espiao)
     _pedir(amb)
 
-    assert amb.bases_llm[0] == "http://localhost:11434/v1"
+    assert amb.bases_llm[0] == "http://127.0.0.1:11434/v1"  # Fase 2, K5 (expectativa alterada, declarada; decisao_c1.md §8.4): o cliente local é 127.0.0.1, não localhost.
     nomes = _nomes(amb.tools_llm[0])
     assert "matar_sessao_oracle" not in nomes and (NOMES_ORACLE - {"matar_sessao_oracle"}) <= nomes
     assert chamadas == []
@@ -873,4 +873,25 @@ def test_web_k2_t6_historico_com_rag_nao_vai_a_nuvem(montar_web, monkeypatch):
     assert not amb.at.exception
     assert len(amb.mensagens_llm) == 2, "o histórico com conteúdo do RAG foi à nuvem"
     assert URL_GEMINI not in amb.bases_llm
+    assert any(od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in t for t in amb.textos_tela())
+
+
+# =============================================================================
+# R1 ampliada fase 2, K5 (fase2/decisao_c1.md §8.4): fechamento pós-HITL pelo base_url (K5-T5)
+# =============================================================================
+
+def test_web_k5_t5_fechamento_pos_hitl_pelo_base_url_e_nao_pelo_bool(montar_web):
+    """K5-T5 (mata R1_M2): o painel abre com o coordenador local; antes do clique a sonda segue "local" (o bool de
+    obter_cliente_llm é True), mas o cliente devolvido diz o Gemini. O kill é decidido e gravado, e o fechamento
+    não vai à nuvem: vale o base_url do cliente que envia (decisao_c1.md §3.1)."""
+    linha = _linha_alvo()
+    amb = montar_web([linha, linha], status_pkg="ENCERRADA")
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    _ate_painel_hitl(amb)
+    amb.base_url_forcado = URL_GEMINI
+
+    _decidir(amb, "btn_hitl_approve", "dba_teste")
+
+    assert amb.par_intencao_resultado()["resultado_banco"] == "ENCERRADA"
+    assert len(amb.mensagens_llm) == 1, "o fechamento pós-HITL foi à nuvem com a sonda dizendo local"
     assert any(od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in t for t in amb.textos_tela())

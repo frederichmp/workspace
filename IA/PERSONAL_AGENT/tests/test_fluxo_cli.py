@@ -36,7 +36,8 @@ class _LLMFalso:
     Expectativa alterada, declarada (R1 ampliada, r1_ampliada/decisao_c1.md §8.5): o falso ganha base_url, local
     por padrão, porque com o coordenador em nuvem as ferramentas Oracle (e o kill) são recusadas (decisão 5.2.1)."""
 
-    def __init__(self, base_url="http://localhost:11434/v1", nome="matar_sessao_oracle", argumentos=None):
+    # Fase 2, K5 (expectativa alterada, declarada; decisao_c1.md §8.4): o cliente local é 127.0.0.1, não localhost.
+    def __init__(self, base_url="http://127.0.0.1:11434/v1", nome="matar_sessao_oracle", argumentos=None):
         self.base_url = base_url
         self.nome, self.argumentos = nome, (ARGS_KILL if argumentos is None else argumentos)
         self.chamadas = []  # cópia da lista de mensagens recebida em cada chamada
