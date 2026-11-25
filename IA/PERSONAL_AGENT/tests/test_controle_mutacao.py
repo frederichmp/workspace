@@ -151,6 +151,40 @@ def test_matar_arvore_usa_taskkill_com_a_arvore():
     assert chamadas == [["taskkill", "/F", "/T", "/PID", "4242"]]
 
 
+def test_km_ambiente_do_filho_tira_credenciais_gate_proxy_e_ollama():
+    """KM (plano 9.9; mata M_KM_*): o filho não recebe ORACLE_*, EMAIL_*, GEMINI_*, OPS_KILL_*, OLLAMA_* nem *_PROXY,
+    em qualquer caixa; o resto passa (positivo), e o bytecode fica desligado. Dict puro: o ambiente do pytest não muda."""
+    fora = {
+        "ORACLE_SANDBOX": "1", "oracle_user_diag": "x", "ORACLE_DSN": "x", "Email_Senha_App": "x",
+        "GEMINI_API_KEY": "x", "OPS_KILL_PKG_VERSAO": "2", "ops_kill_outra": "x", "OLLAMA_HOST": "x",
+        "ollama_base_url": "x", "HTTP_PROXY": "x", "https_proxy": "x", "ALL_PROXY": "x", "No_Proxy": "x",
+    }
+    fica = {"PATH": "p", "SYSTEMROOT": "s", "AGENTDBA_LOG_DIR": "l", "ORACLEHOME": "o", "PROXYCHAINS": "c"}
+    env = cm.ambiente_do_filho({**fora, **fica})
+    assert env == {**fica, "PYTHONDONTWRITEBYTECODE": "1"}
+
+
+def test_km_rodar_testes_entrega_ao_filho_o_ambiente_filtrado(monkeypatch):
+    """KM (mata M_KM_RODAR_SEM_FILTRO): _rodar_testes passa ao filho o ambiente_do_filho(os.environ). Só chaves
+    fictícias são definidas aqui; o ORACLE_SANDBOX do processo não é tocado (CLAUDE.md)."""
+    monkeypatch.setenv("GEMINI_API_KEY", "chave-ficticia-km")
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy-sentinela.invalid:3128")
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
+    monkeypatch.setenv("SENTINELA_KM_FICA", "1")
+    capturado = {}
+
+    def _executar(cmd, cwd, env, timeout):
+        capturado["env"] = env
+        return 0, ""
+
+    monkeypatch.setattr(cm, "_executar", _executar)
+    cm._rodar_testes(".", ["tests/x.py"])
+    env = capturado["env"]
+    assert env == cm.ambiente_do_filho(dict(cm.os.environ))
+    assert "GEMINI_API_KEY" not in env and "HTTP_PROXY" not in env and "OPS_KILL_PKG_VERSAO" not in env
+    assert env["SENTINELA_KM_FICA"] == "1" and env["PYTHONDONTWRITEBYTECODE"] == "1"
+
+
 def test_gravar_nao_sobrescreve(tmp_path):
     alvo = tmp_path / "saida.txt"
     alvo.write_text("anterior", encoding="utf-8")

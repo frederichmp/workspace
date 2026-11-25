@@ -42,6 +42,10 @@ RE_CONTAGEM = re.compile(r"(\d+) (failed|passed|errors?)\b")
 # no início da linha, e o pytest.exit ("! _pytest.outcomes.Exit: ..."). O mesmo texto citado na fonte ou
 # no repr de um teste que falhou fica indentado e não conta.
 RE_GOVERNANCA = re.compile(r"^(?:FALHA DE GOVERNANCA:|!+ _pytest\.outcomes\.Exit: FALHA DE GOVERNANCA:)", re.MULTILINE)
+# Norma dos mutantes (docs/plans/1.11-R1-ampliada.md 9.9, passo KM): o filho que roda os testes da cópia não recebe
+# ORACLE_* (inclui ORACLE_SANDBOX), EMAIL_*, GEMINI_*, OPS_KILL_*, OLLAMA_* nem *_PROXY, sem diferenciar maiúsculas.
+PREFIXOS_FORA_DO_FILHO = ("ORACLE_", "EMAIL_", "GEMINI_", "OPS_KILL_", "OLLAMA_")
+SUFIXOS_FORA_DO_FILHO = ("_PROXY",)
 
 
 # ---------- funções puras (testadas em tests/test_controle_mutacao.py) ----------
@@ -187,10 +191,20 @@ def _executar(cmd, cwd, env, timeout, popen=subprocess.Popen):
         return None, (saida or b"").decode("utf-8", "replace")
 
 
-def _rodar_testes(copia, testes):
-    env = {k: v for k, v in os.environ.items() if k.upper() != "ORACLE_SANDBOX"}
+def ambiente_do_filho(ambiente):
+    """Cópia de `ambiente` para o filho: sem credenciais, ORACLE_SANDBOX, gate do kill, Ollama e proxy (norma KM)."""
+    env = {}
+    for chave, valor in ambiente.items():
+        nome = chave.upper()
+        if nome.startswith(PREFIXOS_FORA_DO_FILHO) or nome.endswith(SUFIXOS_FORA_DO_FILHO):
+            continue
+        env[chave] = valor
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    return _executar([sys.executable, *ARGS_PYTEST, *testes], copia, env, TIMEOUT_TESTE)
+    return env
+
+
+def _rodar_testes(copia, testes):
+    return _executar([sys.executable, *ARGS_PYTEST, *testes], copia, ambiente_do_filho(os.environ), TIMEOUT_TESTE)
 
 
 def _gravar(caminho, texto):
