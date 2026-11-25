@@ -1061,9 +1061,23 @@ def _casos_t7():
         pytest.param(dict(linhas=base, fake=dict(status_pkg="ALVO_DIVERGENTE")), "ALVO_DIVERGENTE", id="divergente"),
         # logon_time com microssegundo na DIAG: desde a correção A10 (parte 2) a recusa é antes do prompt HITL
         pytest.param(dict(linhas=[micro, micro], fake=dict(kill_permitido=False)), "PARAM_INVALIDO", id="param_invalido"),
+        # R1 ampliada V3 (r1_ampliada/decisao_c1.md §8.2; asserções acrescentadas): o texto do erro não vai ao LLM,
+        # o código sim.
         pytest.param(
-            dict(linhas=base, fake=dict(erro_kill=oracledb.DatabaseError("ORA-00600: erro interno"))),
+            dict(
+                linhas=base, fake=dict(erro_kill=oracledb.DatabaseError("ORA-00600: erro interno")),
+                proibidos_extra=["erro interno"], presentes=["ORA-00600"],
+            ),
             "ERRO_ORACLE", id="erro_oracle",
+        ),
+        # R1 ampliada V7 e V2 (casos novos): hashes do ALVO_ALTERADO e rede na reconsulta.
+        pytest.param(
+            dict(linhas=[_linha_alvo(), _linha_alvo(machine="outra-maquina")], fake=dict(kill_permitido=False)),
+            "ALVO_ALTERADO", id="alvo_alterado",
+        ),
+        pytest.param(
+            dict(linhas=base, fake=dict(kill_permitido=False), rede_falha_na_chamada=2),
+            "HostInacessivelVPN", id="reconsulta_rede",
         ),
         # A5 (só :935, ramo D8): o DSN fictício também não pode ir ao LLM.
         # K6/N1 (asserção acrescentada, declarada no plano 8.12.3): o texto da exceção Python também não vai ao
@@ -1084,6 +1098,16 @@ def test_t7_resultado_tool_sem_ref_credenciais_identidade_nem_sql(
 ):
     """T7: o JSON que volta ao LLM não traz id_intervencao/ref, senha ou usuário, valores de identidade nem SQL."""
     oracle_fake = _OracleFake(cenario_t7["linhas"], **cenario_t7["fake"])
+    if cenario_t7.get("rede_falha_na_chamada"):
+        chamadas = []
+
+        def sonda(dsn, timeout=3.0):
+            chamadas.append(1)
+            falha = len(chamadas) == cenario_t7["rede_falha_na_chamada"]
+            return {"acessivel": not falha, "host": "host-teste", "porta": 1521, "latencia_ms": 0.1,
+                    "erro_rede": "recusado (fake)" if falha else None}
+
+        monkeypatch.setattr(oracle_dba, "verificar_acessibilidade_host", sonda)
     desfecho, registros = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
 
     if esperado == "PARAM_INVALIDO":
@@ -1103,9 +1127,16 @@ def test_t7_resultado_tool_sem_ref_credenciais_identidade_nem_sql(
         id_proibido, "senha-fake", USER_KILL_FAKE, USER_DIAG_FAKE,
         "APP_USER", "app.exe", "srv-app01", "2026-11-23 10:00:00", "2026-11-23T10:00:00",
         "BEGIN", "=>", "p_ref_aprovacao", "ref_aprovacao",
+        # R1 ampliada (r1_ampliada/decisao_c1.md §8.2; asserções acrescentadas): DSN, host, chave instancia, nome
+        # do pacote e aprovador em todo ramo, não só no d8 (plano 1.11-V2-item6 §8.8).
+        "host-teste:1521/TESTE", "host-teste", "instancia", "PKG_OPS_KILL", "OPS_OWNER", "KILL_SESSION",
+        "dba_teste", "recusado (fake)",
     ] + cenario_t7.get("proibidos_extra", [])
     for texto in proibidos:
         assert texto not in tool, f"resultado_tool de {esperado} traz {texto!r}"
+    assert not re.search(r"[0-9a-f]{64}", tool), f"resultado_tool de {esperado} traz um hash de 64 hexadecimais"
+    for texto in cenario_t7.get("presentes", []):
+        assert texto in tool, f"resultado_tool de {esperado} perdeu {texto!r}"
 
 
 # ---- K4 (A10 parte 2): identidade inválida da DIAG -> recusa antes do prompt, evento RECUSA_PRE_HITL ----
@@ -1293,7 +1324,8 @@ def test_k6_n5_matar_sessao_com_p_status_vazio_devolve_status_desconhecido(monke
     assert res["status_banco"] == oracle_dba.STATUS_PKG_VAZIO == "DESCONHECIDO"
     assert res["status"] == res["motivo"] == oracle_dba.STATUS_PKG_VAZIO
     assert res["resultado_desconhecido"] is True
-    assert "Status retornado pelo PKG_OPS_KILL: DESCONHECIDO;" in res["mensagem"]
+    # Expectativa alterada, declarada (R1 ampliada V6, r1_ampliada/decisao_c1.md §8.5): o texto não nomeia o pacote.
+    assert "Status retornado pelo procedimento de encerramento: DESCONHECIDO;" in res["mensagem"]
 
 
 @pytest.mark.parametrize(
