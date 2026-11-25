@@ -412,7 +412,11 @@ def test_r1_rag_nao_e_liberado_para_a_nuvem():
 
 # ---- AST (decisao_c1.md §8.4) ----
 
-ARQUIVOS_AST = ["src/tools/oracle_dba.py", "src/tools/executor.py", "app.py", "src/main.py"]
+# Fase 2, K3-T2 (expansão declarada; decisao_c1.md §3.2 e §8.3): as 2 ferramentas liberadas para a nuvem e o RAG.
+ARQUIVOS_AST = [
+    "src/tools/oracle_dba.py", "src/tools/executor.py", "app.py", "src/main.py", "src/tools/os_tools.py",
+    "src/tools/rag_search.py",
+]
 CHAVES_PROIBIDAS_AST = {"instancia", "hash_aprovado", "hash_atual", "detalhe_rede"}
 FUNCOES_PERMITIDAS_COM_EXCECAO = {"type", "isinstance", "getattr", "_codigo_erro", "_registrar_erro_local"}
 FUNCOES_QUE_PODEM_DESCREVER = {"_codigo_erro", "_registrar_erro_local"}
@@ -863,3 +867,110 @@ def test_k2_t4_catalogo_com_ferramenta_nova(monkeypatch):
     nuvem = {s["function"]["name"] for s in od.ferramentas_do_coordenador(todas, False)}
     assert nuvem == LIBERADAS_ESPERADAS_K2
     assert od.ferramentas_do_coordenador(todas, True) == todas
+
+
+# =============================================================================
+# R1 ampliada fase 2, K3 (fase2/decisao_c1.md §3 e §8.3): R-c, D3 e RAG
+# =============================================================================
+
+SENTINELA_RC = "texto-sentinela-rc"
+
+
+class _UsoDisco:
+    total, free, percent = 100 * 1024 ** 3, 40 * 1024 ** 3, 60.0
+
+
+def test_k3_t1_excecao_das_ferramentas_de_so_so_com_o_tipo(monkeypatch, caplog):
+    """K3-T1 (mata M_K3_STR_HW, M_K3_STR_DISCO, M_K3_FSTRING_EXC e M_K3_SEM_LOG*): o retorno ao LLM só tem o tipo;
+    o texto da exceção (com caminho) vai ao log local. O "unidade" igual ao pedido é residual aceito (9.8.3)."""
+    from src.tools import os_tools
+
+    def _disco(drive):
+        raise OSError(f"{SENTINELA_RC} C:\\sentinela-dir")
+
+    def _cpu(interval=None):
+        raise RuntimeError(SENTINELA_RC)
+
+    monkeypatch.setattr(os_tools.psutil, "disk_usage", _disco)
+    monkeypatch.setattr(os_tools.psutil, "cpu_percent", _cpu)
+    with caplog.at_level(logging.WARNING, logger=os_tools.logger.name):
+        disco = os_tools.verificar_espaco_disco("C:\\")
+        hw = os_tools.coletar_metricas_hardware()
+
+    for texto in (disco, hw):
+        assert SENTINELA_RC not in texto and "sentinela-dir" not in texto
+    assert json.loads(disco) == {"status": "erro", "coleta": "disco_local", "unidade": "C:\\", "mensagem": "Erro OSError."}
+    assert json.loads(hw) == {"status": "erro", "coleta": "hardware_base", "mensagem": "Erro RuntimeError."}
+    detalhes = [r.getMessage() for r in caplog.records if "DETALHE LOCAL" in r.getMessage()]
+    assert any("verificar_espaco_disco" in m and "sentinela-dir" in m for m in detalhes), detalhes
+    assert any("coletar_metricas_hardware" in m and SENTINELA_RC in m for m in detalhes), detalhes
+
+
+@pytest.mark.parametrize(
+    "drive",
+    ["\\\\host-sentinela\\share\\", "\\\\?\\C:\\", "C:\\x", "C:\n", "C:\\\n", "C:/", "CC:", "C", "1:", "", " C:", None, 5,
+     ["C:\\"]],
+    ids=["unc", "unc_longo", "subpasta", "c_quebra", "c_barra_quebra", "barra_normal", "duas_letras", "sem_dois_pontos",
+         "digito", "vazio", "espaco", "none", "int", "lista"],
+)
+def test_k3_t3_disco_so_raiz_de_unidade_sem_chamar_o_psutil(monkeypatch, caplog, drive):
+    """K3-T3, D3 (mata M_K3_D3_*): fora de raiz de unidade local, recusa fixa, sem chamar o psutil e sem ecoar o
+    argumento; o log local registra o argumento com %r (sem quebra de linha crua)."""
+    from src.tools import os_tools
+
+    chamadas = []
+    monkeypatch.setattr(os_tools.psutil, "disk_usage", lambda d: chamadas.append(d) or _UsoDisco())
+    with caplog.at_level(logging.WARNING, logger=os_tools.logger.name):
+        texto = os_tools.verificar_espaco_disco(drive)
+
+    assert chamadas == []
+    assert texto == os_tools.RESULTADO_UNIDADE_INVALIDA
+    assert json.loads(texto)["motivo"] == "UNIDADE_INVALIDA"
+    assert "host-sentinela" not in texto
+    recusas = [r.getMessage() for r in caplog.records if "UNIDADE RECUSADA" in r.getMessage()]
+    assert len(recusas) == 1 and "\n" not in recusas[0]
+
+
+@pytest.mark.parametrize("drive", ["C:", "C:\\", "d:\\", "Z:"])
+def test_k3_t3_disco_aceita_raiz_de_unidade(monkeypatch, drive):
+    """K3-T3, controle positivo: raiz de unidade vai ao psutil e o retorno é o payload de sempre."""
+    from src.tools import os_tools
+
+    chamadas = []
+    monkeypatch.setattr(os_tools.psutil, "disk_usage", lambda d: chamadas.append(d) or _UsoDisco())
+    resultado = json.loads(os_tools.verificar_espaco_disco(drive))
+
+    assert chamadas == [drive]
+    assert resultado["status"] == "sucesso" and resultado["dados"]["unidade"] == drive
+
+
+def test_k3_t4_rag_sem_base_nao_leva_o_caminho(monkeypatch, caplog, tmp_path):
+    """K3-T4 (mata M_K3_RAG_DIR): base vetorial ausente: mensagem fixa, sem o caminho (perfil do Windows); o caminho
+    vai ao log local."""
+    from src.tools import rag_search
+
+    ausente = tmp_path / "chroma-sentinela-dir"
+    monkeypatch.setattr(rag_search, "CHROMA_DB_DIR", ausente)
+    with caplog.at_level(logging.WARNING, logger=rag_search.logger.name):
+        texto = rag_search.buscar_script_interno("x")
+
+    assert json.loads(texto) == {"status": "erro", "mensagem": rag_search.TEXTO_BASE_VETORIAL_AUSENTE}
+    assert "chroma-sentinela-dir" not in texto and str(tmp_path) not in texto
+    assert "chroma-sentinela-dir" in caplog.text
+
+
+def test_k3_t4_rag_excecao_so_com_o_tipo(monkeypatch, caplog, tmp_path):
+    """K3-T4 (mata M_K3_RAG_STR_EXC e M_K3_RAG_SEM_LOG): exceção na busca: ao LLM só o tipo; o texto vai ao log."""
+    from src.tools import rag_search
+
+    def _quebra():
+        raise RuntimeError(f"{SENTINELA_RC} C:\\sentinela-dir")
+
+    monkeypatch.setattr(rag_search, "CHROMA_DB_DIR", tmp_path)
+    monkeypatch.setattr(rag_search, "_obter_vectorstore", _quebra)
+    with caplog.at_level(logging.WARNING, logger=rag_search.logger.name):
+        texto = rag_search.buscar_script_interno("tema")
+
+    assert SENTINELA_RC not in texto and "sentinela-dir" not in texto
+    assert json.loads(texto) == {"status": "erro", "consulta": "tema", "mensagem": "Erro RuntimeError."}
+    assert SENTINELA_RC in caplog.text and "sentinela-dir" in caplog.text

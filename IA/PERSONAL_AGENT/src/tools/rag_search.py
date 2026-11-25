@@ -4,6 +4,7 @@ Consulta o banco vetorial local (./chroma_db) com embeddings HuggingFace (all-Mi
 para recuperar scripts SQL homologados e manuais do DBA.
 """
 import json
+import logging
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List
@@ -17,6 +18,11 @@ SRC_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = SRC_DIR.parent
 CHROMA_DB_DIR = PROJECT_ROOT / "chroma_db"
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
+
+# R1 ampliada fase 2, K3 (fase2/decisao_c1.md §8.3): o retorno não leva o caminho da base (perfil do Windows) nem o
+# texto da exceção; o detalhe vai ao log local. O RAG é SO_LOCAL desde o K2.
+logger = logging.getLogger(__name__)
+TEXTO_BASE_VETORIAL_AUSENTE = "Base vetorial não encontrada. Execute 'python src/tools/rag_indexer.py' primeiro."
 
 # Cache em memória para evitar recarregar o modelo de embeddings a cada chamada do Agente
 _EMBEDDINGS_INSTANCE = None
@@ -50,16 +56,12 @@ def buscar_script_interno(tema_ou_problema: str) -> str:
     e retorna os trechos e caminhos dos scripts SQL homologados em formato JSON.
     """
     if not CHROMA_DB_DIR.exists():
-        return json.dumps(
-            {
-                "status": "erro",
-                "mensagem": (
-                    f"Base vetorial não encontrada em '{CHROMA_DB_DIR}'. "
-                    "Execute 'python src/tools/rag_indexer.py' primeiro."
-                ),
-            },
-            ensure_ascii=False,
-        )
+        try:
+            logger.warning("DETALHE LOCAL (fora do LLM) | ferramenta=buscar_script_interno | base ausente=%r",
+                           str(CHROMA_DB_DIR))
+        except Exception:
+            pass
+        return json.dumps({"status": "erro", "mensagem": TEXTO_BASE_VETORIAL_AUSENTE}, ensure_ascii=False)
 
     try:
         vectorstore = _obter_vectorstore()
@@ -110,11 +112,19 @@ def buscar_script_interno(tema_ou_problema: str) -> str:
         )
 
     except Exception as exc:
+        # R-c (K3): ao LLM só o tipo; o detalhe vai ao log local.
+        try:
+            logger.warning(
+                "DETALHE LOCAL (fora do LLM) | ferramenta=%s | erro=%s: %s",
+                "buscar_script_interno", type(exc).__name__, exc,
+            )
+        except Exception:
+            pass
         return json.dumps(
             {
                 "status": "erro",
                 "consulta": tema_ou_problema,
-                "mensagem": str(exc),
+                "mensagem": f"Erro {type(exc).__name__}.",
             },
             ensure_ascii=False,
         )
