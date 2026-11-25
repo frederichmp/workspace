@@ -186,6 +186,9 @@ def test_ausencia_oracle_user_kill_sem_conexao(monkeypatch):
     monkeypatch.setenv("ORACLE_PASSWORD_KILL", "senha-fake")
     monkeypatch.setenv("ORACLE_DSN", "host-teste:1521/TESTE")
     monkeypatch.delenv("ORACLE_USER_KILL", raising=False)
+    # Fase 2, K6 (D2; expectativa alterada, declarada no plano 9.9.4): o gate vem antes das credenciais, então
+    # o ERRO_CONFIG só aparece com o kill habilitado.
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
 
     res = json.loads(matar_sessao_oracle(
         sid=10, serial=20, inst_id=1, identidade_esperada=dict(IDENTIDADE_VALIDA), ref_aprovacao=REF_VALIDO,
@@ -2062,8 +2065,9 @@ def _nomes_catalogo_k1(catalogo):
 
 @pytest.mark.parametrize(
     "valor",
-    [None, "", "0", "1", "3", " 2", "2 ", "02", "2.0", "v2", "\uff12", "2\n"],
-    ids=["ausente", "vazio", "0", "1", "3", "espaco_antes", "espaco_depois", "02", "2.0", "v2", "largo", "quebra"],
+    [None, "", "0", "1", "3", " 2", "2 ", "02", "2.0", "v2", "\uff12", "2\n", '"2"', "'2'"],
+    ids=["ausente", "vazio", "0", "1", "3", "espaco_antes", "espaco_depois", "02", "2.0", "v2", "largo", "quebra",
+         "aspas_duplas", "aspas_simples"],  # K6-T5 (fase 2, R1_M9): aspas não habilitam
 )
 def test_k1_t1_gate_so_com_o_valor_exato_2(monkeypatch, valor):
     """K1-T1 (mata M_K1_STRIP, M_K1_PERMISSIVO e M_K1_DEFAULT_2): todo valor diferente do exato "2", e a ausência,
@@ -2271,3 +2275,82 @@ def test_k1_t9_env_example_nao_habilita_o_kill():
     linhas = (ROOT_DIR_TESTE / ".env.example").read_text(encoding="utf-8").splitlines()
     atribuicoes = [l for l in linhas if re.match(r"\s*(export\s+)?OPS_KILL_PKG_VERSAO\s*=", l)]
     assert atribuicoes == ["OPS_KILL_PKG_VERSAO="]
+
+
+# =============================================================================
+# R1 ampliada fase 2, K6 (fase2/decisao_c1.md §8.5): gate em executar_kill_verificado, D2 e R1_M3
+# =============================================================================
+
+def test_k6_t1_executar_kill_verificado_sem_gate_antes_de_toda_e_s(monkeypatch, tmp_path, ambiente_fake, caplog):
+    """K6-T1 (A6.1; mata M_K6_EXEC_SEM_GATE e M_K6_EXEC_GATE_DEPOIS): chamado direto sem o gate, devolve
+    KILL_DESABILITADO antes da reconsulta: zero conexão (DIAG ou KILL), zero sonda, zero SMTP e nenhum JSONL."""
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+    monkeypatch.chdir(tmp_path)
+    sondas = []
+    monkeypatch.setattr(oracle_dba, "verificar_acessibilidade_host", lambda *a, **k: sondas.append(1) or {"acessivel": True})
+    monkeypatch.setattr(oracle_dba, "consultar_alvo_sessao_diag", _proibido_k1("consultar_alvo_sessao_diag"))
+    monkeypatch.setattr(oracledb, "connect", _proibido_k1("oracledb.connect"))
+
+    with caplog.at_level(logging.WARNING, logger=oracle_dba.logger.name):
+        bruto = oracle_dba.executar_kill_verificado(
+            inst_id=1, sid=101, serial=202, hash_aprovado="hash-fake",
+            aprovacao_expirada=lambda: False, ref_aprovacao=REF_VALIDO,
+        )
+
+    assert bruto == oracle_dba.RESULTADO_KILL_DESABILITADO
+    assert sondas == [] and ambiente_fake == []
+    assert list(tmp_path.iterdir()) == []
+    assert "KILL BLOQUEADO NA VERIFICAÇÃO: KILL_DESABILITADO" in caplog.text
+
+
+def test_k6_t2_matar_sem_gate_e_sem_credenciais_da_kill_desabilitado(monkeypatch):
+    """K6-T2, D2 (assinatura de produção; mata M_K6_GATE_DEPOIS_CREDENCIAIS): sem o gate e sem ORACLE_USER_KILL,
+    ORACLE_PASSWORD_KILL e ORACLE_DSN, matar_sessao_oracle devolve KILL_DESABILITADO, nunca ERRO_CONFIG; controle:
+    com o gate, ERRO_CONFIG. Sem sonda e sem conexão nos dois casos."""
+    monkeypatch.setattr(oracledb, "connect", _proibido_k1("oracledb.connect"))
+    monkeypatch.setattr(oracle_dba, "verificar_acessibilidade_host", _proibido_k1("verificar_acessibilidade_host"))
+    for nome in ("ORACLE_USER_KILL", "ORACLE_PASSWORD_KILL", "ORACLE_DSN", "OPS_KILL_PKG_VERSAO"):
+        monkeypatch.delenv(nome, raising=False)
+
+    argumentos = dict(sid=101, serial=202, inst_id=1, identidade_esperada=dict(IDENTIDADE_VALIDA), ref_aprovacao=REF_VALIDO)
+    sem_gate = json.loads(matar_sessao_oracle(**argumentos))
+    assert sem_gate["motivo"] == "KILL_DESABILITADO" and sem_gate["status"] == "recusado"
+
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
+    com_gate = json.loads(matar_sessao_oracle(**argumentos))
+    assert com_gate["motivo"] == "ERRO_CONFIG"
+
+
+def _um_registro_k6(log):
+    (reg,) = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()]
+    return reg
+
+
+def test_k6_t3_sem_gate_timeout_e_sem_aprovador_seguem_a_regra_de_sempre(monkeypatch, tmp_path, ambiente_fake):
+    """K6-T3 (mata R1_M3): sem o gate, a validação do aprovador e o TTL vêm antes do gate: APROVADO expirado grava
+    TIMEOUT/APROVACAO_EXPIRADA e APROVADO com aprovador vazio grava REJEITADO/SEM_IDENTIFICACAO; nenhum vira
+    "APROVADO" com KILL_DESABILITADO (a auditoria não é adulterada)."""
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+    monkeypatch.setattr(oracle_dba, "executar_kill_verificado", _proibido_k1("executar_kill_verificado"))
+    comum = dict(inst_id=1, sid=101, serial=202, alvo={}, hash_aprovado="hash-fake", canal="TESTE")
+
+    log_expirado = tmp_path / "expirado.log"
+    expirado = registrar_decisao_kill(
+        decisao="APROVADO", aprovador="dba_teste", preparado_em="2026-11-25T11:00:00+00:00", caminho_log=log_expirado,
+        agora=lambda: INSTANTE_K1, **comum,
+    )
+    reg = _um_registro_k6(log_expirado)
+    assert expirado["decisao"] == "TIMEOUT" and expirado["motivo"] == "APROVACAO_EXPIRADA"
+    assert reg["decisao"] == "TIMEOUT" and reg["motivo"] == "APROVACAO_EXPIRADA"
+
+    log_vazio = tmp_path / "vazio.log"
+    vazio = registrar_decisao_kill(
+        decisao="APROVADO", aprovador="   ", preparado_em=PREPARADO_K1, caminho_log=log_vazio,
+        agora=lambda: INSTANTE_K1, **comum,
+    )
+    reg = _um_registro_k6(log_vazio)
+    assert vazio["decisao"] == "REJEITADO" and vazio["motivo"] == "SEM_IDENTIFICACAO"
+    assert reg["decisao"] == "REJEITADO" and reg["motivo"] == "SEM_IDENTIFICACAO"
+    for desfecho in (expirado, vazio):
+        assert desfecho["motivo"] != "KILL_DESABILITADO" and desfecho["executado"] is False
+    assert ambiente_fake == []

@@ -28,6 +28,8 @@ for path_str in (str(ROOT_DIR), str(SRC_DIR)):
 # - override=False: o ambiente (shell ou perfil) vence o arquivo.
 # - ORACLE_SANDBOX só vale se já estava no ambiente antes da carga (incidente 01:27). Se vier do arquivo, o finally
 #   a remove, inclusive quando a carga falha (C1); "ok" só é gravado depois disso.
+# - OPS_KILL_PKG_VERSAO, idem (R1 ampliada fase 2, D1): só o ambiente da sessão habilita o encerramento de sessão.
+#   Se vier do arquivo, o finally a remove e marca o descarte; a subida com o kill habilitado também é marcada.
 # - OSError antes de qualquer escrita em os.environ (inclusive .env ausente): nada entrou, nova tentativa na
 #   próxima subida. Qualquer outra falha (escrita parcial, .env que não é arquivo regular, decodificação, NUL,
 #   interrupção): fail-closed até reiniciar o processo. Mensagens fixas, sem valores.
@@ -37,6 +39,14 @@ _AVISO_SANDBOX_DESCARTADA = (
 )
 _AVISO_SOMBREADAS = "Variáveis do .env ignoradas porque o ambiente já as define com outro valor: "
 _AVISO_MALFORMADAS = "Linhas do .env com erro de sintaxe foram ignoradas. Quantidade: "
+_AVISO_KILL_DESCARTADA = (
+    "OPS_KILL_PKG_VERSAO encontrada no .env foi DESCARTADA: o encerramento de sessão só é habilitado pelo ambiente "
+    "da sessão. Remova a chave do .env."
+)
+_AVISO_KILL_HABILITADO = (
+    "Encerramento de sessão HABILITADO nesta subida por OPS_KILL_PKG_VERSAO no ambiente (shell ou perfil do "
+    "Windows). Confira se é intencional."
+)
 
 
 def _carregar_env(caminho):
@@ -66,13 +76,15 @@ def _carregar_env(caminho):
 _ESTADO_ENV = vars(sys).setdefault(
     "_personal_agent_estado_env",
     {"lock": threading.Lock(), "estado": None, "falha": None, "sandbox_descartada": False, "sombreadas": (),
-     "malformadas": 0},
+     "malformadas": 0, "kill_descartada": False, "kill_habilitado": False},
 )
 _CARREGOU_AGORA = False
 with _ESTADO_ENV["lock"]:
     if _ESTADO_ENV["estado"] is None:
-        _ESTADO_ENV.update(estado="falhou", falha=None, sandbox_descartada=False, sombreadas=(), malformadas=0)
+        _ESTADO_ENV.update(estado="falhou", falha=None, sandbox_descartada=False, sombreadas=(), malformadas=0,
+                           kill_descartada=False, kill_habilitado=False)
         _sandbox_do_shell = "ORACLE_SANDBOX" in os.environ
+        _kill_do_shell = "OPS_KILL_PKG_VERSAO" in os.environ
         _proximo = "falhou"
         try:
             _proximo, _ESTADO_ENV["falha"], _ESTADO_ENV["sombreadas"], _ESTADO_ENV["malformadas"] = (
@@ -83,6 +95,9 @@ with _ESTADO_ENV["lock"]:
         finally:
             if not _sandbox_do_shell and os.environ.pop("ORACLE_SANDBOX", None) is not None:
                 _ESTADO_ENV["sandbox_descartada"] = True
+            if not _kill_do_shell and os.environ.pop("OPS_KILL_PKG_VERSAO", None) is not None:
+                _ESTADO_ENV["kill_descartada"] = True
+            _ESTADO_ENV["kill_habilitado"] = os.environ.get("OPS_KILL_PKG_VERSAO") == "2"
         _ESTADO_ENV["estado"] = _proximo  # só depois do descarte de ORACLE_SANDBOX
         _CARREGOU_AGORA = _proximo == "ok"
     _ESTADO_DESTA_SUBIDA, _FALHA_DESTA_SUBIDA = _ESTADO_ENV["estado"], _ESTADO_ENV["falha"]  # lidos sob o lock
@@ -127,6 +142,12 @@ if _CARREGOU_AGORA:  # avisos da carga: uma vez por processo, depois do basicCon
     if _ESTADO_ENV["malformadas"]:  # Achado 3: só a contagem
         _log_carga.warning(_AVISO_MALFORMADAS + str(_ESTADO_ENV["malformadas"]))
         print(f"[Sistema]: AVISO: {_AVISO_MALFORMADAS}{_ESTADO_ENV['malformadas']}", file=sys.stderr)
+    if _ESTADO_ENV.get("kill_descartada"):  # fase 2, D1
+        _log_carga.warning(_AVISO_KILL_DESCARTADA)
+        print(f"[Sistema]: AVISO: {_AVISO_KILL_DESCARTADA}", file=sys.stderr)
+    if _ESTADO_ENV.get("kill_habilitado"):  # fase 2, P4: toda subida com o kill habilitado
+        _log_carga.warning(_AVISO_KILL_HABILITADO)
+        print(f"[Sistema]: AVISO: {_AVISO_KILL_HABILITADO}", file=sys.stderr)
 
 # 1. Importando as Ferramentas de SO
 from tools.os_tools import (

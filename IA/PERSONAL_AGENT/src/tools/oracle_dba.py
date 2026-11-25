@@ -1039,6 +1039,16 @@ def matar_sessao_oracle(
             ensure_ascii=False,
         )
 
+    # Gate de produção (decisao_c1.md §2.2-iv; D2 do §8.5: antes das credenciais): sem OPS_KILL_PKG_VERSAO=2,
+    # KILL_DESABILITADO, nunca ERRO_CONFIG; nenhuma leitura de credencial, sonda nem conexão. Vem depois só das
+    # validações locais (sem E/S).
+    if not kill_habilitado():
+        logger.warning(
+            f"KILL BLOQUEADO: KILL_DESABILITADO (OPS_KILL_PKG_VERSAO) | inst_id={inst_id_int}, sid={sid_int}, "
+            f"serial={serial_int}"
+        )
+        return RESULTADO_KILL_DESABILITADO
+
     # 2. Verificação de credenciais segregadas da conta KILL
     user = os.getenv("ORACLE_USER_KILL")
     password = os.getenv("ORACLE_PASSWORD_KILL")
@@ -1057,14 +1067,6 @@ def matar_sessao_oracle(
             },
             ensure_ascii=False,
         )
-
-    # Gate de produção (decisao_c1.md §2.2-iv): sem OPS_KILL_PKG_VERSAO=2, nenhuma sonda nem conexão.
-    if not kill_habilitado():
-        logger.warning(
-            f"KILL BLOQUEADO: KILL_DESABILITADO (OPS_KILL_PKG_VERSAO) | inst_id={inst_id_int}, sid={sid_int}, "
-            f"serial={serial_int}"
-        )
-        return RESULTADO_KILL_DESABILITADO
 
     # 3. Pré-validação rápida de rede / VPN
     check_rede = verificar_acessibilidade_host(dsn, timeout=3.0)
@@ -1314,7 +1316,16 @@ def executar_kill_verificado(
     ref_aprovacao: keyword-only, sem default; é o id_intervencao da INTENCAO (decisao.md D4).
     A identidade esperada enviada ao PKG vem da reconsulta cujo hash bateu, montada depois do hash, da
     elegibilidade e do TTL, só com as chaves presentes (a falta de chave fica para a validação local).
+    Gate de produção (fase 2, K6; decisao_c1.md §8.5): sem OPS_KILL_PKG_VERSAO=2, KILL_DESABILITADO antes da
+    reconsulta, sem sonda, sem conexão DIAG nem KILL.
     """
+    if not kill_habilitado():
+        logger.warning(
+            f"KILL BLOQUEADO NA VERIFICAÇÃO: KILL_DESABILITADO (OPS_KILL_PKG_VERSAO) | inst_id={inst_id}, "
+            f"sid={sid}, serial={serial}"
+        )
+        return RESULTADO_KILL_DESABILITADO
+
     reconsulta = consultar_alvo_sessao_diag(inst_id=inst_id, sid=sid, serial=serial)
 
     if not reconsulta.get("encontrado"):

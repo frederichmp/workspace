@@ -735,18 +735,66 @@ def test_t1_bloco_carga_env_identico_nas_entradas():
                     f"(app.py {len(a)} linhas, src/main.py {len(m)} linhas)")
 
 
+TEXTO_KILL_DESCARTADA = (
+    "OPS_KILL_PKG_VERSAO encontrada no .env foi DESCARTADA: o encerramento de sessão só é habilitado pelo ambiente "
+    "da sessão. Remova a chave do .env."
+)
+TEXTO_KILL_HABILITADO = (
+    "Encerramento de sessão HABILITADO nesta subida por OPS_KILL_PKG_VERSAO no ambiente (shell ou perfil do "
+    "Windows). Confira se é intencional."
+)
+
+
+def _contagem_aviso_k6(dados, entrada, texto):
+    """(no log local, na saída da entrada): stderr da CLI com o prefixo, ou st.warning da Web em cada run."""
+    no_log = dados["avisos"].count(texto)
+    if entrada == "cli":
+        na_saida = dados["stderr"].count(f"[Sistema]: AVISO: {texto}")
+    else:
+        na_saida = sum(run["warning_tela"].count(texto) for run in dados["por_run"])
+    return no_log, na_saida
+
+
+def _rodar_k6(entrada, tmp_path, nome, conteudo_env, shell=None):
+    pasta = tmp_path / nome
+    pasta.mkdir()
+    extra = {} if shell is None else {"OPS_KILL_PKG_VERSAO": shell}
+    dados = _rodar(entrada, pasta, conteudo_env, env_extra=extra)
+    assert dados["leituras_reais"] == []
+    return dados
+
+
 @pytest.mark.parametrize("entrada", ["cli", "web"])
 def test_k1_t11_gate_vem_do_env_e_o_shell_desliga(entrada, tmp_path):
-    """K1-T11, L22 (fase 2, decisao_c1.md §2.4): um .env com OPS_KILL_PKG_VERSAO=2 e o shell sem a variável dão "2"
-    no processo; com o shell em "0" (sentinela), fica "0" (override=False): o operador desliga pelo shell."""
-    sem_shell = tmp_path / "sem_shell"
-    sem_shell.mkdir()
-    dados = _rodar(entrada, sem_shell, "OPS_KILL_PKG_VERSAO=2\n")
-    assert dados["ops_kill_pkg_versao"] == "2", dados["avisos"]
-    assert dados["leituras_reais"] == []
+    """K1-T11, L22, invertido pelo D1 (fase 2, K6-T4; expectativa alterada, declarada em decisao_c1.md §8.5 e no
+    plano 9.9.4): um .env com OPS_KILL_PKG_VERSAO=2 e o shell sem a variável dão AUSENTE e o aviso de descarte (só o
+    ambiente da sessão habilita); com o shell em "0" (sentinela), fica "0", sem aviso de habilitado nem de descarte."""
+    dados = _rodar_k6(entrada, tmp_path, "sem_shell", "OPS_KILL_PKG_VERSAO=2\nSENTINELA_FASE2=1\n")
+    assert dados["sentinela"] == "1", "o .env fictício não foi carregado"
+    assert dados["ops_kill_pkg_versao"] == "AUSENTE", dados["avisos"]
+    assert _contagem_aviso_k6(dados, entrada, TEXTO_KILL_DESCARTADA) == (1, 1)
+    assert _contagem_aviso_k6(dados, entrada, TEXTO_KILL_HABILITADO) == (0, 0)
 
-    com_shell = tmp_path / "com_shell"
-    com_shell.mkdir()
-    dados = _rodar(entrada, com_shell, "OPS_KILL_PKG_VERSAO=2\n", env_extra={"OPS_KILL_PKG_VERSAO": "0"})
+    dados = _rodar_k6(entrada, tmp_path, "shell_zero", "OPS_KILL_PKG_VERSAO=2\n", shell="0")
     assert dados["ops_kill_pkg_versao"] == "0", dados["avisos"]
-    assert dados["leituras_reais"] == []
+    assert _contagem_aviso_k6(dados, entrada, TEXTO_KILL_DESCARTADA) == (0, 0)
+    assert _contagem_aviso_k6(dados, entrada, TEXTO_KILL_HABILITADO) == (0, 0)
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+@pytest.mark.parametrize("conteudo_env", ["OPS_KILL_PKG_VERSAO=\n", "SENTINELA_FASE2=1\n"], ids=["env_declara", "env_sem_chave"])
+def test_k6_t4_aviso_de_subida_com_o_kill_habilitado(entrada, tmp_path, conteudo_env):
+    """K6-T4, D1 e P4 (assinatura de produção, nas duas entradas; mata M_K6_SEM_AVISO_* e M_K6_ENV_HABILITA): com o
+    shell em "2", o kill sobe habilitado e há um aviso fixo de subida (no log e na saída da entrada), declare o .env
+    a chave ou não (a variável esquecida no perfil do Windows); nenhum aviso de descarte."""
+    dados = _rodar_k6(entrada, tmp_path, "shell_dois", conteudo_env, shell="2")
+    assert dados["ops_kill_pkg_versao"] == "2", dados["avisos"]
+    assert _contagem_aviso_k6(dados, entrada, TEXTO_KILL_HABILITADO) == (1, 1)
+    assert _contagem_aviso_k6(dados, entrada, TEXTO_KILL_DESCARTADA) == (0, 0)
+
+
+def test_k6_t4_web_aviso_de_habilitado_em_todo_rerun(tmp_path):
+    """K6-T4, P4 na Web: o aviso de subida habilitada aparece em todo rerun da sessão (como os da carga, C3)."""
+    dados = _rodar("web", tmp_path, "SENTINELA_FASE2=1\n", runs=2, env_extra={"OPS_KILL_PKG_VERSAO": "2"})
+    assert [run["warning_tela"].count(TEXTO_KILL_HABILITADO) for run in dados["por_run"]] == [1, 1]
+    assert dados["avisos"].count(TEXTO_KILL_HABILITADO) == 1  # no log, uma vez por processo
