@@ -407,7 +407,7 @@ def test_r1_nomes_sem_dado_do_banco_iguais_aos_schemas_de_so_e_rag():
 
 # ---- AST (decisao_c1.md §8.4) ----
 
-ARQUIVOS_AST = ["src/tools/oracle_dba.py"]
+ARQUIVOS_AST = ["src/tools/oracle_dba.py", "src/tools/executor.py"]
 CHAVES_PROIBIDAS_AST = {"instancia", "hash_aprovado", "hash_atual", "detalhe_rede"}
 FUNCOES_PERMITIDAS_COM_EXCECAO = {"type", "isinstance", "getattr", "_codigo_erro", "_registrar_erro_local"}
 FUNCOES_QUE_PODEM_DESCREVER = {"_codigo_erro", "_registrar_erro_local"}
@@ -502,3 +502,121 @@ def test_r1_ast_a3_descrever_erro_so_nas_pecas_ou_no_log(rel):
         if not permitido:
             achados.append(no.lineno)
     assert achados == [], f"{rel}: _descrever_erro fora do permitido nas linhas {achados}"
+
+
+# ---- C3: executor.py (V1 e, pela decisão 1a do responsável, V3 e caminho; decisao_c1.md §6) ----
+
+class _VarExecutor:
+    def setvalue(self, pos, valor):
+        pass
+
+    def getvalue(self):
+        return None  # dbms_output.get_line: status None != 0 encerra o laço
+
+
+class _CursorExecutor:
+    def __init__(self, erro_execute=None):
+        self.description, self.rowcount, self._erro, self._execucoes = None, 1, erro_execute, 0
+
+    def execute(self, sql, binds=None, **kwargs):
+        self._execucoes += 1
+        if self._erro is not None and self._execucoes == 2:  # a 1ª é a consulta da instância
+            raise self._erro
+        self.description = [("DUMMY",)]
+
+    def fetchone(self):
+        return ("1",)
+
+    def fetchmany(self, limite):
+        return [("X",)]
+
+    def callproc(self, nome, argumentos=None):
+        pass
+
+    def var(self, tipo):
+        return _VarExecutor()
+
+    def close(self):
+        pass
+
+
+class _ConexaoExecutor:
+    def __init__(self, erro_execute=None):
+        self.call_timeout = None
+        self._cursor = _CursorExecutor(erro_execute)
+
+    def cursor(self):
+        return self._cursor
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+@pytest.fixture
+def ambiente_executor(monkeypatch):
+    for conta in ("READ", "MUT"):
+        monkeypatch.setenv(f"ORACLE_USER_{conta}", f"usuario_{conta.lower()}_ficticio")
+        monkeypatch.setenv(f"ORACLE_PASSWORD_{conta}", "senha-ficticia")
+    monkeypatch.setenv("ORACLE_DSN", DSN_SENTINELA)
+
+
+@pytest.mark.parametrize(
+    "script_id, binds, ramo, motivo",
+    [
+        ("verificar_dual", {}, "sucesso", None),
+        ("dml_simples", {"id": 1, "nome": "x"}, "sucesso", None),
+        ("plsql_bloco_t6", {}, "sucesso", None),
+        ("verificar_dual", {}, "erro_oracle", "ERRO_ORACLE"),
+        ("verificar_dual", {}, "excecao", "ERRO_ORACLE"),
+    ],
+    ids=["select", "dml", "plsql", "erro_oracle", "excecao"],
+)
+def test_r1_varredura_executor(monkeypatch, ambiente_executor, script_id, binds, ramo, motivo):
+    """C3: o retorno do executor não leva o DSN (V1) nem o texto cru do erro (V3); o código continua."""
+    from src.tools.executor import executar_script
+
+    def connect(*a, **k):
+        if ramo == "erro_oracle":
+            raise ERRO_ORA
+        return _ConexaoExecutor(ERRO_EXC if ramo == "excecao" else None)
+
+    monkeypatch.setattr(oracledb, "connect", connect)
+    texto = executar_script(script_id, binds)
+    resultado = json.loads(texto)
+
+    # O sha256_verificado é o hash do arquivo homologado (o mesmo do registry/ versionado), não um hash de
+    # identidade (V7): só esse valor exato sai da varredura; qualquer outro hash de 64 hexadecimais reprova.
+    sha_do_script = resultado.get("sha256_verificado") or ""
+    _sem_vazamento(texto.replace(sha_do_script, "") if sha_do_script else texto, f"executor:{script_id}:{ramo}")
+    if ramo == "sucesso":
+        assert resultado["status"] == "sucesso" and resultado["inst_id"] == "1"
+    else:
+        assert resultado["motivo"] == motivo
+        assert resultado["codigo_erro"] == ("ORA-99999" if ramo == "erro_oracle" else "RuntimeError")
+        assert resultado["codigo_erro"] in resultado["mensagem"]
+
+
+def test_r1_executor_path_invalido_sem_o_diretorio_de_scripts(monkeypatch, ambiente_executor):
+    """C3 (decisao_c1.md §6): a recusa PATH_INVALIDO não mostra o caminho absoluto do diretório de scripts (que
+    traz o perfil do Windows)."""
+    from unittest.mock import patch
+
+    from src.tools.executor import executar_script
+    from src.tools.registry import obter_caminho_scripts_dir, obter_script
+
+    entrada = obter_script("verificar_dual").model_copy(update={"arquivo": "../../fora.sql"})
+    monkeypatch.setattr(oracledb, "connect", lambda *a, **k: pytest.fail("connect com caminho inválido"))
+    with patch("src.tools.executor.obter_script", return_value=entrada):
+        texto = executar_script("verificar_dual", {})
+
+    resultado = json.loads(texto)
+    assert resultado["motivo"] == "PATH_INVALIDO"
+    diretorio = str(obter_caminho_scripts_dir())
+    assert diretorio not in texto and diretorio.replace("\\", "\\\\") not in texto
+    assert str(RAIZ) not in texto and str(RAIZ).replace("\\", "\\\\") not in texto

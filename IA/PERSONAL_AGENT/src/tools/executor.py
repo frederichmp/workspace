@@ -22,6 +22,8 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple, Union
 import oracledb
 
+from src.tools.oracle_dba import _codigo_erro, _registrar_erro_local
+
 from src.tools.registry import (
     ScriptRegistryEntry,
     carregar_registro,
@@ -59,7 +61,7 @@ def _serializar_valor(valor: Any, limite_lob: int = LIMITE_PADRAO_LOB) -> Any:
                 return conteudo[:limite_lob] + "... [LOB TRUNCADO]"
             return conteudo
         except Exception as e:
-            return f"<Erro ao ler LOB: {str(e)}>"
+            return f"<Erro ao ler LOB: {type(e).__name__}>"
     return valor
 
 
@@ -610,19 +612,20 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                     "sha256_verificado": None,
                     "mensagem": (
                         f"Caminho do arquivo '{registro.arquivo}' tenta acessar diretório externo "
-                        f"a '{scripts_dir}'."
+                        "ao diretório de scripts."
                     ),
                 },
                 ensure_ascii=False,
             )
     except Exception as e:
+        _registrar_erro_local("executar_script", "PATH_INVALIDO", exc=e)
         return json.dumps(
             {
                 "status": "recusado",
                 "motivo": "PATH_INVALIDO",
                 "script_id": script_id,
                 "sha256_verificado": None,
-                "mensagem": f"Falha na validação do caminho do arquivo: {str(e)}",
+                "mensagem": f"Falha na validação do caminho do arquivo: {type(e).__name__}.",
             },
             ensure_ascii=False,
         )
@@ -807,7 +810,6 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                     "status": "sucesso",
                     "script_id": script_id,
                     "sha256_verificado": sha256_calculado,
-                    "instancia": dsn,
                     "inst_id": inst_id,
                     "tipo": registro.tipo,
                     "linhas_afetadas": len(registros_saida),
@@ -845,7 +847,6 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                     "status": "sucesso",
                     "script_id": script_id,
                     "sha256_verificado": sha256_calculado,
-                    "instancia": dsn,
                     "inst_id": inst_id,
                     "tipo": registro.tipo,
                     "linhas_afetadas": linhas_afetadas,
@@ -864,7 +865,6 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                     "status": "sucesso",
                     "script_id": script_id,
                     "sha256_verificado": sha256_calculado,
-                    "instancia": dsn,
                     "inst_id": inst_id,
                     "tipo": registro.tipo,
                     "linhas_afetadas": linhas_afetadas,
@@ -883,7 +883,6 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                     "status": "sucesso",
                     "script_id": script_id,
                     "sha256_verificado": sha256_calculado,
-                    "instancia": dsn,
                     "inst_id": inst_id,
                     "tipo": registro.tipo,
                     "linhas_afetadas": linhas_afetadas,
@@ -893,6 +892,7 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
             )
 
     except oracledb.Error as db_err:
+        _registrar_erro_local("executar_script", "ERRO_ORACLE", exc=db_err)
         if connection is not None:
             try:
                 connection.rollback()
@@ -905,13 +905,14 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                 "motivo": "ERRO_ORACLE",
                 "script_id": script_id,
                 "sha256_verificado": sha256_calculado,
-                "instancia": dsn,
-                "mensagem": str(db_err),
+                "codigo_erro": _codigo_erro(db_err),
+                "mensagem": f"Erro do Oracle {_codigo_erro(db_err)}.",
             },
             ensure_ascii=False,
         )
 
     except Exception as exc:
+        _registrar_erro_local("executar_script", "ERRO_ORACLE", exc=exc)
         if connection is not None:
             try:
                 connection.rollback()
@@ -924,8 +925,8 @@ def executar_script(script_id: str, binds: Optional[Dict[str, Any]] = None) -> s
                 "motivo": "ERRO_ORACLE",
                 "script_id": script_id,
                 "sha256_verificado": sha256_calculado,
-                "instancia": dsn,
-                "mensagem": f"Erro inesperado durante execução: {str(exc)}",
+                "codigo_erro": _codigo_erro(exc),
+                "mensagem": f"Erro inesperado durante execução: {_codigo_erro(exc)}.",
             },
             ensure_ascii=False,
         )
