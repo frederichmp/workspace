@@ -1086,7 +1086,10 @@ def matar_sessao_oracle(
         # de acontecer. Sem retentativa automática: o resultado é devolvido como desconhecido.
         _registrar_erro_local("matar_sessao_oracle", type(exc).__name__, exc=exc)
         if execute_iniciado:
-            mensagem = f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro a partir da chamada ao PKG: {type(exc).__name__}"
+            # R1 ampliada (conferencia_c7.md §6.1): o mesmo texto do ramo Oracle, sem nomear o pacote.
+            mensagem = (
+                f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro a partir da chamada de encerramento: {type(exc).__name__}"
+            )
         else:
             mensagem = _codigo_erro(exc)
         return json.dumps(

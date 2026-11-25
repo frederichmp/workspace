@@ -500,3 +500,37 @@ def test_cli_historico_com_dado_do_banco_nao_vai_a_nuvem(main_cli, monkeypatch, 
     assert llm.chamadas == [], "a nuvem recebeu o histórico com dado do banco"
     assert od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in capsys.readouterr().out
     assert original([{"role": "tool", "name": "coletar_sessoes_ativas", "content": "{}"}]) is True
+
+
+class _LLMSempreFerramenta(_LLMFalso):
+    """Pede uma tool_call em toda chamada (o loop da CLI chega ao limite de 6 passos)."""
+
+    def _create(self, model=None, messages=None, tools=None, **kwargs):
+        self.chamadas.append(list(messages))
+        self.tools.append(tools)
+        tool_call = SimpleNamespace(
+            id=f"call_{len(self.chamadas)}", function=SimpleNamespace(name=self.nome, arguments="{}"),
+        )
+        msg = SimpleNamespace(content=None, tool_calls=[tool_call])
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+
+def test_cli_trava_do_laudo_final_depois_do_limite_de_passos(main_cli, monkeypatch, capsys):
+    """V8c, laudo final da CLI (src/main.py, depois do loop; conferencia_c7.md §6.3): com a nuvem, se o histórico
+    passa a ter dado do banco só na checagem do laudo final (7ª), a nuvem não recebe o laudo: 6 chamadas, não 7."""
+    import tools.oracle_dba as od
+
+    llm = _LLMSempreFerramenta(base_url=URL_GEMINI, nome="ferramenta_inexistente", argumentos={})
+    monkeypatch.setattr(main_cli, "client", llm)
+    checagens = []
+
+    def _historico(mensagens):
+        checagens.append(1)
+        return len(checagens) > 6
+
+    monkeypatch.setattr(main_cli, "historico_tem_dado_do_banco", _historico)
+    main_cli.executar_agente("pedido de teste")
+
+    assert len(checagens) == 7, "a checagem do laudo final não rodou"
+    assert len(llm.chamadas) == 6, "a nuvem recebeu o laudo final com dado do banco"
+    assert od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in capsys.readouterr().out

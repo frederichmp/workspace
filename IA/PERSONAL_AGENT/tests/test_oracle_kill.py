@@ -1085,7 +1085,8 @@ def _casos_t7():
         pytest.param(
             dict(
                 linhas=base, fake=dict(status_pkg="ENCERRADA", erro_getvalue_status=RuntimeError("falha simulada")),
-                proibidos_extra=["host-teste:1521/TESTE", "instancia", "falha simulada"],
+                # R1 ampliada (conferencia_c7.md §6.1; asserção acrescentada): nem a forma curta "PKG" no D8.
+                proibidos_extra=["host-teste:1521/TESTE", "instancia", "falha simulada", "PKG"],
             ),
             "RuntimeError", id="d8",
         ),
