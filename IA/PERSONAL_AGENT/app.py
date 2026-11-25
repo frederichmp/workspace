@@ -155,10 +155,14 @@ from tools.oracle_dba import (
     APROVACAO_TTL_SEGUNDOS,
     MENSAGEM_RESULTADO_DESCONHECIDO,
     MENSAGEM_DESFECHO_NAO_CONFIRMADO,
+    NOME_FERRAMENTA_KILL,
     NOMES_FERRAMENTAS_ORACLE,
+    RESULTADO_KILL_DESABILITADO,
     RESULTADO_ORACLE_SO_LOCAL,
     TEXTO_HISTORICO_COM_DADO_DO_BANCO,
     _registrar_erro_local,
+    ferramentas_do_coordenador,
+    kill_habilitado,
     coordenador_e_local,
     historico_tem_dado_do_banco,
 )
@@ -171,10 +175,10 @@ from tools.rag_search import (
     buscar_script_interno,
 )
 
-# Catálogo de Ferramentas (R1 ampliada V8, falha fechada; decisao_c1.md §3.2): com o coordenador local,
-# Windows + Oracle + RAG; com o coordenador em nuvem, só Windows + RAG (as ferramentas Oracle não são oferecidas).
+# Registro de Ferramentas da interface. O catálogo entregue ao LLM a cada chamada é
+# ferramentas_do_coordenador(TODAS_FERRAMENTAS, local): sem OPS_KILL_PKG_VERSAO=2 o kill sai, e com o coordenador em
+# nuvem saem as ferramentas Oracle (R1 ampliada V8; fase 2, decisao_c1.md §1.2 e §2.2-i).
 TODAS_FERRAMENTAS = os_tools_schema + oracle_tools_schema + rag_tools_schema
-FERRAMENTAS_NUVEM = os_tools_schema + rag_tools_schema
 
 SYSTEM_PROMPT = """Você é o Agente Coordenador, o cérebro central de um sistema autônomo local de administração de TI e Banco de Dados.
 Seus princípios absolutos são:
@@ -275,7 +279,7 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
         response = client.chat.completions.create(
             model=modelo_ativo,
             messages=st.session_state.llm_messages,
-            tools=TODAS_FERRAMENTAS if local else FERRAMENTAS_NUVEM,
+            tools=ferramentas_do_coordenador(TODAS_FERRAMENTAS, local),
         )
         mensagem_resposta = response.choices[0].message
 
@@ -325,6 +329,21 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
                     }
                 )
                 yield f"⛔ `{nome_funcao}` recusada: dados do banco só com o coordenador local."
+                continue
+
+            # Gate de produção do kill (fase 2, decisao_c1.md §2.2-ii), antes do ramo HITL: sem
+            # OPS_KILL_PKG_VERSAO=2, recusa fixa, sem pré-consulta e sem painel.
+            if nome_funcao == NOME_FERRAMENTA_KILL and not kill_habilitado():
+                logging.warning("KILL BLOQUEADO NO DESPACHO (Web): KILL_DESABILITADO (OPS_KILL_PKG_VERSAO)")
+                st.session_state.llm_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": nome_funcao,
+                        "content": RESULTADO_KILL_DESABILITADO,
+                    }
+                )
+                yield "⛔ Encerramento de sessão indisponível nesta instalação (OPS_KILL_PKG_VERSAO)."
                 continue
 
             # ------------------------------------------------------------------
@@ -519,6 +538,13 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
             f"🛑 **Ação Abortada pelo Aprovador (`{aprovador_registro}`):** "
             f"O encerramento da sessão `{sid},{serial}` foi negado. Nenhuma execução no banco."
         )
+    elif desfecho.get("motivo") == "KILL_DESABILITADO":
+        # Fase 2, decisao_c1.md §2.2-iii-b (tela): HITL pendente com o gate desligado antes do clique.
+        aviso_ui = (
+            f"❌ **Intervenção aprovada por `{id_aprovador_limpo}`, mas NÃO EXECUTADA:** encerramento desabilitado "
+            "nesta instalação (OPS_KILL_PKG_VERSAO); nenhuma consulta nem chamada à conta KILL."
+        )
+        st.error(aviso_ui)
     elif desfecho.get("motivo") == "FALHA_LOG_APROVACAO":
         aviso_ui = (
             f"❌ **Intervenção APROVADA por `{id_aprovador_limpo}`, mas NÃO EXECUTADA:** falha ao gravar o "

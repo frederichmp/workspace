@@ -250,6 +250,7 @@ print("\n" + json.dumps({
     "sentinela": final["sentinela"],
     "sentinela_fase3": final["sentinela_fase3"],
     "sentinela_tardia": final["sentinela_tardia"],
+    "ops_kill_pkg_versao": os.environ.get("OPS_KILL_PKG_VERSAO", "AUSENTE"),  # fase 2 (K1-T11): não é segredo
     "por_run": por_run,
     "oracle_dsn_do_shell": final["oracle_dsn_do_shell"],
     "log_total": [m for n, m in capturados],
@@ -306,6 +307,7 @@ def _rodar(
     else:
         env["AGENTDBA_LOG_DIR"] = str(tmp_path / "log")
     env["SCRIPTS_REGISTRY_PATH"] = str(RAIZ / "registry" / "test_scripts.yaml")
+    env.pop("OPS_KILL_PKG_VERSAO", None)  # fase 2 (K1-T11): o filho só a recebe por env_extra ou pelo .env
     if sandbox_shell is not None:
         env["ORACLE_SANDBOX"] = sandbox_shell
     env.update(env_extra or {})
@@ -731,3 +733,20 @@ def test_t1_bloco_carga_env_identico_nas_entradas():
         i = next((k for k, (x, y) in enumerate(zip(a, m)) if x != y), min(len(a), len(m)))
         pytest.fail(f"bloco carga-env divergente: primeira diferença na linha {i + 1} do bloco "
                     f"(app.py {len(a)} linhas, src/main.py {len(m)} linhas)")
+
+
+@pytest.mark.parametrize("entrada", ["cli", "web"])
+def test_k1_t11_gate_vem_do_env_e_o_shell_desliga(entrada, tmp_path):
+    """K1-T11, L22 (fase 2, decisao_c1.md §2.4): um .env com OPS_KILL_PKG_VERSAO=2 e o shell sem a variável dão "2"
+    no processo; com o shell em "0" (sentinela), fica "0" (override=False): o operador desliga pelo shell."""
+    sem_shell = tmp_path / "sem_shell"
+    sem_shell.mkdir()
+    dados = _rodar(entrada, sem_shell, "OPS_KILL_PKG_VERSAO=2\n")
+    assert dados["ops_kill_pkg_versao"] == "2", dados["avisos"]
+    assert dados["leituras_reais"] == []
+
+    com_shell = tmp_path / "com_shell"
+    com_shell.mkdir()
+    dados = _rodar(entrada, com_shell, "OPS_KILL_PKG_VERSAO=2\n", env_extra={"OPS_KILL_PKG_VERSAO": "0"})
+    assert dados["ops_kill_pkg_versao"] == "0", dados["avisos"]
+    assert dados["leituras_reais"] == []

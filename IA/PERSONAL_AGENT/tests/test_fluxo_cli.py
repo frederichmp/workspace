@@ -130,6 +130,8 @@ def main_cli(tmp_path_factory):
     mp.setenv("ORACLE_PASSWORD_KILL", "senha_kill_ficticia")
     mp.setenv("ORACLE_DSN", "host-ficticio.invalid:1521/FAKE")
     mp.delenv("ORACLE_SANDBOX", raising=False)
+    # Fase 2 da R1 (decisao_c1.md §2.3; expectativa alterada, declarada): o kill exige OPS_KILL_PKG_VERSAO=2.
+    mp.setenv("OPS_KILL_PKG_VERSAO", "2")
 
     import socket
 
@@ -534,3 +536,46 @@ def test_cli_trava_do_laudo_final_depois_do_limite_de_passos(main_cli, monkeypat
     assert len(checagens) == 7, "a checagem do laudo final não rodou"
     assert len(llm.chamadas) == 6, "a nuvem recebeu o laudo final com dado do banco"
     assert od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in capsys.readouterr().out
+
+
+# =============================================================================
+# R1 ampliada fase 2, K1 (fase2/decisao_c1.md §2): gate de produção do kill na CLI (K1-T2 e K1-T4)
+# =============================================================================
+
+def test_cli_k1_t4_sem_gate_kill_fora_do_catalogo_e_despacho_recusa(main_cli, monkeypatch, isolar_log_aprovacao, capsys):
+    """K1-T2 na interface e K1-T4 (mata M_K1_CAT_LOCAL na CLI e M_K1_DESP_CLI): coordenador local e sem
+    OPS_KILL_PKG_VERSAO. O kill não está no catálogo; o LLM o chama mesmo assim e recebe a recusa fixa, sem
+    conduzir_kill_hitl, sem prompt, sem conexão e sem JSONL."""
+    import tools.oracle_dba as od
+
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+    monkeypatch.setattr(main_cli, "conduzir_kill_hitl", lambda *a, **k: pytest.fail("conduzir_kill_hitl chamado"))
+    monkeypatch.setattr("builtins.input", lambda *a, **k: pytest.fail("prompt HITL exibido"))
+    monkeypatch.setattr(od.oracledb, "connect", lambda *a, **k: pytest.fail("conexão com o kill desabilitado"))
+    llm = _rodar(main_cli, monkeypatch, _LLMFalso(nome="matar_sessao_oracle", argumentos=dict(ARGS_KILL)))
+
+    nomes = _nomes(llm.tools[0])
+    assert "matar_sessao_oracle" not in nomes and (NOMES_ORACLE - {"matar_sessao_oracle"}) <= nomes
+    (tool,) = _tools_vistas(llm)
+    assert tool["name"] == "matar_sessao_oracle" and tool["content"] == od.RESULTADO_KILL_DESABILITADO
+    assert not isolar_log_aprovacao.exists()
+    assert "indisponível nesta instalação (OPS_KILL_PKG_VERSAO)" in capsys.readouterr().out
+
+
+def test_cli_k1_t6b_gate_retirado_durante_o_prompt(cenario, monkeypatch):
+    """K1-T6b na CLI (além da lista do §2.4; mata M_K1_TELA_CLI): a variável é retirada entre o aprovador e a
+    confirmação. Uma RESULTADO KILL_DESABILITADO sem INTENCAO, só a pré-consulta DIAG, sem conta KILL e sem
+    e-mail; a tela diz que a intervenção aprovada NÃO foi executada."""
+    def _entradas():
+        yield "dba"
+        monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+        yield "S"
+
+    r = cenario([_linha_alvo(), _linha_alvo()], "ENCERRADA", _entradas())
+    reg = _um_registro(r)
+    assert reg["fase"] == "RESULTADO" and reg["decisao"] == "APROVADO" and reg["aprovador"] == "dba"
+    assert reg["resultado_banco"] == "KILL_DESABILITADO" and reg["resultado_desconhecido"] is False
+    assert r.consultas_diag == 1 and r.oracle.conexoes_kill == [] and r.emails == []
+    assert "NÃO EXECUTADA: encerramento desabilitado nesta instalação (OPS_KILL_PKG_VERSAO)" in r.tela
+    assert r.json_tool["motivo"] == "KILL_DESABILITADO" and r.json_tool["executado"] is False
+    assert "dba" not in json.dumps(r.json_tool, ensure_ascii=False)

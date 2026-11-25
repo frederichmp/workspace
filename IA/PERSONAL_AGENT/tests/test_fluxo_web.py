@@ -142,7 +142,8 @@ _AUSENTE = object()
 _ATRIBUTO_ESTADO_ENV = "_personal_agent_estado_env"
 
 
-def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=True, ollama="local"):
+def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=True, ollama="local",
+            versao_pkg="2"):
     monkeypatch.syspath_prepend(str(RAIZ / "src"))
     monkeypatch.syspath_prepend(str(RAIZ))
     monkeypatch.setenv("ORACLE_USER_DIAG", USER_DIAG_FAKE)
@@ -152,6 +153,11 @@ def _montar(monkeypatch, tmp_path, linhas_diag, status_pkg=None, kill_permitido=
     monkeypatch.setenv("ORACLE_DSN", "host-teste:1521/TESTE")
     monkeypatch.setenv("EMAIL_DESTINATARIO", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
+    # Fase 2 da R1 (decisao_c1.md §2.3; expectativa alterada, declarada): o kill exige OPS_KILL_PKG_VERSAO=2.
+    if versao_pkg is None:
+        monkeypatch.delenv("OPS_KILL_PKG_VERSAO", raising=False)
+    else:
+        monkeypatch.setenv("OPS_KILL_PKG_VERSAO", versao_pkg)
 
     # app.py chama load_dotenv(ROOT/".env"): proibido ler o .env real (stubs + guarda; open/stat vão ao fictício)
     ficticio = tmp_path / "env_ficticio_web.env"
@@ -247,9 +253,9 @@ def montar_web(monkeypatch, tmp_path, snapshot_logs_reais):
     criados = []
     estado_env_antes = vars(sys).get(_ATRIBUTO_ESTADO_ENV, _AUSENTE)
 
-    def _fabrica(linhas_diag, status_pkg=None, kill_permitido=True, ollama="local"):
+    def _fabrica(linhas_diag, status_pkg=None, kill_permitido=True, ollama="local", versao_pkg="2"):
         vars(sys).pop(_ATRIBUTO_ESTADO_ENV, None)
-        amb = _montar(monkeypatch, tmp_path, linhas_diag, status_pkg, kill_permitido, ollama)
+        amb = _montar(monkeypatch, tmp_path, linhas_diag, status_pkg, kill_permitido, ollama, versao_pkg)
         criados.append(amb)
         return amb
 
@@ -718,3 +724,72 @@ def test_web_c3_erro_execucao_so_com_o_tipo(montar_web, monkeypatch):
     (tool,) = _tools_vistas(amb)
     assert json.loads(tool["content"]) == {"erro_execucao": "RuntimeError"}
     assert not any("exc-sentinela" in json.dumps(m, default=str) for msgs in amb.mensagens_llm for m in msgs)
+
+
+# =============================================================================
+# R1 ampliada fase 2, K1 (fase2/decisao_c1.md §2): gate de produção do kill na Web (K1-T2, K1-T3 e K1-T7)
+# =============================================================================
+
+def test_web_k1_t3_sem_gate_kill_fora_do_catalogo_e_despacho_recusa(montar_web, monkeypatch, caplog):
+    """K1-T2 na interface e K1-T3 (mata M_K1_CAT_LOCAL na Web e M_K1_DESP_WEB): coordenador local e sem
+    OPS_KILL_PKG_VERSAO. O kill não está no catálogo; o LLM o chama mesmo assim e recebe a recusa fixa, sem
+    preparar (sem pré-consulta e sem painel), sem JSONL e sem e-mail."""
+    amb = montar_web([_linha_alvo()], kill_permitido=False, versao_pkg=None)
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    chamadas = []
+
+    def _preparar_espiao(*a, **k):  # o rerun reimporta o nome de tools.oracle_dba
+        chamadas.append(1)
+        return {"requer_aprovacao": False, "motivo": "ESPIAO", "resultado_tool": "{}"}
+
+    monkeypatch.setattr(od, "preparar_intervencao_kill", _preparar_espiao)
+    _pedir(amb)
+
+    assert amb.bases_llm[0] == "http://localhost:11434/v1"
+    nomes = _nomes(amb.tools_llm[0])
+    assert "matar_sessao_oracle" not in nomes and (NOMES_ORACLE - {"matar_sessao_oracle"}) <= nomes
+    assert chamadas == []
+    (tool,) = _tools_vistas(amb)
+    assert tool["name"] == "matar_sessao_oracle" and tool["content"] == od.RESULTADO_KILL_DESABILITADO
+    assert amb.at.session_state.hitl_pendente is None and _painel_ausente(amb.at)
+    assert amb.registros() == [] and amb.emails == [] and amb.oracle.conexoes_kill == []
+    # o aviso do yield vai a um st.status que some no rerun; o registro local fica no log
+    assert "KILL BLOQUEADO NO DESPACHO (Web): KILL_DESABILITADO (OPS_KILL_PKG_VERSAO)" in caplog.text
+
+
+def test_web_k1_t7_hitl_pendente_com_o_gate_retirado_antes_do_clique(montar_web, monkeypatch):
+    """K1-T7 (ponto do 9.4.2; mata M_K1_REG e M_K1_REG_APOS_INTENCAO na Web): o painel abre com "2"; a variável é
+    retirada; o clique em aprovar grava uma RESULTADO KILL_DESABILITADO sem INTENCAO, sem reconsulta DIAG, sem
+    conta KILL e sem e-mail. Não se contam conexões globais: o rerun do painel faz DIAG (L8)."""
+    linha = _linha_alvo()
+    amb = montar_web([linha, linha], status_pkg="ENCERRADA")
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    _ate_painel_hitl(amb)
+
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+    chamadas = []
+
+    def _espiao(nome):
+        def _f(*a, **k):
+            chamadas.append(nome)
+            raise RuntimeError(f"{nome} chamado com o kill desabilitado")
+        return _f
+
+    monkeypatch.setattr(od, "executar_kill_verificado", _espiao("executar_kill_verificado"))
+    monkeypatch.setattr(od, "consultar_alvo_sessao_diag", _espiao("consultar_alvo_sessao_diag"))
+    _decidir(amb, "btn_hitl_approve", "dba_teste")
+
+    assert chamadas == []
+    (reg,) = amb.registros()
+    assert reg["fase"] == "RESULTADO" and reg["decisao"] == "APROVADO" and reg["aprovador"] == "dba_teste"
+    assert reg["resultado_banco"] == "KILL_DESABILITADO" and reg["motivo"] == "KILL_DESABILITADO"
+    assert reg["resultado_desconhecido"] is False
+    assert amb.oracle.conexoes_kill == [] and amb.emails == []
+    assert amb.at.session_state.hitl_pendente is None and _painel_ausente(amb.at)
+    assert any(
+        "NÃO EXECUTADA:** encerramento desabilitado nesta instalação" in m["content"]
+        for m in amb.at.session_state.messages
+    )
+    devolvido = amb.json_devolvido_ao_llm()
+    assert devolvido["motivo"] == "KILL_DESABILITADO" and devolvido["executado"] is False
+    assert "dba_teste" not in json.dumps(devolvido, ensure_ascii=False)

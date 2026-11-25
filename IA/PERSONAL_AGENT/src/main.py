@@ -146,10 +146,14 @@ from tools.oracle_dba import (
     APROVACAO_TTL_SEGUNDOS,
     MENSAGEM_RESULTADO_DESCONHECIDO,
     MENSAGEM_DESFECHO_NAO_CONFIRMADO,
+    NOME_FERRAMENTA_KILL,
     NOMES_FERRAMENTAS_ORACLE,
+    RESULTADO_KILL_DESABILITADO,
     RESULTADO_ORACLE_SO_LOCAL,
     TEXTO_HISTORICO_COM_DADO_DO_BANCO,
     _registrar_erro_local,
+    ferramentas_do_coordenador,
+    kill_habilitado,
     coordenador_e_local,
     historico_tem_dado_do_banco,
 )
@@ -190,10 +194,10 @@ def _inicializar_cliente_coordenador() -> tuple[OpenAI, str]:
 
 client, MODELO = _inicializar_cliente_coordenador()
 
-# 4. Catálogo de Ferramentas (R1 ampliada V8, falha fechada; decisao_c1.md §3.2): com o coordenador local,
-# SO + Oracle + RAG; com o coordenador em nuvem, só SO + RAG (as ferramentas Oracle não são oferecidas).
+# 4. Registro de Ferramentas da interface. O catálogo entregue ao LLM a cada chamada é
+# ferramentas_do_coordenador(todas_ferramentas, local): sem OPS_KILL_PKG_VERSAO=2 o kill sai, e com o coordenador
+# em nuvem saem as ferramentas Oracle (R1 ampliada V8; fase 2, decisao_c1.md §1.2 e §2.2-i).
 todas_ferramentas = os_tools_schema + oracle_tools_schema + rag_tools_schema
-ferramentas_nuvem = os_tools_schema + rag_tools_schema
 
 # 5. System Prompt do Coordenador
 SYSTEM_PROMPT = """Você é o Agente Coordenador, o cérebro central de um sistema autônomo local de administração de TI e Banco de Dados.
@@ -253,6 +257,13 @@ def _exibir_desfecho_kill_cli(desfecho: dict) -> None:
         )
     elif desfecho["decisao"] != "APROVADO":
         print(f"[Sistema]: Intervenção NÃO aprovada ({desfecho['motivo']}). Nenhuma execução no banco.")
+    elif desfecho.get("motivo") == "KILL_DESABILITADO":
+        # Fase 2, decisao_c1.md §2.2-iii-b (tela): gate desligado depois do prompt.
+        print(
+            f"\033[91m[Sistema]: Intervenção aprovada por '{desfecho['aprovador']}', mas NÃO EXECUTADA: "
+            "encerramento desabilitado nesta instalação (OPS_KILL_PKG_VERSAO); nenhuma consulta nem chamada "
+            "à conta KILL.\033[0m"
+        )
     elif desfecho.get("motivo") == "FALHA_LOG_APROVACAO":
         print(
             f"\033[91m[Sistema]: Intervenção APROVADA por '{desfecho['aprovador']}', mas NÃO EXECUTADA: "
@@ -332,7 +343,7 @@ def executar_agente(prompt_usuario: str) -> None:
         response = client.chat.completions.create(
             model=MODELO,
             messages=messages,
-            tools=todas_ferramentas if local else ferramentas_nuvem,
+            tools=ferramentas_do_coordenador(todas_ferramentas, local),
         )
 
         mensagem_resposta = response.choices[0].message
@@ -367,6 +378,13 @@ def executar_agente(prompt_usuario: str) -> None:
                 # coordenador em nuvem, ferramenta Oracle devolve a recusa fixa, sem consultar nada.
                 if not local and nome_funcao in NOMES_FERRAMENTAS_ORACLE:
                     resultado_tool = RESULTADO_ORACLE_SO_LOCAL
+
+                # Gate de produção do kill (fase 2, decisao_c1.md §2.2-ii): sem OPS_KILL_PKG_VERSAO=2, recusa fixa;
+                # conduzir_kill_hitl não é chamado (sem pré-consulta e sem prompt).
+                elif nome_funcao == NOME_FERRAMENTA_KILL and not kill_habilitado():
+                    logging.warning("KILL BLOQUEADO NO DESPACHO (CLI): KILL_DESABILITADO (OPS_KILL_PKG_VERSAO)")
+                    print("[Sistema]: Encerramento de sessão indisponível nesta instalação (OPS_KILL_PKG_VERSAO).")
+                    resultado_tool = RESULTADO_KILL_DESABILITADO
 
                 # Rotas do Windows
                 elif nome_funcao == "coletar_metricas_hardware":

@@ -227,6 +227,52 @@ def historico_tem_dado_do_banco(mensagens: Any) -> bool:
         return True
 
 
+# ---- R1 ampliada, fase 2 (docs/entregas/1.11/r1_ampliada/fase2/decisao_c1.md §2): gate de produção do kill ----
+NOME_FERRAMENTA_KILL = "matar_sessao_oracle"
+
+RESULTADO_KILL_DESABILITADO = json.dumps(
+    {
+        "status": "recusado",
+        "motivo": "KILL_DESABILITADO",
+        "status_banco": "KILL_DESABILITADO",
+        "resultado_desconhecido": False,
+        "mensagem": "Encerramento de sessão indisponível nesta instalação. Nenhuma consulta nem conexão foi feita.",
+    },
+    ensure_ascii=False,
+)
+
+
+def kill_habilitado() -> bool:
+    """
+    Gate de produção do kill (decisao_c1.md §2.1): só o valor exato "2" de OPS_KILL_PKG_VERSAO (PKG_OPS_KILL v2
+    instalado) habilita o encerramento. Lido a cada chamada, sem strip, sem cache e sem reler o .env; qualquer
+    outro valor, ou a ausência, deixa o kill indisponível (falha fechada).
+    """
+    return os.environ.get("OPS_KILL_PKG_VERSAO") == "2"
+
+
+def ferramentas_do_coordenador(schemas: Any, local: bool) -> List[Dict[str, Any]]:
+    """
+    Catálogo entregue ao LLM a cada chamada (decisao_c1.md §1.1 e §2.2-i). Pula a entrada malformada (falha
+    fechada). Sem o gate, matar_sessao_oracle sai do catálogo, também com o coordenador local. Com o coordenador em
+    nuvem, saem as ferramentas Oracle (V8).
+    """
+    catalogo: List[Dict[str, Any]] = []
+    for schema in schemas or []:
+        try:
+            nome = schema["function"]["name"]
+        except Exception:
+            continue
+        if not isinstance(nome, str):
+            continue
+        if nome == NOME_FERRAMENTA_KILL and not kill_habilitado():
+            continue
+        if not local and nome in NOMES_FERRAMENTAS_ORACLE:
+            continue
+        catalogo.append(schema)
+    return catalogo
+
+
 def _extrair_host_porta(dsn: str) -> Tuple[str, int]:
     """
     Extrai o IP/Hostname e a porta a partir de uma string Easy Connect (ex: 10.10.20.16:1521/MODELO).
@@ -954,6 +1000,14 @@ def matar_sessao_oracle(
             },
             ensure_ascii=False,
         )
+
+    # Gate de produção (decisao_c1.md §2.2-iv): sem OPS_KILL_PKG_VERSAO=2, nenhuma sonda nem conexão.
+    if not kill_habilitado():
+        logger.warning(
+            f"KILL BLOQUEADO: KILL_DESABILITADO (OPS_KILL_PKG_VERSAO) | inst_id={inst_id_int}, sid={sid_int}, "
+            f"serial={serial_int}"
+        )
+        return RESULTADO_KILL_DESABILITADO
 
     # 3. Pré-validação rápida de rede / VPN
     check_rede = verificar_acessibilidade_host(dsn, timeout=3.0)
@@ -1837,6 +1891,79 @@ def registrar_decisao_kill(
             "email_detalhe": None,
         }
 
+    # Gate de produção (decisao_c1.md §2.2-iii-b): APROVADO, mas sem OPS_KILL_PKG_VERSAO=2 (ex.: HITL pendente com a
+    # variável retirada antes do clique). Uma RESULTADO sem INTENCAO; sem reconsulta, sem conta KILL e sem e-mail.
+    if not kill_habilitado():
+        falha_registro_gate: Optional[str] = None
+        try:
+            registro = registrar_log_aprovacao_kill(
+                aprovador=aprovador_limpo,
+                decisao="APROVADO",
+                hash_payload=hash_aprovado,
+                parametros=parametros,
+                alvo=alvo,
+                resultado_banco="KILL_DESABILITADO",
+                motivo="KILL_DESABILITADO",
+                caminho_log=destino_log,
+                fase="RESULTADO",
+                id_intervencao=id_intervencao,
+                resultado_desconhecido=False,
+            )
+        except Exception as exc:
+            registro = None
+            falha_registro_gate = "RESULTADO"
+            logger.error(
+                f"AUDITORIA HITL: FALHA AO GRAVAR RESULTADO (APROVADO/KILL_DESABILITADO, {canal}) | "
+                f"id_intervencao={id_intervencao} | erro={type(exc).__name__} "
+                f"errno={getattr(exc, 'errno', None)} | registro="
+                + _serializar_para_log(
+                    {
+                        "fase": "RESULTADO",
+                        "id_intervencao": id_intervencao,
+                        "aprovador": aprovador_limpo,
+                        "decisao": "APROVADO",
+                        "resultado_banco": "KILL_DESABILITADO",
+                        "resultado_desconhecido": False,
+                        "motivo": "KILL_DESABILITADO",
+                        "hash_payload": hash_aprovado,
+                        "parametros": parametros,
+                    }
+                )
+            )
+        logger.warning(
+            f"AUDITORIA HITL: APROVADO por {aprovador_limpo} ({canal}), mas KILL_DESABILITADO "
+            f"(OPS_KILL_PKG_VERSAO) | inst_id={inst_id}, sid={sid}, serial={serial} | Hash={hash_aprovado} | "
+            f"id_intervencao={id_intervencao}"
+        )
+        resultado_tool = json.dumps(
+            {
+                "status": "abortado",
+                "decisao": "APROVADO",
+                "motivo": "KILL_DESABILITADO",
+                "resultado_banco": "KILL_DESABILITADO",
+                "executado": False,
+                "mensagem": (
+                    "Encerramento de sessão indisponível nesta instalação; intervenção NÃO executada. "
+                    "Nenhuma consulta nem chamada à conta KILL foi feita."
+                ),
+            },
+            ensure_ascii=False,
+        )
+        return {
+            "decisao": "APROVADO",
+            "resultado_banco": "KILL_DESABILITADO",
+            "executado": False,
+            "motivo": "KILL_DESABILITADO",
+            "resultado_tool": resultado_tool,
+            "registro": registro,
+            "falha_registro": falha_registro_gate,
+            "id_intervencao": id_intervencao,
+            "resultado_desconhecido": False,
+            "assunto_email": None,
+            "email_enviado": None,
+            "email_detalhe": None,
+        }
+
     # 1. INTENCAO durável ANTES de qualquer conexão posterior à decisão (reconsulta DIAG, sonda, KILL).
     try:
         registrar_log_aprovacao_kill(
@@ -2108,6 +2235,18 @@ def preparar_intervencao_kill(
             ),
         }
     inst_id_int, sid_int, serial_int = validados
+
+    # Gate de produção (decisao_c1.md §2.2-iii-a): sem OPS_KILL_PKG_VERSAO=2, sem pré-consulta e sem prompt.
+    if not kill_habilitado():
+        logger.warning(
+            f"HITL RECUSADO LOCALMENTE: KILL_DESABILITADO (OPS_KILL_PKG_VERSAO) | inst_id={inst_id_int}, "
+            f"sid={sid_int}, serial={serial_int}"
+        )
+        return {
+            "requer_aprovacao": False,
+            "motivo": "KILL_DESABILITADO",
+            "resultado_tool": RESULTADO_KILL_DESABILITADO,
+        }
 
     check_alvo = consultar_alvo_sessao_diag(inst_id=inst_id_int, sid=sid_int, serial=serial_int)
     if not check_alvo.get("elegivel"):

@@ -301,6 +301,8 @@ from tests.fakes_oracle import (  # noqa: E402
 @pytest.fixture
 def ambiente_fake(monkeypatch):
     """Credenciais fictícias, rede sempre acessível e e-mail capturado (enviar_alerta_email mockado)."""
+    # Fase 2 da R1 (decisao_c1.md §2.3; expectativa alterada, declarada): o kill exige OPS_KILL_PKG_VERSAO=2.
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
     monkeypatch.setenv("ORACLE_USER_DIAG", USER_DIAG_FAKE)
     monkeypatch.setenv("ORACLE_PASSWORD_DIAG", "senha-fake")
     monkeypatch.setenv("ORACLE_USER_KILL", USER_KILL_FAKE)
@@ -2036,3 +2038,236 @@ def test_sandbox_privilegio_negativo_startup_kill():
     assert "ORA-01031" in str(exc_info.value), f"Esperado ORA-01031, obtido: {exc_info.value}"
     cur.close()
     conn.close()
+
+
+# =============================================================================
+# R1 ampliada fase 2, K1 (fase2/decisao_c1.md §2): gate de produção OPS_KILL_PKG_VERSAO=2
+# =============================================================================
+
+TEXTOS_FORA_DO_LLM_K1 = ("OPS_KILL_PKG_VERSAO", "PKG_OPS_KILL", "OPS_OWNER")
+NOMES_ORACLE_DIAG_K1 = {"coletar_sessoes_ativas", "coletar_top_sql", "coletar_plano_execucao"}
+INSTANTE_K1 = datetime(2026, 11, 25, 12, 0, 0, tzinfo=timezone.utc)
+PREPARADO_K1 = "2026-11-25T11:59:30+00:00"  # 30 s antes de INSTANTE_K1: dentro do TTL
+
+
+def _proibido_k1(nome):
+    def _falha(*a, **k):
+        pytest.fail(f"{nome} chamado com o kill desabilitado")
+    return _falha
+
+
+def _nomes_catalogo_k1(catalogo):
+    return {s["function"]["name"] for s in catalogo}
+
+
+@pytest.mark.parametrize(
+    "valor",
+    [None, "", "0", "1", "3", " 2", "2 ", "02", "2.0", "v2", "\uff12", "2\n"],
+    ids=["ausente", "vazio", "0", "1", "3", "espaco_antes", "espaco_depois", "02", "2.0", "v2", "largo", "quebra"],
+)
+def test_k1_t1_gate_so_com_o_valor_exato_2(monkeypatch, valor):
+    """K1-T1 (mata M_K1_STRIP, M_K1_PERMISSIVO e M_K1_DEFAULT_2): todo valor diferente do exato "2", e a ausência,
+    deixam o kill indisponível. "0" é a sentinela do operador (L22)."""
+    if valor is None:
+        monkeypatch.delenv("OPS_KILL_PKG_VERSAO", raising=False)
+    else:
+        monkeypatch.setenv("OPS_KILL_PKG_VERSAO", valor)
+    assert oracle_dba.kill_habilitado() is False
+
+
+def test_k1_t1_gate_lido_a_cada_chamada(monkeypatch):
+    """K1-T1 (mata M_K1_CACHE_IMPORT): "2" habilita e a retirada desabilita no mesmo processo, sem reimport."""
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
+    assert oracle_dba.kill_habilitado() is True
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+    assert oracle_dba.kill_habilitado() is False
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
+    assert oracle_dba.kill_habilitado() is True
+
+
+def test_k1_t2_catalogo_sem_gate_tira_o_kill_tambem_no_local(monkeypatch):
+    """K1-T2, unidade (mata M_K1_CAT_LOCAL): sem o gate, o kill sai do catálogo também com o coordenador local, e
+    as outras 3 Oracle ficam (positivo). Com o gate, aparece no local e não na nuvem. Entrada malformada é pulada."""
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO", raising=False)
+    local = _nomes_catalogo_k1(oracle_dba.ferramentas_do_coordenador(oracle_tools_schema, True))
+    assert "matar_sessao_oracle" not in local
+    assert NOMES_ORACLE_DIAG_K1 <= local
+
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
+    assert "matar_sessao_oracle" in _nomes_catalogo_k1(oracle_dba.ferramentas_do_coordenador(oracle_tools_schema, True))
+    nuvem = _nomes_catalogo_k1(oracle_dba.ferramentas_do_coordenador(oracle_tools_schema, False))
+    assert not (nuvem & (NOMES_ORACLE_DIAG_K1 | {"matar_sessao_oracle"}))
+    assert oracle_dba.ferramentas_do_coordenador([{}, {"function": {"name": 3}}, None], True) == []
+
+
+def test_k1_t5_preparar_e_conduzir_sem_gate_sem_pre_consulta(monkeypatch, tmp_path, ambiente_fake, caplog):
+    """K1-T5 (mata M_K1_PREP): parâmetros válidos e sem o gate: preparar e conduzir devolvem KILL_DESABILITADO, sem
+    pré-consulta DIAG, sem prompt, sem conexão e sem JSONL. O JSON fixo não cita variável, pacote nem OPS_OWNER."""
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+    monkeypatch.setattr(oracle_dba, "consultar_alvo_sessao_diag", _proibido_k1("consultar_alvo_sessao_diag"))
+    monkeypatch.setattr(oracledb, "connect", _proibido_k1("oracledb.connect"))
+    log = tmp_path / "kill.log"
+
+    with caplog.at_level(logging.WARNING, logger=oracle_dba.logger.name):
+        prep = oracle_dba.preparar_intervencao_kill(dict(ARGS_ALVO), caminho_log=log)
+        desfecho = conduzir_kill_hitl(
+            dict(ARGS_ALVO), solicitar_aprovacao=_proibido_k1("solicitar_aprovacao"), canal="TESTE", caminho_log=log
+        )
+
+    assert prep == {
+        "requer_aprovacao": False,
+        "motivo": "KILL_DESABILITADO",
+        "resultado_tool": oracle_dba.RESULTADO_KILL_DESABILITADO,
+    }
+    assert desfecho["prompt_exibido"] is False and desfecho["motivo"] == "KILL_DESABILITADO"
+    assert desfecho["executado"] is False and desfecho["resultado_desconhecido"] is False
+    assert desfecho["resultado_tool"] == oracle_dba.RESULTADO_KILL_DESABILITADO
+    assert json.loads(oracle_dba.RESULTADO_KILL_DESABILITADO) == {
+        "status": "recusado",
+        "motivo": "KILL_DESABILITADO",
+        "status_banco": "KILL_DESABILITADO",
+        "resultado_desconhecido": False,
+        "mensagem": "Encerramento de sessão indisponível nesta instalação. Nenhuma consulta nem conexão foi feita.",
+    }
+    for texto in TEXTOS_FORA_DO_LLM_K1:
+        assert texto not in oracle_dba.RESULTADO_KILL_DESABILITADO
+    assert not log.exists()
+    assert ambiente_fake == []
+    assert caplog.text.count("HITL RECUSADO LOCALMENTE: KILL_DESABILITADO") == 2
+
+
+def _afirmar_resultado_kill_desabilitado_k1(log, desfecho, aprovador="dba_teste"):
+    registros = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()]
+    assert len(registros) == 1, f"só a RESULTADO, sem INTENCAO: {[r.get('fase') for r in registros]}"
+    (reg,) = registros
+    assert reg["fase"] == "RESULTADO" and reg["decisao"] == "APROVADO" and reg["aprovador"] == aprovador
+    assert reg["resultado_banco"] == "KILL_DESABILITADO" and reg["motivo"] == "KILL_DESABILITADO"
+    assert reg["resultado_desconhecido"] is False
+    assert desfecho["decisao"] == "APROVADO" and desfecho["executado"] is False
+    assert desfecho["motivo"] == "KILL_DESABILITADO" and desfecho["resultado_banco"] == "KILL_DESABILITADO"
+    assert desfecho["resultado_desconhecido"] is False and desfecho["falha_registro"] is None
+    assert desfecho["id_intervencao"] == reg["id_intervencao"]
+    assert desfecho["email_enviado"] is None and desfecho["assunto_email"] is None
+    tool = json.loads(desfecho["resultado_tool"])
+    assert tool["status"] == "abortado" and tool["decisao"] == "APROVADO" and tool["executado"] is False
+    assert tool["motivo"] == "KILL_DESABILITADO" and tool["resultado_banco"] == "KILL_DESABILITADO"
+    assert aprovador not in desfecho["resultado_tool"], "aprovador vai ao LLM (V5)"
+    for texto in TEXTOS_FORA_DO_LLM_K1:
+        assert texto not in desfecho["resultado_tool"]
+
+
+def test_k1_t6a_registrar_aprovado_sem_gate_so_resultado(monkeypatch, tmp_path, ambiente_fake, caplog):
+    """K1-T6a (mata M_K1_REG e M_K1_REG_APOS_INTENCAO): APROVADO, no TTL e com aprovador, mas sem o gate: uma
+    RESULTADO KILL_DESABILITADO sem INTENCAO; sem execução, sem e-mail e sem conexão."""
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+    monkeypatch.setattr(oracle_dba, "executar_kill_verificado", _proibido_k1("executar_kill_verificado"))
+    monkeypatch.setattr(oracle_dba, "enviar_alerta_email", _proibido_k1("enviar_alerta_email"))
+    monkeypatch.setattr(oracledb, "connect", _proibido_k1("oracledb.connect"))
+    log = tmp_path / "kill.log"
+
+    with caplog.at_level(logging.WARNING, logger=oracle_dba.logger.name):
+        desfecho = registrar_decisao_kill(
+            decisao="APROVADO", aprovador="dba_teste", inst_id=1, sid=101, serial=202, alvo={},
+            hash_aprovado="hash-fake", canal="TESTE", preparado_em=PREPARADO_K1, caminho_log=log,
+            agora=lambda: INSTANTE_K1,
+        )
+
+    _afirmar_resultado_kill_desabilitado_k1(log, desfecho)
+    assert "AUDITORIA HITL: APROVADO por dba_teste (TESTE), mas KILL_DESABILITADO" in caplog.text
+
+
+def test_k1_t6b_variavel_retirada_durante_o_prompt(monkeypatch, tmp_path, ambiente_fake):
+    """K1-T6b: dentro de conduzir_kill_hitl, a variável é retirada durante o prompt da CLI e a decisão é APROVADO:
+    mesmo desfecho do T6a; só a pré-consulta DIAG de antes do prompt, nenhuma conta KILL."""
+    oracle_fake = _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo(), _linha_alvo()], status_pkg="ENCERRADA"))
+    monkeypatch.setattr(oracle_dba, "executar_kill_verificado", _proibido_k1("executar_kill_verificado"))
+
+    def _solicitar(prep):
+        monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+        return "APROVADO", "dba_teste", None
+
+    log = tmp_path / "kill.log"
+    desfecho = conduzir_kill_hitl(dict(ARGS_ALVO), solicitar_aprovacao=_solicitar, canal="TESTE", caminho_log=log)
+
+    assert desfecho["prompt_exibido"] is True
+    _afirmar_resultado_kill_desabilitado_k1(log, desfecho)
+    assert oracle_fake.conexoes_kill == []
+    assert oracle_fake.conexoes.count(USER_DIAG_FAKE) == 1
+    assert ambiente_fake == []
+
+
+def test_k1_t6c_rejeitado_sem_gate_grava_como_sempre(monkeypatch, tmp_path, ambiente_fake):
+    """K1-T6c (controle): REJEITADO sem o gate grava a RESULTADO REJEITADO de sempre, sem KILL_DESABILITADO."""
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+    log = tmp_path / "kill.log"
+    desfecho = registrar_decisao_kill(
+        decisao="REJEITADO", aprovador="dba_teste", inst_id=1, sid=101, serial=202, alvo={},
+        hash_aprovado="hash-fake", canal="TESTE", preparado_em=PREPARADO_K1, caminho_log=log,
+        agora=lambda: INSTANTE_K1,
+    )
+    (reg,) = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()]
+    assert reg["fase"] == "RESULTADO" and reg["decisao"] == "REJEITADO"
+    assert reg["resultado_banco"] != "KILL_DESABILITADO" and reg.get("motivo") != "KILL_DESABILITADO"
+    assert desfecho["decisao"] == "REJEITADO" and desfecho["motivo"] != "KILL_DESABILITADO"
+    assert desfecho["executado"] is False
+    assert ambiente_fake == []
+
+
+def test_k1_t6d_falha_ao_gravar_a_resultado_do_gate(monkeypatch, tmp_path, ambiente_fake, caplog):
+    """K1-T6d (além da lista do §2.4; padrão de falha de gravação da RESULTADO): a gravação falha, o desfecho marca
+    falha_registro="RESULTADO" e o registro completo vai ao log de erro; nada é executado."""
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+    monkeypatch.setattr(oracle_dba, "executar_kill_verificado", _proibido_k1("executar_kill_verificado"))
+
+    def _falha_gravacao(*a, **k):
+        raise OSError(28, "disco cheio simulado")
+
+    monkeypatch.setattr(oracle_dba, "registrar_log_aprovacao_kill", _falha_gravacao)
+    with caplog.at_level(logging.WARNING, logger=oracle_dba.logger.name):
+        desfecho = registrar_decisao_kill(
+            decisao="APROVADO", aprovador="dba_teste", inst_id=1, sid=101, serial=202, alvo={},
+            hash_aprovado="hash-fake", canal="TESTE", preparado_em=PREPARADO_K1, caminho_log=tmp_path / "kill.log",
+            agora=lambda: INSTANTE_K1,
+        )
+
+    assert desfecho["falha_registro"] == "RESULTADO" and desfecho["registro"] is None
+    assert desfecho["executado"] is False and desfecho["motivo"] == "KILL_DESABILITADO"
+    erros = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    (erro,) = [m for m in erros if "FALHA AO GRAVAR RESULTADO (APROVADO/KILL_DESABILITADO, TESTE)" in m]
+    registro = json.loads(erro.split("registro=", 1)[1])
+    assert registro["resultado_banco"] == "KILL_DESABILITADO" and registro["resultado_desconhecido"] is False
+    assert registro["id_intervencao"] == desfecho["id_intervencao"] and registro["aprovador"] == "dba_teste"
+    assert ambiente_fake == []
+
+
+def test_k1_t8_matar_sem_gate_antes_da_sonda(monkeypatch, ambiente_fake, caplog):
+    """K1-T8 (mata M_K1_MATAR e M_K1_MATAR_APOS_SONDA): parâmetros e identidade válidos, sem o gate:
+    KILL_DESABILITADO antes da sonda de rede e de oracledb.connect."""
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+    sondas = []
+
+    def _sonda(dsn, timeout=3.0):
+        sondas.append(dsn)
+        return {"acessivel": True, "host": "host-teste", "porta": 1521, "latencia_ms": 0.1}
+
+    monkeypatch.setattr(oracle_dba, "verificar_acessibilidade_host", _sonda)
+    monkeypatch.setattr(oracledb, "connect", _proibido_k1("oracledb.connect"))
+
+    with caplog.at_level(logging.WARNING, logger=oracle_dba.logger.name):
+        bruto = matar_sessao_oracle(
+            sid=101, serial=202, inst_id=1, identidade_esperada=dict(IDENTIDADE_VALIDA), ref_aprovacao=REF_VALIDO,
+        )
+
+    assert bruto == oracle_dba.RESULTADO_KILL_DESABILITADO
+    assert json.loads(bruto)["resultado_desconhecido"] is False
+    assert sondas == []
+    assert "KILL BLOQUEADO: KILL_DESABILITADO" in caplog.text
+    assert ambiente_fake == []
+
+
+def test_k1_t9_env_example_nao_habilita_o_kill():
+    """K1-T9 (mata M_K1_ENV_EXAMPLE_2): o .env.example tem a linha OPS_KILL_PKG_VERSAO= vazia e nenhuma linha
+    atribui valor a ela (copiar o exemplo não pode habilitar o kill)."""
+    linhas = (ROOT_DIR_TESTE / ".env.example").read_text(encoding="utf-8").splitlines()
+    atribuicoes = [l for l in linhas if re.match(r"\s*(export\s+)?OPS_KILL_PKG_VERSAO\s*=", l)]
+    assert atribuicoes == ["OPS_KILL_PKG_VERSAO="]

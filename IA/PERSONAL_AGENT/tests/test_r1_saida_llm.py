@@ -48,6 +48,8 @@ def _sem_vazamento(texto, caso):
 @pytest.fixture
 def rede(monkeypatch):
     """Credenciais fictícias, DSN sentinela e sonda de rede controlável (falha na N-ésima chamada, ou sempre)."""
+    # Fase 2 da R1 (decisao_c1.md §2.3; expectativa alterada, declarada): o kill exige OPS_KILL_PKG_VERSAO=2.
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
     monkeypatch.setenv("ORACLE_USER_DIAG", USER_DIAG_FAKE)
     monkeypatch.setenv("ORACLE_PASSWORD_DIAG", "senha-ficticia")
     monkeypatch.setenv("ORACLE_USER_KILL", USER_KILL_FAKE)
