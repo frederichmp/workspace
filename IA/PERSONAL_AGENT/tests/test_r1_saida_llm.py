@@ -10,6 +10,7 @@ import ast
 import json
 import logging
 import re
+import types
 from datetime import datetime
 from pathlib import Path
 
@@ -382,7 +383,11 @@ def test_r1_coordenador_e_local_falha_fechada():
         ([], False),
         ([{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}], False),
         ([{"role": "tool", "name": "coletar_metricas_hardware", "content": "{}"}], False),
-        ([{"role": "tool", "name": "buscar_script_interno", "content": "{}"}], False),
+        # Fase 2, K2 (expectativa alterada, declarada; decisao_c1.md §1.5): o RAG é SO_LOCAL e passa a bloquear.
+        ([{"role": "tool", "name": "buscar_script_interno", "content": "{}"}], True),
+        ([{"role": "tool", "name": "analisar_log_complexo", "content": "{}"}], True),
+        ([{"role": "tool", "name": "matar_sessao_oracle", "content": od.RESULTADO_KILL_DESABILITADO}], True),
+        ([{"role": "tool", "name": "verificar_espaco_disco", "content": "{}"}], False),
         ([{"role": "tool", "name": "coletar_sessoes_ativas", "content": od.RESULTADO_ORACLE_SO_LOCAL}], False),
         ([{"role": "tool", "name": "coletar_sessoes_ativas", "content": "{}"}], True),
         ([{"role": "tool", "name": "matar_sessao_oracle", "content": "{}"}], True),
@@ -396,15 +401,13 @@ def test_r1_historico_tem_dado_do_banco(mensagens, esperado):
     assert od.historico_tem_dado_do_banco(mensagens) is esperado
 
 
-def test_r1_nomes_sem_dado_do_banco_iguais_aos_schemas_de_so_e_rag():
-    """A constante de oracle_dba (sem importar o RAG) tem de ser igual aos nomes de os_tools_schema e
-    rag_tools_schema: ferramenta nova nesses schemas obriga a revisar a trava de histórico."""
-    from src.tools.os_tools import os_tools_schema
-    from src.tools.rag_search import rag_tools_schema
-
-    nomes = {f["function"]["name"] for f in os_tools_schema + rag_tools_schema}
-    assert od.NOMES_FERRAMENTAS_SEM_DADO_DO_BANCO == nomes
-    assert nomes.isdisjoint({f["function"]["name"] for f in od.oracle_tools_schema})
+def test_r1_rag_nao_e_liberado_para_a_nuvem():
+    """Fase 2, K2 (substitui test_r1_nomes_sem_dado_do_banco_iguais_aos_schemas_de_so_e_rag; expectativa alterada,
+    declarada em decisao_c1.md §1.5 e §8.2): NOMES_FERRAMENTAS_SEM_DADO_DO_BANCO saiu; a cobertura de "toda
+    ferramenta registrada tem classificação" é o K2-T1, e o RAG passa a SO_LOCAL (plano 9.8.1)."""
+    assert not hasattr(od, "NOMES_FERRAMENTAS_SEM_DADO_DO_BANCO")
+    assert od.CLASSIFICACAO_FERRAMENTAS["buscar_script_interno"] == od.SO_LOCAL
+    assert od.ferramenta_liberada_nuvem("buscar_script_interno") is False
 
 
 # ---- AST (decisao_c1.md §8.4) ----
@@ -630,7 +633,8 @@ def test_r1_nomes_ferramentas_oracle_iguais_ao_schema():
     """O despacho das interfaces recusa, com a nuvem, todo nome de oracle_tools_schema (inclusive o kill, §3.5)."""
     assert od.NOMES_FERRAMENTAS_ORACLE == frozenset(f["function"]["name"] for f in od.oracle_tools_schema)
     assert "matar_sessao_oracle" in od.NOMES_FERRAMENTAS_ORACLE
-    assert od.NOMES_FERRAMENTAS_ORACLE.isdisjoint(od.NOMES_FERRAMENTAS_SEM_DADO_DO_BANCO)
+    # Fase 2, K2 (decisao_c1.md §1.5): a constante removida dá lugar a "nenhuma Oracle liberada para a nuvem".
+    assert not any(od.ferramenta_liberada_nuvem(nome) for nome in od.NOMES_FERRAMENTAS_ORACLE)
 
 
 @pytest.mark.parametrize("rel", ["app.py", "src/main.py"])
@@ -662,3 +666,200 @@ def test_r1_system_prompt_sem_regra_de_ouro(rel):
     assert len(prompts) == 1
     assert "REGRA DE OURO" not in prompts[0] and "analisar_log_complexo" not in prompts[0]
     assert "matar_sessao_oracle" in prompts[0], "o prompt perdeu a regra de HITL"
+
+
+# =============================================================================
+# R1 ampliada fase 2, K2 (fase2/decisao_c1.md §1 e §8.2): lista de permissão para a nuvem
+# =============================================================================
+
+LIBERADAS_ESPERADAS_K2 = {"coletar_metricas_hardware", "verificar_espaco_disco"}  # plano 9.8.1
+AUXILIARES_DO_LACO_K2 = {
+    "coordenador_e_local", "historico_tem_dado_do_banco", "ferramenta_liberada_nuvem", "kill_habilitado",
+    "ferramentas_do_coordenador", "_registrar_erro_local",
+}
+
+
+def _valor_da_chave_k2(no, chave):
+    if not isinstance(no, ast.Dict):
+        return None
+    for k, v in zip(no.keys, no.values):
+        if isinstance(k, ast.Constant) and k.value == chave:
+            return v
+    return None
+
+
+def _schemas_por_ast_k2(texto, rel):
+    """{"<rel>:<variável>:<linha>": nomes} de toda atribuição (Assign, AnnAssign, AugAssign) a um nome terminado em
+    _tools_schema. Só lista literal de dicts com "function": {"name": "<literal>"} rende nomes; outra forma rende None
+    (o teste falha: schema não literal não pode escapar da classificação)."""
+    achados = {}
+    for no in ast.walk(ast.parse(texto, filename=rel)):
+        if isinstance(no, ast.Assign):
+            alvos, valor = no.targets, no.value
+        elif isinstance(no, (ast.AnnAssign, ast.AugAssign)):
+            alvos, valor = [no.target], no.value
+        else:
+            continue
+        for alvo in alvos:
+            if not (isinstance(alvo, ast.Name) and alvo.id.endswith("_tools_schema")):
+                continue
+            chave = f"{rel}:{alvo.id}:{no.lineno}"
+            if isinstance(no, ast.AugAssign) or not isinstance(valor, ast.List):
+                achados[chave] = None
+                continue
+            nomes = []
+            for elemento in valor.elts:
+                nome = _valor_da_chave_k2(_valor_da_chave_k2(elemento, "function"), "name")
+                if not (isinstance(nome, ast.Constant) and isinstance(nome.value, str)):
+                    nomes = None
+                    break
+                nomes.append(nome.value)
+            achados[chave] = nomes
+    return achados
+
+
+def _ferramentas_registradas_k2():
+    achados = {}
+    for arquivo in sorted((RAIZ / "src" / "tools").glob("*.py")):
+        rel = arquivo.relative_to(RAIZ).as_posix()
+        achados.update(_schemas_por_ast_k2(arquivo.read_text(encoding="utf-8"), rel))
+    return achados
+
+
+def test_k2_t1_toda_ferramenta_registrada_tem_classificacao():
+    """K2-T1 (mata M_K2_CLASSIF_FALTA, M_K2_RAG_LIBERADO e M_K2_EXTRATOR): toda atribuição *_tools_schema de
+    src/tools/*.py, achada por AST (sem lista manual e sem importar gemini_router nem rag_search), rende nomes
+    literais, únicos entre os módulos, e o conjunto é exatamente o da classificação; só as 2 de SO liberadas."""
+    achados = _ferramentas_registradas_k2()
+    assert achados, "nenhum *_tools_schema achado em src/tools"
+    invalidos = sorted(c for c, nomes in achados.items() if not nomes)
+    assert invalidos == [], f"schema não literal ou vazio: {invalidos}"
+    todos = [nome for nomes in achados.values() for nome in nomes]
+    assert len(todos) == len(set(todos)), f"nome repetido entre módulos: {sorted(todos)}"
+    assert set(od.CLASSIFICACAO_FERRAMENTAS) == set(todos)
+    assert set(od.CLASSIFICACAO_FERRAMENTAS.values()) <= {od.LIBERADA_NUVEM, od.SO_LOCAL}
+    liberadas = {n for n, v in od.CLASSIFICACAO_FERRAMENTAS.items() if v == od.LIBERADA_NUVEM}
+    assert liberadas == LIBERADAS_ESPERADAS_K2
+    assert isinstance(od.CLASSIFICACAO_FERRAMENTAS, types.MappingProxyType)
+    with pytest.raises(TypeError):
+        od.CLASSIFICACAO_FERRAMENTAS["ferramenta_nova"] = od.LIBERADA_NUVEM
+
+
+def test_k2_t1_extrator_acha_annassign_e_recusa_schema_nao_literal():
+    """K2-T1, autoteste do extrator (mata M_K2_EXTRATOR): AnnAssign e Assign rendem o nome; compreensão de lista,
+    nome não literal e AugAssign rendem None."""
+    texto = (
+        'novo_tools_schema: list = [{"type": "function", "function": {"name": "ferramenta_x"}}]\n'
+        'outro_tools_schema = [{"type": "function", "function": {"name": "ferramenta_y"}}]\n'
+        'gerado_tools_schema = [{"type": "function", "function": {"name": n}} for n in ("a",)]\n'
+        'variavel_tools_schema = [{"type": "function", "function": {"name": NOME}}]\n'
+        'somado_tools_schema += []\n'
+        'nao_e_schema = [{"type": "function", "function": {"name": "ignorada"}}]\n'
+    )
+    por_variavel = {c.split(":")[1]: v for c, v in _schemas_por_ast_k2(texto, "sintetico.py").items()}
+    assert por_variavel == {
+        "novo_tools_schema": ["ferramenta_x"], "outro_tools_schema": ["ferramenta_y"],
+        "gerado_tools_schema": None, "variavel_tools_schema": None, "somado_tools_schema": None,
+    }
+
+
+def _parcelas_da_soma_k2(no):
+    if isinstance(no, ast.BinOp) and isinstance(no.op, ast.Add):
+        return _parcelas_da_soma_k2(no.left) + _parcelas_da_soma_k2(no.right)
+    return [no]
+
+
+@pytest.mark.parametrize("rel, registro", [("app.py", "TODAS_FERRAMENTAS"), ("src/main.py", "todas_ferramentas")])
+def test_k2_t2_catalogo_so_por_ferramentas_do_coordenador(rel, registro):
+    """K2-T2 (mata M_K2_TOOLS_SEM_FILTRO e M_K2_CAT_SOMA): todo .create( com tools= recebe
+    ferramentas_do_coordenador(<registro>, ...), e o registro é soma de *_tools_schema achados pelo K2-T1."""
+    arvore = _arvore(rel)
+    com_tools = [
+        no for no in ast.walk(arvore)
+        if isinstance(no, ast.Call) and isinstance(no.func, ast.Attribute) and no.func.attr == "create"
+        and any(k.arg == "tools" for k in no.keywords)
+    ]
+    assert com_tools, "nenhum create com tools="
+    for chamada in com_tools:
+        valor = next(k.value for k in chamada.keywords if k.arg == "tools")
+        assert isinstance(valor, ast.Call) and _nome_da_chamada(valor) == "ferramentas_do_coordenador", ast.unparse(valor)
+        assert isinstance(valor.args[0], ast.Name) and valor.args[0].id == registro, ast.unparse(valor)
+    atribuicoes = [
+        no for no in arvore.body
+        if isinstance(no, ast.Assign) and any(isinstance(a, ast.Name) and a.id == registro for a in no.targets)
+    ]
+    assert len(atribuicoes) == 1
+    variaveis = {c.split(":")[1] for c in _ferramentas_registradas_k2()}
+    parcelas = _parcelas_da_soma_k2(atribuicoes[0].value)
+    assert all(isinstance(p, ast.Name) and p.id in variaveis for p in parcelas), ast.unparse(atribuicoes[0].value)
+
+
+@pytest.mark.parametrize("rel, funcao", [("app.py", "executar_agente_ui"), ("src/main.py", "executar_agente")])
+def test_k2_t3_recusa_da_nuvem_antes_de_toda_rota(rel, funcao):
+    """K2-T3, R-e por construção (mata M_K2_ROTA_ANTES): no laço de tool_calls, o If com ferramenta_liberada_nuvem vem
+    antes de toda chamada a função importada de tools.* (salvo os auxiliares). Rota nova fica coberta sem editar o
+    teste."""
+    arvore = _arvore(rel)
+    importados = {
+        a.asname or a.name
+        for no in arvore.body if isinstance(no, ast.ImportFrom) and (no.module or "").startswith("tools.")
+        for a in no.names
+    }
+    (definicao,) = [no for no in ast.walk(arvore) if isinstance(no, ast.FunctionDef) and no.name == funcao]
+    lacos = [no for no in ast.walk(definicao) if isinstance(no, ast.For) and "tool_call" in ast.unparse(no.target)]
+    assert len(lacos) == 1, [ast.unparse(l.target) for l in lacos]
+    checagens = [
+        no for no in ast.walk(lacos[0])
+        if isinstance(no, ast.If)
+        and any(isinstance(c, ast.Call) and _nome_da_chamada(c) == "ferramenta_liberada_nuvem" for c in ast.walk(no.test))
+    ]
+    assert len(checagens) == 1
+    rotas = [
+        no for no in ast.walk(lacos[0])
+        if isinstance(no, ast.Call) and _nome_da_chamada(no) in importados - AUXILIARES_DO_LACO_K2
+    ]
+    assert rotas, "nenhuma rota de ferramenta achada no laço (o teste ficaria vazio)"
+    antes = [(ast.unparse(no)[:60], no.lineno) for no in rotas if no.lineno <= checagens[0].lineno]
+    assert antes == [], f"rota antes da recusa da nuvem: {antes}"
+
+
+@pytest.mark.parametrize(
+    "nome",
+    [None, [], 3, "", "ferramenta_nova", "buscar_script_interno", "analisar_log_complexo", "coletar_sessoes_ativas",
+     "coletar_top_sql", "coletar_plano_execucao", "matar_sessao_oracle", "COLETAR_METRICAS_HARDWARE",
+     " verificar_espaco_disco"],
+)
+def test_k2_t4_nao_liberada(nome):
+    """K2-T4 (mata M_K2_DIF_SO_LOCAL e M_K2_DEFAULT_LIBERADA): fora das 2 de SO, nada é liberado; nome exato."""
+    assert od.ferramenta_liberada_nuvem(nome) is False
+
+
+@pytest.mark.parametrize("nome", sorted(LIBERADAS_ESPERADAS_K2))
+def test_k2_t4_liberada(nome):
+    assert od.ferramenta_liberada_nuvem(nome) is True
+
+
+def test_k2_t4_classificacao_lida_em_tempo_de_chamada_e_so_o_valor_exato(monkeypatch):
+    """K2-T4: a classificação é lida a cada chamada; "LIBERADA" ou caixa trocada (erro de digitação) não liberam."""
+    monkeypatch.setattr(
+        od, "CLASSIFICACAO_FERRAMENTAS",
+        types.MappingProxyType({"x": "LIBERADA", "y": od.LIBERADA_NUVEM, "z": "liberada_nuvem"}),
+    )
+    assert od.ferramenta_liberada_nuvem("x") is False
+    assert od.ferramenta_liberada_nuvem("y") is True
+    assert od.ferramenta_liberada_nuvem("z") is False
+    assert od.ferramenta_liberada_nuvem("coletar_metricas_hardware") is False
+
+
+def test_k2_t4_catalogo_com_ferramenta_nova(monkeypatch):
+    """K2-T4 (mata M_K2_CAT_EXCLUSAO): com a nuvem, o catálogo é exatamente as 2 de SO, mesmo com uma ferramenta
+    nova registrada; com o coordenador local e o gate ligado, tudo passa, na ordem."""
+    from src.tools.os_tools import os_tools_schema
+    from src.tools.rag_search import rag_tools_schema
+
+    nova = {"type": "function", "function": {"name": "ferramenta_nova", "parameters": {"type": "object"}}}
+    todas = os_tools_schema + od.oracle_tools_schema + rag_tools_schema + [nova]
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
+    nuvem = {s["function"]["name"] for s in od.ferramentas_do_coordenador(todas, False)}
+    assert nuvem == LIBERADAS_ESPERADAS_K2
+    assert od.ferramentas_do_coordenador(todas, True) == todas

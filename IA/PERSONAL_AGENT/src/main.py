@@ -147,11 +147,11 @@ from tools.oracle_dba import (
     MENSAGEM_RESULTADO_DESCONHECIDO,
     MENSAGEM_DESFECHO_NAO_CONFIRMADO,
     NOME_FERRAMENTA_KILL,
-    NOMES_FERRAMENTAS_ORACLE,
     RESULTADO_KILL_DESABILITADO,
     RESULTADO_ORACLE_SO_LOCAL,
     TEXTO_HISTORICO_COM_DADO_DO_BANCO,
     _registrar_erro_local,
+    ferramenta_liberada_nuvem,
     ferramentas_do_coordenador,
     kill_habilitado,
     coordenador_e_local,
@@ -196,7 +196,7 @@ client, MODELO = _inicializar_cliente_coordenador()
 
 # 4. Registro de Ferramentas da interface. O catálogo entregue ao LLM a cada chamada é
 # ferramentas_do_coordenador(todas_ferramentas, local): sem OPS_KILL_PKG_VERSAO=2 o kill sai, e com o coordenador
-# em nuvem saem as ferramentas Oracle (R1 ampliada V8; fase 2, decisao_c1.md §1.2 e §2.2-i).
+# em nuvem só ficam as liberadas (lista de permissão; R1 ampliada V8; fase 2, decisao_c1.md §1.2 e §2.2-i).
 todas_ferramentas = os_tools_schema + oracle_tools_schema + rag_tools_schema
 
 # 5. System Prompt do Coordenador
@@ -374,9 +374,10 @@ def executar_agente(prompt_usuario: str) -> None:
 
             # 3. Roteamento Dinâmico (Switch Case / If-Elif) com Barreira HITL + Notificador SMTP
             try:
-                # V8, despacho (decisao_c1.md §3.3): o LLM pode chamar ferramenta que não foi oferecida; com o
-                # coordenador em nuvem, ferramenta Oracle devolve a recusa fixa, sem consultar nada.
-                if not local and nome_funcao in NOMES_FERRAMENTAS_ORACLE:
+                # V8, despacho (decisao_c1.md §3.3; fase 2, K2), antes de toda rota: o LLM pode chamar ferramenta que
+                # não foi oferecida; com o coordenador em nuvem, toda ferramenta não liberada (Oracle, RAG, nome sem
+                # classificação) devolve a recusa fixa, sem consultar nada.
+                if not local and not ferramenta_liberada_nuvem(nome_funcao):
                     resultado_tool = RESULTADO_ORACLE_SO_LOCAL
 
                 # Gate de produção do kill (fase 2, decisao_c1.md §2.2-ii): sem OPS_KILL_PKG_VERSAO=2, recusa fixa;

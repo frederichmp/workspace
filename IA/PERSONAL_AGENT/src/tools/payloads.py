@@ -1,5 +1,9 @@
-"""Contratos de dados (Payloads JSON) com filtro na borda (Edge Filtering) para o Qwen 2.5."""
-from typing import Literal, List, Optional
+"""Contratos de dados (Payloads JSON) com filtro na borda (Edge Filtering) para o Qwen 2.5.
+
+R1 ampliada fase 2, K2 (plano 9.9.8, P1): os payloads de banco (health check e DBMS_XPLAN), sem chamador e com o
+campo `instancia`, saíram junto com src/tools/oracle_tools.py. Dado do banco ao LLM só por src/tools/oracle_dba.py.
+"""
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -35,51 +39,3 @@ class PayloadDiscoLocal(BaseModel):
     status: Literal["sucesso", "erro"] = "sucesso"
     coleta: Literal["disco_local"] = "disco_local"
     dados: DadosDiscoLocal
-
-
-# ==========================================
-# 2. Payload de Banco de Dados: Health Check
-# ==========================================
-
-class MetricasGlobaisDB(BaseModel):
-    sessoes_ativas: int
-    bloqueios_ativos: int
-    top_wait_event: str
-
-
-class SessaoOfensoraDB(BaseModel):
-    sid_serial: str = Field(..., description="Formato 'SID,SERIAL#'")
-    usuario: str
-    sql_id: Optional[str] = None
-    evento_espera: str
-    tempo_espera_segundos: int
-    status_bloqueador: str = Field(..., description="Ex: 'Bloqueando N sessão(ões)' ou 'Nenhum'")
-
-
-class PayloadDBHealthCheck(BaseModel):
-    status: Literal["sucesso", "erro"] = "sucesso"
-    instancia: str
-    metricas_globais: MetricasGlobaisDB
-    top_3_ofensores: List[SessaoOfensoraDB] = Field(default_factory=list, max_length=3)
-
-
-# ==========================================
-# 3. Payload de Plano de Execução (DBMS_XPLAN)
-# ==========================================
-
-class OperacaoCriticaXPlan(BaseModel):
-    id_operacao: int
-    tipo: str = Field(..., description="Ex: TABLE ACCESS FULL, HASH JOIN")
-    objeto: str = Field(default="", description="Nome da tabela ou índice")
-    custo: int
-    linhas_estimadas: int
-
-
-class PayloadDBMSXPlan(BaseModel):
-    status: Literal["sucesso", "erro"] = "sucesso"
-    sql_id: str
-    plan_hash_value: str
-    custo_total: int
-    alerta_arquitetura: str
-    operacoes_criticas: List[OperacaoCriticaXPlan] = Field(default_factory=list)
-    plano_truncado_para_ia: bool = True

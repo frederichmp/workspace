@@ -15,6 +15,7 @@ import re
 import socket
 import threading
 import time
+import types
 import uuid
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
@@ -146,11 +147,35 @@ TEXTO_HISTORICO_COM_DADO_DO_BANCO = (
     "Use 'Limpar Chat' ou religue o Ollama."
 )
 
-# Ferramentas cujo resultado não é dado do banco: os nomes de os_tools_schema e rag_tools_schema. Constante aqui
-# (sem importar rag_search, que carrega o langchain); um teste confere a igualdade com os dois schemas.
-NOMES_FERRAMENTAS_SEM_DADO_DO_BANCO = frozenset(
-    {"coletar_metricas_hardware", "verificar_espaco_disco", "buscar_script_interno"}
+# Lista de permissão para o coordenador em nuvem (R1 ampliada fase 2, K2; fase2/decisao_c1.md §1 e plano 9.8.1):
+# só LIBERADA_NUVEM libera. Toda ferramenta registrada (*_tools_schema de src/tools/*.py) tem entrada explícita; um
+# teste AST falha se faltar ou sobrar nome. Na execução, nome ausente vale SO_LOCAL. Imutável (MappingProxyType) e
+# sem importar rag_search nem gemini_router (langchain, chave do Gemini).
+LIBERADA_NUVEM = "LIBERADA_NUVEM"
+SO_LOCAL = "SO_LOCAL"
+CLASSIFICACAO_FERRAMENTAS = types.MappingProxyType(
+    {
+        "coletar_metricas_hardware": LIBERADA_NUVEM,
+        "verificar_espaco_disco": LIBERADA_NUVEM,
+        "coletar_sessoes_ativas": SO_LOCAL,
+        "coletar_top_sql": SO_LOCAL,
+        "coletar_plano_execucao": SO_LOCAL,
+        "matar_sessao_oracle": SO_LOCAL,
+        "buscar_script_interno": SO_LOCAL,
+        "analisar_log_complexo": SO_LOCAL,
+    }
 )
+
+
+def ferramenta_liberada_nuvem(nome: Any) -> bool:
+    """
+    True só para nome (str) classificado LIBERADA_NUVEM em CLASSIFICACAO_FERRAMENTAS, lida em tempo de chamada.
+    Ausente, outro valor (inclusive erro de digitação), outro tipo ou exceção: False (falha fechada). Nunca levanta.
+    """
+    try:
+        return isinstance(nome, str) and CLASSIFICACAO_FERRAMENTAS.get(nome) == LIBERADA_NUVEM
+    except Exception:
+        return False
 
 _HOSTS_COORDENADOR_LOCAL = frozenset({"localhost", "127.0.0.1", "::1"})
 
@@ -208,9 +233,9 @@ def coordenador_e_local(client: Any) -> bool:
 
 def historico_tem_dado_do_banco(mensagens: Any) -> bool:
     """
-    V8, trava de histórico (decisao_c1.md §3.4): True se alguma mensagem role "tool" (fora a recusa fixa
-    RESULTADO_ORACLE_SO_LOCAL) veio de ferramenta que não está em NOMES_FERRAMENTAS_SEM_DADO_DO_BANCO. Lista de
-    permitidos: nome ausente ou desconhecido conta como dado do banco. Entrada que não é lista: True.
+    V8, trava de histórico (decisao_c1.md §3.4; fase 2, K2): True se alguma mensagem role "tool" (fora a recusa fixa
+    RESULTADO_ORACLE_SO_LOCAL) veio de ferramenta não liberada para a nuvem (ferramenta_liberada_nuvem). Lista de
+    permissão: nome ausente ou desconhecido, RAG e recusa do kill contam como dado local. Entrada que não é lista: True.
     """
     try:
         if not isinstance(mensagens, (list, tuple)):
@@ -220,7 +245,7 @@ def historico_tem_dado_do_banco(mensagens: Any) -> bool:
                 continue
             if mensagem.get("content") == RESULTADO_ORACLE_SO_LOCAL:
                 continue
-            if mensagem.get("name") not in NOMES_FERRAMENTAS_SEM_DADO_DO_BANCO:
+            if not ferramenta_liberada_nuvem(mensagem.get("name")):
                 return True
         return False
     except Exception:
@@ -255,7 +280,8 @@ def ferramentas_do_coordenador(schemas: Any, local: bool) -> List[Dict[str, Any]
     """
     Catálogo entregue ao LLM a cada chamada (decisao_c1.md §1.1 e §2.2-i). Pula a entrada malformada (falha
     fechada). Sem o gate, matar_sessao_oracle sai do catálogo, também com o coordenador local. Com o coordenador em
-    nuvem, saem as ferramentas Oracle (V8).
+    nuvem, só ficam as ferramentas liberadas (ferramenta_liberada_nuvem; fase 2, K2): Oracle, RAG e nome sem
+    classificação saem.
     """
     catalogo: List[Dict[str, Any]] = []
     for schema in schemas or []:
@@ -267,7 +293,7 @@ def ferramentas_do_coordenador(schemas: Any, local: bool) -> List[Dict[str, Any]
             continue
         if nome == NOME_FERRAMENTA_KILL and not kill_habilitado():
             continue
-        if not local and nome in NOMES_FERRAMENTAS_ORACLE:
+        if not local and not ferramenta_liberada_nuvem(nome):
             continue
         catalogo.append(schema)
     return catalogo
@@ -2481,6 +2507,6 @@ oracle_tools_schema: List[Dict[str, Any]] = [
     },
 ]
 
-# R1 ampliada V8 (decisao_c1.md §1 e §3.3): nomes das ferramentas Oracle, recusadas no despacho das interfaces
-# quando o coordenador é em nuvem (inclusive o kill, §3.5).
+# R1 ampliada V8 (decisao_c1.md §1 e §3.3): nomes das ferramentas Oracle. Desde a fase 2 (K2) o catálogo, o despacho
+# e o histórico derivam de CLASSIFICACAO_FERRAMENTAS; esta constante fica para os testes (nenhuma Oracle liberada).
 NOMES_FERRAMENTAS_ORACLE = frozenset(f["function"]["name"] for f in oracle_tools_schema)

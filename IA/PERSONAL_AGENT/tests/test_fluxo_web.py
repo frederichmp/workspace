@@ -793,3 +793,84 @@ def test_web_k1_t7_hitl_pendente_com_o_gate_retirado_antes_do_clique(montar_web,
     devolvido = amb.json_devolvido_ao_llm()
     assert devolvido["motivo"] == "KILL_DESABILITADO" and devolvido["executado"] is False
     assert "dba_teste" not in json.dumps(devolvido, ensure_ascii=False)
+
+
+# =============================================================================
+# R1 ampliada fase 2, K2 (fase2/decisao_c1.md §1 e §8.2): lista de permissão na Web (K2-T5 e K2-T6)
+# =============================================================================
+
+LIBERADAS_K2 = {"coletar_metricas_hardware", "verificar_espaco_disco"}
+NOVA_K2 = {"type": "function", "function": {"name": "ferramenta_nova", "parameters": {"type": "object"}}}
+ARGUMENTOS_K2 = {
+    "coletar_plano_execucao": {"sql_id": "abc123def4567"}, "matar_sessao_oracle": ARGS_KILL,
+    "buscar_script_interno": {"tema_ou_problema": "x"},
+}
+
+
+def test_web_k2_t5_catalogo_da_nuvem_so_com_as_liberadas(montar_web, monkeypatch):
+    """K2-T5 (mata M_K2_CAT_EXCLUSAO e M_K2_WEB_CAT_SOMA): com uma ferramenta nova registrada (o rerun reimporta
+    tools.os_tools), o catálogo local a recebe (o teste não é cego) e o da nuvem é exatamente as 2 de SO."""
+    local = montar_web([_linha_alvo()], kill_permitido=False)
+    import tools.os_tools as ost  # depois do montar_web, que põe src/ no sys.path
+    monkeypatch.setattr(ost, "os_tools_schema", ost.os_tools_schema + [NOVA_K2])
+    local.chamada = ("ferramenta_inexistente", {})
+    _pedir(local)
+    assert "ferramenta_nova" in _nomes(local.tools_llm[0])
+
+    nuvem = montar_web([_linha_alvo()], kill_permitido=False, ollama="nuvem")
+    nuvem.chamada = ("ferramenta_inexistente", {})
+    _pedir(nuvem)
+    assert nuvem.bases_llm[0] == URL_GEMINI
+    assert _nomes(nuvem.tools_llm[0]) == LIBERADAS_K2
+
+
+@pytest.mark.parametrize("ferramenta", sorted(NOMES_ORACLE | {"buscar_script_interno", "ferramenta_nova"}))
+def test_web_k2_t5_nuvem_recusa_toda_ferramenta_nao_liberada(montar_web, monkeypatch, ferramenta):
+    """K2-T5 (mata R1_M1 e M_K2_DESP_WEB_ORACLE): com a nuvem, o LLM chama cada ferramenta não liberada mesmo fora do
+    catálogo: recusa fixa, sem executar, sem conexão e sem painel. A prova é o conteúdo da tool (a barra lateral chama
+    coletar_sessoes_ativas e coletar_top_sql direto, a cada execução do script)."""
+    amb = montar_web([_linha_alvo()], kill_permitido=False, ollama="nuvem")
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    import tools.rag_search as rag
+    chamadas = []
+    monkeypatch.setattr(rag, "buscar_script_interno", lambda *a, **k: chamadas.append("rag") or "{}")
+    monkeypatch.setattr(od, "coletar_plano_execucao", lambda *a, **k: chamadas.append("plano") or "{}")
+    amb.chamada = (ferramenta, ARGUMENTOS_K2.get(ferramenta, {}))
+    _pedir(amb)
+
+    (tool,) = _tools_vistas(amb)
+    assert tool["name"] == ferramenta and tool["content"] == od.RESULTADO_ORACLE_SO_LOCAL
+    assert chamadas == [] and amb.oracle.conexoes == [] and amb.at.session_state.hitl_pendente is None
+    assert amb.registros() == []
+
+
+def test_web_k2_t5_nuvem_executa_a_liberada(montar_web, monkeypatch):
+    """K2-T5, controle positivo: com a nuvem, coletar_metricas_hardware é executada e o resultado vai ao LLM."""
+    amb = montar_web([_linha_alvo()], kill_permitido=False, ollama="nuvem")
+    import tools.os_tools as ost  # depois do montar_web, que põe src/ no sys.path
+    monkeypatch.setattr(ost, "coletar_metricas_hardware", lambda *a, **k: '{"sentinela_hw": 1}')
+    amb.chamada = ("coletar_metricas_hardware", {})
+    _pedir(amb)
+
+    (tool,) = _tools_vistas(amb)
+    assert json.loads(tool["content"]) == {"sentinela_hw": 1}
+
+
+def test_web_k2_t6_historico_com_rag_nao_vai_a_nuvem(montar_web, monkeypatch):
+    """K2-T6, W4 com o RAG (mata M_K2_HIST_RAG e M_K2_RAG_LIBERADO): o turno 1, local, traz conteúdo do RAG; o
+    Ollama cai; no turno 2 a nuvem não recebe o histórico e a tela mostra o texto fixo."""
+    amb = montar_web([_linha_alvo()], kill_permitido=False)
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    import tools.rag_search as rag
+    monkeypatch.setattr(rag, "buscar_script_interno", lambda *a, **k: json.dumps({"conteudo_sql": "sql-sentinela"}))
+    amb.chamada = ("buscar_script_interno", {"tema_ou_problema": "x"})
+    _pedir(amb)
+    assert len(amb.mensagens_llm) == 2  # tool_call + laudo, os dois com o coordenador local
+    assert any("sql-sentinela" in t["content"] for t in _tools_vistas(amb))
+
+    amb.estado_rede["ollama"] = "nuvem"
+    amb.at.chat_input[0].set_value("e agora?").run()
+    assert not amb.at.exception
+    assert len(amb.mensagens_llm) == 2, "o histórico com conteúdo do RAG foi à nuvem"
+    assert URL_GEMINI not in amb.bases_llm
+    assert any(od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in t for t in amb.textos_tela())

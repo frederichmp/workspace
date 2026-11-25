@@ -579,3 +579,46 @@ def test_cli_k1_t6b_gate_retirado_durante_o_prompt(cenario, monkeypatch):
     assert "NÃO EXECUTADA: encerramento desabilitado nesta instalação (OPS_KILL_PKG_VERSAO)" in r.tela
     assert r.json_tool["motivo"] == "KILL_DESABILITADO" and r.json_tool["executado"] is False
     assert "dba" not in json.dumps(r.json_tool, ensure_ascii=False)
+
+
+# =============================================================================
+# R1 ampliada fase 2, K2 (fase2/decisao_c1.md §1 e §8.2): lista de permissão na CLI (K2-T5)
+# =============================================================================
+
+LIBERADAS_K2 = {"coletar_metricas_hardware", "verificar_espaco_disco"}
+NOVA_K2 = {"type": "function", "function": {"name": "ferramenta_nova", "parameters": {"type": "object"}}}
+
+
+def test_cli_k2_t5_catalogo_da_nuvem_so_com_as_liberadas(main_cli, monkeypatch):
+    """K2-T5 (mata M_K2_CAT_EXCLUSAO e M_K2_CLI_CAT_SOMA): com uma ferramenta nova no registro da CLI, o catálogo
+    local a recebe (o teste não é cego) e o da nuvem é exatamente as 2 de SO."""
+    monkeypatch.setattr(main_cli, "todas_ferramentas", main_cli.todas_ferramentas + [NOVA_K2])
+    local = _rodar(main_cli, monkeypatch, _LLMFalso(nome="ferramenta_inexistente", argumentos={}))
+    assert "ferramenta_nova" in _nomes(local.tools[0])
+
+    nuvem = _rodar(main_cli, monkeypatch, _LLMFalso(base_url=URL_GEMINI, nome="ferramenta_inexistente", argumentos={}))
+    assert _nomes(nuvem.tools[0]) == LIBERADAS_K2
+
+
+@pytest.mark.parametrize(
+    "ferramenta, argumentos", [("buscar_script_interno", {"tema_ou_problema": "x"}), ("ferramenta_nova", {})]
+)
+def test_cli_k2_t5_nuvem_recusa_rag_e_ferramenta_nova(main_cli, monkeypatch, ferramenta, argumentos):
+    """K2-T5 (mata M_K2_DESP_CLI_ORACLE e M_K2_ROTA_ANTES): com a nuvem, o RAG e um nome sem classificação dão a
+    recusa fixa; o RAG não é executado."""
+    import tools.oracle_dba as od
+
+    monkeypatch.setattr(main_cli, "buscar_script_interno", lambda *a, **k: pytest.fail("RAG executado com a nuvem"))
+    llm = _rodar(main_cli, monkeypatch, _LLMFalso(base_url=URL_GEMINI, nome=ferramenta, argumentos=argumentos))
+
+    (tool,) = _tools_vistas(llm)
+    assert tool["content"] == od.RESULTADO_ORACLE_SO_LOCAL
+
+
+def test_cli_k2_t5_nuvem_executa_a_liberada(main_cli, monkeypatch):
+    """K2-T5, controle positivo: com a nuvem, coletar_metricas_hardware é executada e o resultado vai ao LLM."""
+    monkeypatch.setattr(main_cli, "coletar_metricas_hardware", lambda *a, **k: '{"sentinela_hw": 1}')
+    llm = _rodar(main_cli, monkeypatch, _LLMFalso(base_url=URL_GEMINI, nome="coletar_metricas_hardware", argumentos={}))
+
+    (tool,) = _tools_vistas(llm)
+    assert json.loads(tool["content"]) == {"sentinela_hw": 1}
