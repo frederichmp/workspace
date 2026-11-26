@@ -1,0 +1,15 @@
+# Controle de mutação `mut_c4_main_b`
+
+Alvo `src/main.py`; testes `tests/test_fluxo_cli.py`, `tests/test_fluxo_web.py`, `tests/test_r1_saida_llm.py::test_r1_ast_a2_excecao_so_em_tipo_codigo_registro_ou_log`, `tests/test_r1_saida_llm.py::test_r1_ast_a4_coordenador_sem_analisar_log_complexo`, `tests/test_r1_saida_llm.py::test_r1_system_prompt_sem_regra_de_ouro`, `tests/test_r1_saida_llm.py::test_r1_nomes_ferramentas_oracle_iguais_ao_schema`; cópia `git archive HEAD` + `app.py`, `src/main.py`, `src/tools/oracle_dba.py`, `tests/test_fluxo_web.py`, `tests/test_fluxo_cli.py`, `tests/test_r1_saida_llm.py`.
+
+| Mutação | Troca | Contagem | Resultado | Status |
+|---|---|---|---|---|
+| m0 | sem mutação | - | 48 passed, 13 warnings in 65.89s (0:01:05) | OK |
+| M_R1_CLI_V8A_CATALOGO_COM_ORACLE |             tools=todas_ferramentas if local else ferramentas_nuvem,… | 1 substituição | 1 failed, 47 passed, 13 warnings in 65.92s (0:01:05) \| caíram: tests… | DETECTADA |
+| M_R1_CLI_V8B_SEM_RECUSA_NO_DESPACHO |                 if not local and nome_funcao in NOMES_FERRAMENTAS_ORA… | 1 substituição | 4 failed, 44 passed, 13 warnings in 64.56s (0:01:04) \| caíram: tests… | DETECTADA |
+| M_R1_CLI_V8C_SEM_TRAVA_NO_LOOP |         if not local and historico_tem_dado_do_banco(messages):\n ->… | 1 substituição | 1 failed, 47 passed, 13 warnings in 65.65s (0:01:05) \| caíram: tests… | DETECTADA |
+| M_R1_CLI_V9B_ANALISAR_NA_AUDITORIA |                 nome_funcao.startswith("coletar_")\n                … | 1 substituição | 1 failed, 47 passed, 13 warnings in 66.64s (0:01:06) \| caíram: tests… | DETECTADA |
+| M_R1_CLI_V3_ERRO_EXECUCAO_COM_TEXTO |                         {"erro_execucao": type(e).__name__}, ensure_a… | 1 substituição | 2 failed, 46 passed, 13 warnings in 65.10s (0:01:05) \| caíram: tests… | DETECTADA |
+
+Resultado: todas DETECTADAS.
+Relatório: docs/entregas/1.11/r1_ampliada/mut_c4_main_b.md

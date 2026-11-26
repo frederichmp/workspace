@@ -1392,10 +1392,12 @@ def _chamadas_de_registro_na_producao():
 def test_ra_toda_chamada_de_producao_passa_resultado_desconhecido():
     """R-a ponto 3, decisão 8.12.0.2 (mata R-a9): as 6 chamadas de produção (todas em oracle_dba.py) passam
     resultado_desconhecido= explícito, sem **kwargs. O TypeError seria engolido nos except do fluxo e do
-    reconciliador (decisao_ra.md §0), então esta é a proteção real. Chamada nova obriga a revisar este teste."""
+    reconciliador (decisao_ra.md §0), então esta é a proteção real. Chamada nova obriga a revisar este teste.
+    R1 ampliada fase 2, K1 (expectativa alterada, declarada): 6 -> 7, a RESULTADO KILL_DESABILITADO da camada
+    iii-b em registrar_decisao_kill (fase2/decisao_c1.md §2.2), também com resultado_desconhecido= explícito."""
     chamadas = _chamadas_de_registro_na_producao()
     assert {arquivo for arquivo, _, _ in chamadas} == {"src/tools/oracle_dba.py"}
-    assert len(chamadas) == 6, [(a, l) for a, l, _ in chamadas]
+    assert len(chamadas) == 7, [(a, l) for a, l, _ in chamadas]
     for arquivo, linha, chamada in chamadas:
         palavras = [k.arg for k in chamada.keywords]
         assert None not in palavras, f"{arquivo}:{linha}: **kwargs na chamada de registro"

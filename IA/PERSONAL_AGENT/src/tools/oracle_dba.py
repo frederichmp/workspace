@@ -15,6 +15,7 @@ import re
 import socket
 import threading
 import time
+import types
 import uuid
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
@@ -53,7 +54,8 @@ MENSAGEM_RESULTADO_DESCONHECIDO = "resultado desconhecido: conferir sessão"
 
 # Desfecho fora da lista fechada (correcao/decisao_c1.md, pontos 2 e 4): texto comum a e-mail, CLI e Web.
 MENSAGEM_DESFECHO_NAO_CONFIRMADO = "desfecho no banco não confirmado"
-MENSAGEM_RECUSA_PKG = "Encerramento NÃO executado: recusado pelo PKG_OPS_KILL (status {status})."
+# R1 ampliada V6 (docs/entregas/1.11/r1_ampliada/decisao_c1.md §2.6): nenhum texto ao LLM nomeia o pacote.
+MENSAGEM_RECUSA_PKG = "Encerramento NÃO executado: recusado pelo procedimento de encerramento (status {status})."
 STATUS_PKG_VAZIO = "DESCONHECIDO"
 
 # Reconciliador na subida
@@ -101,7 +103,7 @@ CAMPOS_IDENTIDADE_ALVO: Tuple[str, ...] = ("inst_id", "sid", "serial#") + CAMPOS
 LIMITE_TEXTO_IDENTIDADE = 128
 
 MENSAGEM_ALVO_DIVERGENTE = (
-    "A identidade da sessão no banco diverge da aprovada (verificação do PKG_OPS_KILL). "
+    "A identidade da sessão no banco diverge da aprovada (verificação do procedimento de encerramento). "
     "Encerramento NÃO executado. Campos e valores só em OPS_KILL_AUDIT."
 )
 
@@ -117,6 +119,259 @@ USUARIOS_PROTEGIDOS: Tuple[str, ...] = (
     "STARTUPADMIN",
     "OPS_OWNER",
 )
+
+
+# ---- R1 ampliada (docs/entregas/1.11/r1_ampliada/decisao_c1.md §1): saída de dados ao LLM ----
+# O resultado_tool vai ao coordenador, que pode ser o Gemini em nuvem. Nele não vão DSN, host:porta, texto cru de
+# exceção, usuário protegido, aprovador, nome do pacote nem hashes (V1-V7); o detalhe fica no log local.
+# Com o coordenador em nuvem, as ferramentas Oracle não são oferecidas nem executadas (V8, falha fechada).
+
+_REGEX_CODIGO_ERRO = re.compile(r"\b(?:ORA|DPY|DPI|TNS)-\d{4,5}\b")
+
+TEXTO_HOST_INACESSIVEL = "Host do banco inacessível."
+TEXTO_HOST_INACESSIVEL_VPN = (
+    "Host do banco inacessível. Verifique se a VPN está conectada ou se há bloqueio de firewall."
+)
+
+RESULTADO_ORACLE_SO_LOCAL = json.dumps(
+    {
+        "status": "recusado",
+        "motivo": "COORDENADOR_NUVEM",
+        "mensagem": "Dados do banco só com o coordenador local. Nenhuma consulta foi feita.",
+    },
+    ensure_ascii=False,
+)
+
+# KM2 (docs/plans/1.11-R1-ampliada.md 9.10.2, item 6): argumentos da tool_call que não são JSON de objeto não
+# derrubam o laço das interfaces; o LLM recebe esta recusa fixa (sem ecoar o argumento) e o detalhe vai ao log local.
+RESULTADO_ARGUMENTOS_INVALIDOS = json.dumps(
+    {
+        "status": "recusado",
+        "motivo": "ARGUMENTOS_INVALIDOS",
+        "mensagem": "Argumentos da ferramenta inválidos; nada foi executado.",
+    },
+    ensure_ascii=False,
+)
+
+TEXTO_HISTORICO_COM_DADO_DO_BANCO = (
+    "O histórico desta conversa tem dados do banco e o coordenador ativo é em nuvem. "
+    "Use 'Limpar Chat' ou religue o Ollama."
+)
+
+# Lista de permissão para o coordenador em nuvem (R1 ampliada fase 2, K2; fase2/decisao_c1.md §1 e plano 9.8.1):
+# só LIBERADA_NUVEM libera. Toda ferramenta registrada (*_tools_schema de src/tools/*.py) tem entrada explícita; um
+# teste AST falha se faltar ou sobrar nome. Na execução, nome ausente vale SO_LOCAL. Imutável (MappingProxyType) e
+# sem importar rag_search nem gemini_router (langchain, chave do Gemini).
+LIBERADA_NUVEM = "LIBERADA_NUVEM"
+SO_LOCAL = "SO_LOCAL"
+CLASSIFICACAO_FERRAMENTAS = types.MappingProxyType(
+    {
+        "coletar_metricas_hardware": LIBERADA_NUVEM,
+        "verificar_espaco_disco": LIBERADA_NUVEM,
+        "coletar_sessoes_ativas": SO_LOCAL,
+        "coletar_top_sql": SO_LOCAL,
+        "coletar_plano_execucao": SO_LOCAL,
+        "matar_sessao_oracle": SO_LOCAL,
+        "buscar_script_interno": SO_LOCAL,
+        "analisar_log_complexo": SO_LOCAL,
+    }
+)
+
+
+def ferramenta_liberada_nuvem(nome: Any) -> bool:
+    """
+    True só para nome (str) classificado LIBERADA_NUVEM em CLASSIFICACAO_FERRAMENTAS, lida em tempo de chamada.
+    Ausente, outro valor (inclusive erro de digitação), outro tipo ou exceção: False (falha fechada). Nunca levanta.
+    """
+    try:
+        return isinstance(nome, str) and CLASSIFICACAO_FERRAMENTAS.get(nome) == LIBERADA_NUVEM
+    except Exception:
+        return False
+
+# R1 ampliada fase 2, K5 (fase2/decisao_c1.md §8.4; A3 e A4 da revisão adversarial): o coordenador local é um só
+# destino, em IP literal (sem resolução de nome), o mesmo da sonda. "localhost" deixa de ser aceito.
+HOST_COORDENADOR_LOCAL = "127.0.0.1"
+PORTA_COORDENADOR_LOCAL = 11434
+URL_COORDENADOR_LOCAL = f"http://{HOST_COORDENADOR_LOCAL}:{PORTA_COORDENADOR_LOCAL}/v1"
+_HOSTS_COORDENADOR_LOCAL = frozenset({"127.0.0.1", "::1"})
+_CAMINHOS_COORDENADOR_LOCAL = frozenset({"/v1", "/v1/"})
+
+
+def criar_cliente_coordenador_local() -> Any:
+    """
+    Fábrica única do cliente do coordenador local (K5), usada por app.py e src/main.py: base_url em
+    URL_COORDENADOR_LOCAL e cliente HTTP sem proxy de ambiente ou do sistema (trust_env=False) e sem seguir
+    redirecionamento (follow_redirects=False). O openai é importado aqui (o módulo não depende dele no import, e o
+    monkeypatch de openai.OpenAI dos testes continua valendo).
+    """
+    import openai
+
+    return openai.OpenAI(
+        base_url=URL_COORDENADOR_LOCAL,
+        api_key="local",
+        http_client=openai.DefaultHttpxClient(trust_env=False, follow_redirects=False),
+    )
+
+
+def _codigo_erro(exc: BaseException) -> str:
+    """
+    Só o código do erro para o LLM (V3): o 1º ORA-/DPY-/DPI-/TNS-NNNNN de um oracledb.Error; senão, ou para
+    outra exceção, o nome do tipo. Nunca ecoa o texto do erro e nunca levanta (A3).
+    """
+    try:
+        if isinstance(exc, oracledb.Error):
+            achado = _REGEX_CODIGO_ERRO.search(_descrever_erro(exc))
+            if achado:
+                return achado.group(0)
+        return type(exc).__name__
+    except Exception:
+        return "Exception"
+
+
+def _registrar_erro_local(
+    ferramenta: str,
+    motivo: str,
+    exc: Optional[BaseException] = None,
+    rede: Optional[Dict[str, Any]] = None,
+) -> None:
+    """
+    Detalhe cru de um erro só no log local (auditoria_oracle.log), nunca no resultado_tool: o texto do erro
+    e, quando há, host:porta e erro_rede da sonda. O DSN não é gravado. Nunca levanta.
+    """
+    try:
+        partes = [f"DETALHE LOCAL (fora do LLM) | ferramenta={ferramenta} | motivo={motivo}"]
+        if exc is not None:
+            partes.append(f"erro={_descrever_erro(exc)}")
+        if rede is not None:
+            partes.append(f"host={rede.get('host')}:{rede.get('porta')} | erro_rede={rede.get('erro_rede')}")
+        logger.warning(" | ".join(partes))
+    except Exception:
+        pass
+
+
+def coordenador_e_local(client: Any) -> bool:
+    """
+    V8 (decisao_c1.md §3.1), estrito desde o K5 (fase2/decisao_c1.md §8.4): o coordenador é local só se o base_url
+    do próprio cliente que envia é http, host 127.0.0.1 ou ::1 (hostname exato; "localhost" não), porta 11434, sem
+    usuário nem senha, caminho /v1 e sem query nem fragmento. Não lê atributo privado do openai nem do httpx2 (o
+    transporte sem proxy e sem redirect vem da fábrica). Sem atributo, exceção ou qualquer outra forma: False.
+    """
+    try:
+        from urllib.parse import urlsplit
+
+        partes = urlsplit(str(client.base_url))
+        return (
+            partes.scheme == "http"
+            and partes.hostname in _HOSTS_COORDENADOR_LOCAL
+            and partes.port == PORTA_COORDENADOR_LOCAL
+            and "@" not in partes.netloc  # sem userinfo (usuário e/ou senha), inclusive "@" vazio
+            and partes.path in _CAMINHOS_COORDENADOR_LOCAL
+            and not partes.query
+            and not partes.fragment
+        )
+    except Exception:
+        return False
+
+
+def ler_argumentos_da_ferramenta(nome_funcao: Any, bruto: Any) -> Optional[Dict[str, Any]]:
+    """
+    KM2 (plano 9.10.2, item 6): argumentos de uma tool_call. Vazio: {}. JSON de objeto: o dict. Qualquer outra coisa
+    (JSON malformado, lista, número, tipo errado): None, com o detalhe no log local (_registrar_erro_local). Nunca
+    levanta; quem chama devolve RESULTADO_ARGUMENTOS_INVALIDOS ao LLM e segue para a próxima tool_call.
+    """
+    if not bruto:
+        return {}
+    try:
+        valor = json.loads(bruto)
+    except Exception as exc:
+        _registrar_erro_local(str(nome_funcao), "ARGUMENTOS_INVALIDOS", exc=exc)
+        return None
+    if not isinstance(valor, dict):
+        _registrar_erro_local(
+            str(nome_funcao), "ARGUMENTOS_INVALIDOS", exc=TypeError(f"não é objeto JSON: {type(valor).__name__}")
+        )
+        return None
+    return valor
+
+
+_PAPEIS_DE_MENSAGEM = frozenset({"system", "user", "assistant", "tool"})
+
+
+def historico_tem_dado_do_banco(mensagens: Any) -> bool:
+    """
+    V8, trava de histórico (decisao_c1.md §3.4; fase 2, K2 e K7): True se alguma mensagem role "tool" (fora a recusa
+    fixa RESULTADO_ORACLE_SO_LOCAL) veio de ferramenta não liberada para a nuvem (ferramenta_liberada_nuvem). Lista de
+    permissão: nome ausente ou desconhecido, RAG e recusa do kill contam como dado local. Dict ou objeto (role, name e
+    content por getattr, como o ChatCompletionMessage que a CLI anexa) valem igual; role fora de system/user/assistant/
+    tool, entrada que não é lista ou exceção: True (falha fechada, K7).
+    """
+    try:
+        if not isinstance(mensagens, (list, tuple)):
+            return True
+        for mensagem in mensagens:
+            if isinstance(mensagem, dict):
+                papel, nome, conteudo = mensagem.get("role"), mensagem.get("name"), mensagem.get("content")
+            else:
+                papel = getattr(mensagem, "role", None)
+                nome, conteudo = getattr(mensagem, "name", None), getattr(mensagem, "content", None)
+            if papel not in _PAPEIS_DE_MENSAGEM:
+                return True
+            if papel != "tool":
+                continue
+            if conteudo == RESULTADO_ORACLE_SO_LOCAL:
+                continue
+            if not ferramenta_liberada_nuvem(nome):
+                return True
+        return False
+    except Exception:
+        return True
+
+
+# ---- R1 ampliada, fase 2 (docs/entregas/1.11/r1_ampliada/fase2/decisao_c1.md §2): gate de produção do kill ----
+NOME_FERRAMENTA_KILL = "matar_sessao_oracle"
+
+RESULTADO_KILL_DESABILITADO = json.dumps(
+    {
+        "status": "recusado",
+        "motivo": "KILL_DESABILITADO",
+        "status_banco": "KILL_DESABILITADO",
+        "resultado_desconhecido": False,
+        "mensagem": "Encerramento de sessão indisponível nesta instalação. Nenhuma consulta nem conexão foi feita.",
+    },
+    ensure_ascii=False,
+)
+
+
+def kill_habilitado() -> bool:
+    """
+    Gate de produção do kill (decisao_c1.md §2.1): só o valor exato "2" de OPS_KILL_PKG_VERSAO (PKG_OPS_KILL v2
+    instalado) habilita o encerramento. Lido a cada chamada, sem strip, sem cache e sem reler o .env; qualquer
+    outro valor, ou a ausência, deixa o kill indisponível (falha fechada).
+    """
+    return os.environ.get("OPS_KILL_PKG_VERSAO") == "2"
+
+
+def ferramentas_do_coordenador(schemas: Any, local: bool) -> List[Dict[str, Any]]:
+    """
+    Catálogo entregue ao LLM a cada chamada (decisao_c1.md §1.1 e §2.2-i). Pula a entrada malformada (falha
+    fechada). Sem o gate, matar_sessao_oracle sai do catálogo, também com o coordenador local. Com o coordenador em
+    nuvem, só ficam as ferramentas liberadas (ferramenta_liberada_nuvem; fase 2, K2): Oracle, RAG e nome sem
+    classificação saem.
+    """
+    catalogo: List[Dict[str, Any]] = []
+    for schema in schemas or []:
+        try:
+            nome = schema["function"]["name"]
+        except Exception:
+            continue
+        if not isinstance(nome, str):
+            continue
+        if nome == NOME_FERRAMENTA_KILL and not kill_habilitado():
+            continue
+        if not local and not ferramenta_liberada_nuvem(nome):
+            continue
+        catalogo.append(schema)
+    return catalogo
 
 
 def _extrair_host_porta(dsn: str) -> Tuple[str, int]:
@@ -156,7 +411,8 @@ def verificar_acessibilidade_host(dsn: str, timeout: float = 3.0) -> Dict[str, A
             "acessivel": False,
             "host": host,
             "porta": porta,
-            "erro_rede": str(net_err),
+            # R1 ampliada (A2): só tipo e errno; o texto do erro de socket pode trazer o host.
+            "erro_rede": f"{type(net_err).__name__} errno={getattr(net_err, 'errno', None)}",
         }
 
 
@@ -176,7 +432,6 @@ def coletar_sessoes_ativas() -> str:
             {
                 "status": "erro",
                 "motivo": "ERRO_CONFIG",
-                "instancia": dsn or "NAO_CONFIGURADO",
                 "mensagem": (
                     "Configuração incompleta no cofre (.env). "
                     "Variáveis ORACLE_USER_DIAG, ORACLE_PASSWORD_DIAG e ORACLE_DSN são obrigatórias."
@@ -188,18 +443,14 @@ def coletar_sessoes_ativas() -> str:
     # 1. Pré-validação de Rede / VPN (Fail-Fast em 3 segundos)
     check_rede = verificar_acessibilidade_host(dsn, timeout=3.0)
     if not check_rede["acessivel"]:
+        _registrar_erro_local("coletar_sessoes_ativas", "HostInacessivelVPN", rede=check_rede)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": "HostInacessivelVPN",
-                "instancia": dsn,
                 "host_acessivel": False,
                 "tipo_erro": "HostInacessivelVPN",
-                "mensagem": (
-                    f"Host {check_rede['host']}:{check_rede['porta']} inacessível. "
-                    "Verifique se a VPN está conectada ou se há bloqueio de firewall."
-                ),
-                "detalhe_rede": check_rede["erro_rede"],
+                "mensagem": TEXTO_HOST_INACESSIVEL_VPN,
             },
             ensure_ascii=False,
         )
@@ -252,7 +503,6 @@ def coletar_sessoes_ativas() -> str:
         return json.dumps(
             {
                 "status": "sucesso",
-                "instancia": dsn,
                 "host_acessivel": True,
                 "latencia_rede_ms": check_rede["latencia_ms"],
                 "sessoes_ativas": total_ativas,
@@ -262,26 +512,31 @@ def coletar_sessoes_ativas() -> str:
         )
 
     except oracledb.Error as db_err:
+        _registrar_erro_local("coletar_sessoes_ativas", "OracleError", exc=db_err)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": "OracleError",
-                "instancia": dsn,
                 "host_acessivel": True,
                 "tipo_erro": "OracleError",
-                "mensagem": str(db_err),
+                "codigo_erro": _codigo_erro(db_err),
+                "mensagem": f"Erro do Oracle {_codigo_erro(db_err)}.",
             },
             ensure_ascii=False,
         )
     except Exception as exc:
+        _registrar_erro_local("coletar_sessoes_ativas", type(exc).__name__, exc=exc)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": type(exc).__name__,
-                "instancia": dsn,
                 "host_acessivel": True,
                 "tipo_erro": type(exc).__name__,
-                "mensagem": str(exc),
+                "codigo_erro": _codigo_erro(exc),
+                "mensagem": (
+                    f"Erro do Oracle {_codigo_erro(exc)}." if isinstance(exc, oracledb.Error)
+                    else f"Erro {type(exc).__name__}."
+                ),
             },
             ensure_ascii=False,
         )
@@ -313,7 +568,6 @@ def coletar_top_sql(limite: int = 3) -> str:
             {
                 "status": "erro",
                 "motivo": "ERRO_CONFIG",
-                "instancia": dsn or "NAO_CONFIGURADO",
                 "mensagem": (
                     "Configuração incompleta no cofre (.env). "
                     "Variáveis ORACLE_USER_DIAG, ORACLE_PASSWORD_DIAG e ORACLE_DSN são obrigatórias."
@@ -325,18 +579,14 @@ def coletar_top_sql(limite: int = 3) -> str:
     # Pré-validação de Rede / VPN (Fail-Fast em 3 segundos)
     check_rede = verificar_acessibilidade_host(dsn, timeout=3.0)
     if not check_rede["acessivel"]:
+        _registrar_erro_local("coletar_top_sql", "HostInacessivelVPN", rede=check_rede)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": "HostInacessivelVPN",
-                "instancia": dsn,
                 "host_acessivel": False,
                 "tipo_erro": "HostInacessivelVPN",
-                "mensagem": (
-                    f"Host {check_rede['host']}:{check_rede['porta']} inacessível. "
-                    "Verifique se a VPN está conectada ou se há bloqueio de firewall."
-                ),
-                "detalhe_rede": check_rede["erro_rede"],
+                "mensagem": TEXTO_HOST_INACESSIVEL_VPN,
             },
             ensure_ascii=False,
         )
@@ -379,7 +629,6 @@ def coletar_top_sql(limite: int = 3) -> str:
         return json.dumps(
             {
                 "status": "sucesso",
-                "instancia": dsn,
                 "host_acessivel": True,
                 "top_sql": top_sqls,
             },
@@ -387,12 +636,16 @@ def coletar_top_sql(limite: int = 3) -> str:
         )
 
     except Exception as exc:
+        _registrar_erro_local("coletar_top_sql", type(exc).__name__, exc=exc)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": type(exc).__name__,
-                "instancia": dsn,
-                "mensagem": str(exc),
+                "codigo_erro": _codigo_erro(exc),
+                "mensagem": (
+                    f"Erro do Oracle {_codigo_erro(exc)}." if isinstance(exc, oracledb.Error)
+                    else f"Erro {type(exc).__name__}."
+                ),
             },
             ensure_ascii=False,
         )
@@ -440,7 +693,6 @@ def coletar_plano_execucao(sql_id: str) -> str:
             {
                 "status": "erro",
                 "motivo": "ERRO_CONFIG",
-                "instancia": dsn or "NAO_CONFIGURADO",
                 "mensagem": (
                     "Configuração incompleta no cofre (.env). "
                     "Variáveis ORACLE_USER_DIAG, ORACLE_PASSWORD_DIAG e ORACLE_DSN são obrigatórias."
@@ -452,18 +704,14 @@ def coletar_plano_execucao(sql_id: str) -> str:
     # Pré-validação de Rede / VPN (Fail-Fast em 3 segundos)
     check_rede = verificar_acessibilidade_host(dsn, timeout=3.0)
     if not check_rede["acessivel"]:
+        _registrar_erro_local("coletar_plano_execucao", "HostInacessivelVPN", rede=check_rede)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": "HostInacessivelVPN",
-                "instancia": dsn,
                 "host_acessivel": False,
                 "tipo_erro": "HostInacessivelVPN",
-                "mensagem": (
-                    f"Host {check_rede['host']}:{check_rede['porta']} inacessível. "
-                    "Verifique se a VPN está conectada ou se há bloqueio de firewall."
-                ),
-                "detalhe_rede": check_rede["erro_rede"],
+                "mensagem": TEXTO_HOST_INACESSIVEL_VPN,
             },
             ensure_ascii=False,
         )
@@ -507,12 +755,17 @@ def coletar_plano_execucao(sql_id: str) -> str:
         )
 
     except Exception as exc:
+        _registrar_erro_local("coletar_plano_execucao", type(exc).__name__, exc=exc)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": type(exc).__name__,
                 "sql_id": sql_id_str,
-                "mensagem": str(exc),
+                "codigo_erro": _codigo_erro(exc),
+                "mensagem": (
+                    f"Erro do Oracle {_codigo_erro(exc)}." if isinstance(exc, oracledb.Error)
+                    else f"Erro {type(exc).__name__}."
+                ),
             },
             ensure_ascii=False,
         )
@@ -605,10 +858,11 @@ def consultar_alvo_sessao_diag(
     # 3. Pré-validação rápida de rede
     check_rede = verificar_acessibilidade_host(dsn, timeout=3.0)
     if not check_rede["acessivel"]:
+        _registrar_erro_local("consultar_alvo_sessao_diag", "HostInacessivelVPN", rede=check_rede)
         return {
             "encontrado": False,
             "motivo": "HostInacessivelVPN",
-            "mensagem": f"Host {check_rede['host']}:{check_rede['porta']} inacessível.",
+            "mensagem": TEXTO_HOST_INACESSIVEL,
         }
 
     connection: Optional[oracledb.Connection] = None
@@ -680,9 +934,10 @@ def consultar_alvo_sessao_diag(
                 "elegivel": False,
                 "motivo": "USUARIO_PROTEGIDO",
                 "alvo": dados_alvo,
+                # V4 (decisao_c1.md §2.4): o nome do usuário protegido não vai ao LLM; fica no log local.
                 "mensagem": (
                     f"Sessão inst_id={inst_id_int}, sid={sid_int}, serial={serial_int} "
-                    f"pertence a usuário protegido ({username or 'NULO'}). Encerramento não permitido."
+                    "pertence a usuário protegido. Encerramento não permitido."
                 ),
             }
 
@@ -692,16 +947,20 @@ def consultar_alvo_sessao_diag(
             "alvo": dados_alvo,
         }
     except oracledb.Error as db_err:
+        _registrar_erro_local("consultar_alvo_sessao_diag", "ERRO_ORACLE", exc=db_err)
         return {
             "encontrado": False,
             "motivo": "ERRO_ORACLE",
-            "mensagem": str(db_err),
+            "codigo_erro": _codigo_erro(db_err),
+            "mensagem": f"Erro do Oracle {_codigo_erro(db_err)}.",
         }
     except Exception as exc:
+        _registrar_erro_local("consultar_alvo_sessao_diag", type(exc).__name__, exc=exc)
         return {
             "encontrado": False,
             "motivo": type(exc).__name__,
-            "mensagem": str(exc),
+            "codigo_erro": _codigo_erro(exc),
+            "mensagem": f"Erro {type(exc).__name__}.",
         }
     finally:
         if cursor is not None:
@@ -824,6 +1083,16 @@ def matar_sessao_oracle(
             ensure_ascii=False,
         )
 
+    # Gate de produção (decisao_c1.md §2.2-iv; D2 do §8.5: antes das credenciais): sem OPS_KILL_PKG_VERSAO=2,
+    # KILL_DESABILITADO, nunca ERRO_CONFIG; nenhuma leitura de credencial, sonda nem conexão. Vem depois só das
+    # validações locais (sem E/S).
+    if not kill_habilitado():
+        logger.warning(
+            f"KILL BLOQUEADO: KILL_DESABILITADO (OPS_KILL_PKG_VERSAO) | inst_id={inst_id_int}, sid={sid_int}, "
+            f"serial={serial_int}"
+        )
+        return RESULTADO_KILL_DESABILITADO
+
     # 2. Verificação de credenciais segregadas da conta KILL
     user = os.getenv("ORACLE_USER_KILL")
     password = os.getenv("ORACLE_PASSWORD_KILL")
@@ -835,7 +1104,6 @@ def matar_sessao_oracle(
                 "status": "erro",
                 "motivo": "ERRO_CONFIG",
                 "resultado_desconhecido": False,
-                "instancia": dsn or "NAO_CONFIGURADO",
                 "mensagem": (
                     "Configuração incompleta no cofre (.env). "
                     "Variáveis ORACLE_USER_KILL, ORACLE_PASSWORD_KILL e ORACLE_DSN são obrigatórias."
@@ -847,18 +1115,14 @@ def matar_sessao_oracle(
     # 3. Pré-validação rápida de rede / VPN
     check_rede = verificar_acessibilidade_host(dsn, timeout=3.0)
     if not check_rede["acessivel"]:
+        _registrar_erro_local("matar_sessao_oracle", "HostInacessivelVPN", rede=check_rede)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": "HostInacessivelVPN",
                 "resultado_desconhecido": False,
-                "instancia": dsn,
                 "host_acessivel": False,
-                "mensagem": (
-                    f"Host {check_rede['host']}:{check_rede['porta']} inacessível. "
-                    "Verifique se a VPN está conectada ou se há bloqueio de firewall."
-                ),
-                "detalhe_rede": check_rede["erro_rede"],
+                "mensagem": TEXTO_HOST_INACESSIVEL_VPN,
             },
             ensure_ascii=False,
         )
@@ -918,7 +1182,7 @@ def matar_sessao_oracle(
         desconhecido = False
         if status_banco in RESULTADOS_KILL_EXECUTADO:
             mensagem = (
-                f"Procedimento OPS_OWNER.PKG_OPS_KILL.KILL_SESSION executado para "
+                f"Encerramento executado para "
                 f"inst_id={inst_id_int}, sid={sid_int}, serial={serial_int}. "
                 f"Status retornado pelo banco: {status_banco}."
             )
@@ -931,7 +1195,7 @@ def matar_sessao_oracle(
             desconhecido = True
             status_banco = status_banco or STATUS_PKG_VAZIO
             mensagem = (
-                f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Status retornado pelo PKG_OPS_KILL: {status_banco}; "
+                f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Status retornado pelo procedimento de encerramento: {status_banco}; "
                 f"{MENSAGEM_DESFECHO_NAO_CONFIRMADO}. Consulte OPS_KILL_AUDIT."
             )
 
@@ -950,24 +1214,26 @@ def matar_sessao_oracle(
         )
 
     except oracledb.Error as db_err:
-        # A3: o texto do erro passa por _descrever_erro, que nunca levanta; nenhuma exceção sai daqui.
+        # A3: _codigo_erro e _registrar_erro_local nunca levantam; nenhuma exceção sai daqui.
+        # R1 ampliada V3 (decisao_c1.md §2.3): ao LLM só o código; o texto cru vai ao log local.
+        _registrar_erro_local("matar_sessao_oracle", "ERRO_ORACLE", exc=db_err)
         if execute_iniciado:
             mensagem = (
-                f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro do Oracle a partir da chamada ao PKG: "
-                f"{_descrever_erro(db_err)}"
+                f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro do Oracle a partir da chamada de encerramento: "
+                f"{_codigo_erro(db_err)}"
             )
         else:
-            mensagem = _descrever_erro(db_err)
+            mensagem = _codigo_erro(db_err)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": "ERRO_ORACLE",
                 "status_banco": "ERRO_ORACLE",
                 "resultado_desconhecido": execute_iniciado,
-                "instancia": dsn,
                 "sid": sid_int,
                 "serial": serial_int,
                 "tipo_erro": "OracleError",
+                "codigo_erro": _codigo_erro(db_err),
                 "mensagem": mensagem,
             },
             ensure_ascii=False,
@@ -975,16 +1241,20 @@ def matar_sessao_oracle(
     except Exception as exc:
         # D8 (decisao.md): exceção que não é do Oracle depois do execute também não prova que o kill deixou
         # de acontecer. Sem retentativa automática: o resultado é devolvido como desconhecido.
+        _registrar_erro_local("matar_sessao_oracle", type(exc).__name__, exc=exc)
         if execute_iniciado:
-            mensagem = f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro a partir da chamada ao PKG: {type(exc).__name__}"
+            # R1 ampliada (conferencia_c7.md §6.1): o mesmo texto do ramo Oracle, sem nomear o pacote.
+            mensagem = (
+                f"{MENSAGEM_RESULTADO_DESCONHECIDO}. Erro a partir da chamada de encerramento: {type(exc).__name__}"
+            )
         else:
-            mensagem = _descrever_erro(exc)
+            mensagem = _codigo_erro(exc)
         return json.dumps(
             {
                 "status": "erro",
                 "motivo": type(exc).__name__,
                 "resultado_desconhecido": execute_iniciado,
-                # A5 (só este ramo, D8): sem "instancia": dsn; os demais ramos ficam para a tarefa R1 ampliada.
+                # R1 ampliada V1: nenhum ramo leva "instancia" (o DSN) ao LLM.
                 "sid": sid_int,
                 "serial": serial_int,
                 "tipo_erro": type(exc).__name__,
@@ -1090,7 +1360,16 @@ def executar_kill_verificado(
     ref_aprovacao: keyword-only, sem default; é o id_intervencao da INTENCAO (decisao.md D4).
     A identidade esperada enviada ao PKG vem da reconsulta cujo hash bateu, montada depois do hash, da
     elegibilidade e do TTL, só com as chaves presentes (a falta de chave fica para a validação local).
+    Gate de produção (fase 2, K6; decisao_c1.md §8.5): sem OPS_KILL_PKG_VERSAO=2, KILL_DESABILITADO antes da
+    reconsulta, sem sonda, sem conexão DIAG nem KILL.
     """
+    if not kill_habilitado():
+        logger.warning(
+            f"KILL BLOQUEADO NA VERIFICAÇÃO: KILL_DESABILITADO (OPS_KILL_PKG_VERSAO) | inst_id={inst_id}, "
+            f"sid={sid}, serial={serial}"
+        )
+        return RESULTADO_KILL_DESABILITADO
+
     reconsulta = consultar_alvo_sessao_diag(inst_id=inst_id, sid=sid, serial=serial)
 
     if not reconsulta.get("encontrado"):
@@ -1125,8 +1404,7 @@ def executar_kill_verificado(
                 "motivo": "ALVO_ALTERADO",
                 "status_banco": "ALVO_ALTERADO",
                 "resultado_desconhecido": False,
-                "hash_aprovado": hash_aprovado,
-                "hash_atual": hash_atual,
+                # R1 ampliada V7 (R2; decisao_c1.md §2.7): os hashes ficam só no log acima e no JSONL.
                 "mensagem": (
                     "A identidade da sessão mudou entre a aprovação e a execução. "
                     "Encerramento cancelado sem chamada à conta KILL."
@@ -1138,7 +1416,8 @@ def executar_kill_verificado(
     if not reconsulta.get("elegivel"):
         motivo = reconsulta.get("motivo", "NAO_ELEGIVEL")
         logger.warning(
-            f"KILL BLOQUEADO NA RECONSULTA: {motivo} | inst_id={inst_id}, sid={sid}, serial={serial}"
+            f"KILL BLOQUEADO NA RECONSULTA: {motivo} | inst_id={inst_id}, sid={sid}, serial={serial} | "
+            f"username={(reconsulta.get('alvo') or {}).get('username')}"
         )
         return json.dumps(
             {
@@ -1693,8 +1972,9 @@ def registrar_decisao_kill(
                 "Para prosseguir, reconsulte a sessão e solicite nova aprovação."
             )
         else:
+            # R1 ampliada V5 (decisao_c1.md §2.5): o aprovador fica no JSONL, no log e na tela, não no LLM.
             mensagem = (
-                f"Intervenção não aprovada ({decisao}/{motivo}) por '{aprovador_registro}'. "
+                f"Intervenção não aprovada ({decisao}/{motivo}). "
                 "Nenhuma chamada à conta KILL foi feita."
             )
         resultado_tool = json.dumps(
@@ -1716,6 +1996,79 @@ def registrar_decisao_kill(
             "resultado_tool": resultado_tool,
             "registro": registro,
             "falha_registro": falha_registro,
+            "id_intervencao": id_intervencao,
+            "resultado_desconhecido": False,
+            "assunto_email": None,
+            "email_enviado": None,
+            "email_detalhe": None,
+        }
+
+    # Gate de produção (decisao_c1.md §2.2-iii-b): APROVADO, mas sem OPS_KILL_PKG_VERSAO=2 (ex.: HITL pendente com a
+    # variável retirada antes do clique). Uma RESULTADO sem INTENCAO; sem reconsulta, sem conta KILL e sem e-mail.
+    if not kill_habilitado():
+        falha_registro_gate: Optional[str] = None
+        try:
+            registro = registrar_log_aprovacao_kill(
+                aprovador=aprovador_limpo,
+                decisao="APROVADO",
+                hash_payload=hash_aprovado,
+                parametros=parametros,
+                alvo=alvo,
+                resultado_banco="KILL_DESABILITADO",
+                motivo="KILL_DESABILITADO",
+                caminho_log=destino_log,
+                fase="RESULTADO",
+                id_intervencao=id_intervencao,
+                resultado_desconhecido=False,
+            )
+        except Exception as exc:
+            registro = None
+            falha_registro_gate = "RESULTADO"
+            logger.error(
+                f"AUDITORIA HITL: FALHA AO GRAVAR RESULTADO (APROVADO/KILL_DESABILITADO, {canal}) | "
+                f"id_intervencao={id_intervencao} | erro={type(exc).__name__} "
+                f"errno={getattr(exc, 'errno', None)} | registro="
+                + _serializar_para_log(
+                    {
+                        "fase": "RESULTADO",
+                        "id_intervencao": id_intervencao,
+                        "aprovador": aprovador_limpo,
+                        "decisao": "APROVADO",
+                        "resultado_banco": "KILL_DESABILITADO",
+                        "resultado_desconhecido": False,
+                        "motivo": "KILL_DESABILITADO",
+                        "hash_payload": hash_aprovado,
+                        "parametros": parametros,
+                    }
+                )
+            )
+        logger.warning(
+            f"AUDITORIA HITL: APROVADO por {aprovador_limpo} ({canal}), mas KILL_DESABILITADO "
+            f"(OPS_KILL_PKG_VERSAO) | inst_id={inst_id}, sid={sid}, serial={serial} | Hash={hash_aprovado} | "
+            f"id_intervencao={id_intervencao}"
+        )
+        resultado_tool = json.dumps(
+            {
+                "status": "abortado",
+                "decisao": "APROVADO",
+                "motivo": "KILL_DESABILITADO",
+                "resultado_banco": "KILL_DESABILITADO",
+                "executado": False,
+                "mensagem": (
+                    "Encerramento de sessão indisponível nesta instalação; intervenção NÃO executada. "
+                    "Nenhuma consulta nem chamada à conta KILL foi feita."
+                ),
+            },
+            ensure_ascii=False,
+        )
+        return {
+            "decisao": "APROVADO",
+            "resultado_banco": "KILL_DESABILITADO",
+            "executado": False,
+            "motivo": "KILL_DESABILITADO",
+            "resultado_tool": resultado_tool,
+            "registro": registro,
+            "falha_registro": falha_registro_gate,
             "id_intervencao": id_intervencao,
             "resultado_desconhecido": False,
             "assunto_email": None,
@@ -1995,12 +2348,25 @@ def preparar_intervencao_kill(
         }
     inst_id_int, sid_int, serial_int = validados
 
+    # Gate de produção (decisao_c1.md §2.2-iii-a): sem OPS_KILL_PKG_VERSAO=2, sem pré-consulta e sem prompt.
+    if not kill_habilitado():
+        logger.warning(
+            f"HITL RECUSADO LOCALMENTE: KILL_DESABILITADO (OPS_KILL_PKG_VERSAO) | inst_id={inst_id_int}, "
+            f"sid={sid_int}, serial={serial_int}"
+        )
+        return {
+            "requer_aprovacao": False,
+            "motivo": "KILL_DESABILITADO",
+            "resultado_tool": RESULTADO_KILL_DESABILITADO,
+        }
+
     check_alvo = consultar_alvo_sessao_diag(inst_id=inst_id_int, sid=sid_int, serial=serial_int)
     if not check_alvo.get("elegivel"):
         motivo = check_alvo.get("motivo", "ALVO_NAO_ENCONTRADO")
         logger.warning(
             f"HITL CANCELADO: alvo recusado na pré-consulta GV$SESSION | "
-            f"inst_id={inst_id_int}, sid={sid_int}, serial={serial_int} | Motivo={motivo}"
+            f"inst_id={inst_id_int}, sid={sid_int}, serial={serial_int} | Motivo={motivo} | "
+            f"username={(check_alvo.get('alvo') or {}).get('username')}"
         )
         return {
             "requer_aprovacao": False,
@@ -2199,8 +2565,8 @@ oracle_tools_schema: List[Dict[str, Any]] = [
         "function": {
             "name": "matar_sessao_oracle",
             "description": (
-                "Encerra uma sessão de usuário no banco de dados através da procedure homologada "
-                "OPS_OWNER.PKG_OPS_KILL.KILL_SESSION. Requer aprovação humana prévia (HITL)."
+                "Encerra uma sessão de usuário no banco de dados através do procedimento homologado "
+                "de encerramento. Requer aprovação humana prévia (HITL)."
             ),
             "parameters": {
                 "type": "object",
@@ -2226,3 +2592,7 @@ oracle_tools_schema: List[Dict[str, Any]] = [
         },
     },
 ]
+
+# R1 ampliada V8 (decisao_c1.md §1 e §3.3): nomes das ferramentas Oracle. Desde a fase 2 (K2) o catálogo, o despacho
+# e o histórico derivam de CLASSIFICACAO_FERRAMENTAS; esta constante fica para os testes (nenhuma Oracle liberada).
+NOMES_FERRAMENTAS_ORACLE = frozenset(f["function"]["name"] for f in oracle_tools_schema)

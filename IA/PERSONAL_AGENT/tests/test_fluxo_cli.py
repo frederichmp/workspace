@@ -31,20 +31,30 @@ ARGS_KILL = {"inst_id": 1, "sid": 101, "serial": 202}
 
 
 class _LLMFalso:
-    """Substitui main.client: 1ª chamada pede matar_sessao_oracle; 2ª devolve texto final."""
+    """Substitui main.client: 1ª chamada pede matar_sessao_oracle (ou `nome`); 2ª devolve texto final.
 
-    def __init__(self):
+    Expectativa alterada, declarada (R1 ampliada, r1_ampliada/decisao_c1.md §8.5): o falso ganha base_url, local
+    por padrão, porque com o coordenador em nuvem as ferramentas Oracle (e o kill) são recusadas (decisão 5.2.1)."""
+
+    # Fase 2, K5 (expectativa alterada, declarada; decisao_c1.md §8.4): o cliente local é 127.0.0.1, não localhost.
+    def __init__(self, base_url="http://127.0.0.1:11434/v1", nome="matar_sessao_oracle", argumentos=None):
+        self.base_url = base_url
+        self.nome, self.argumentos = nome, (ARGS_KILL if argumentos is None else argumentos)
         self.chamadas = []  # cópia da lista de mensagens recebida em cada chamada
+        self.tools = []  # catálogo recebido em cada chamada
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
     def _create(self, model=None, messages=None, tools=None, **kwargs):
         self.chamadas.append(list(messages))
+        self.tools.append(tools)
         if len(self.chamadas) == 1:
             tool_call = SimpleNamespace(
                 id="call_1",
-                function=SimpleNamespace(name="matar_sessao_oracle", arguments=json.dumps(ARGS_KILL)),
+                function=SimpleNamespace(name=self.nome, arguments=json.dumps(self.argumentos)),
             )
-            msg = SimpleNamespace(content=None, tool_calls=[tool_call])
+            # Fase 2, K7 (falso fiel ao ChatCompletionMessage; declarado em decisao_c1.md §8.6): com o role, a
+            # trava de histórico (que agora falha fechado para role desconhecido) vê o assistant como no real.
+            msg = SimpleNamespace(role="assistant", content=None, tool_calls=[tool_call])
         else:
             msg = SimpleNamespace(content="Resposta final do agente falso.", tool_calls=None)
         return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
@@ -123,6 +133,8 @@ def main_cli(tmp_path_factory):
     mp.setenv("ORACLE_PASSWORD_KILL", "senha_kill_ficticia")
     mp.setenv("ORACLE_DSN", "host-ficticio.invalid:1521/FAKE")
     mp.delenv("ORACLE_SANDBOX", raising=False)
+    # Fase 2 da R1 (decisao_c1.md §2.3; expectativa alterada, declarada): o kill exige OPS_KILL_PKG_VERSAO=2.
+    mp.setenv("OPS_KILL_PKG_VERSAO", "2")
 
     import socket
 
@@ -412,3 +424,239 @@ def test_cli_reconciliador_falha_nao_derruba(main_cli, monkeypatch, capsys):
     monkeypatch.setattr(main_cli, "reconciliar_intencoes_orfas", _lock_indisponivel)
     main_cli._reconciliar_na_subida_cli()  # não levanta
     assert "Reconciliação do log de aprovações NÃO executada" in capsys.readouterr().out
+
+
+# =============================================================================
+# R1 ampliada V8/V3 (r1_ampliada/decisao_c1.md §8.3): coordenador em nuvem na CLI (C1, C2) e erro (C3)
+# =============================================================================
+
+NOMES_ORACLE = {"coletar_sessoes_ativas", "coletar_top_sql", "coletar_plano_execucao", "matar_sessao_oracle"}
+URL_GEMINI = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def _nomes(tools):
+    return {f["function"]["name"] for f in (tools or [])}
+
+
+def _tools_vistas(llm, indice=-1):
+    return [m for m in llm.chamadas[indice] if isinstance(m, dict) and m.get("role") == "tool"]
+
+
+def _rodar(main_cli, monkeypatch, llm):
+    monkeypatch.setattr(main_cli, "client", llm)
+    main_cli.executar_agente("pedido de teste")
+    return llm
+
+
+def test_cli_c1_catalogo_local_tem_oracle_e_nuvem_nao(main_cli, monkeypatch):
+    """C1 (mata V8a, V9a): catálogo local com as ferramentas Oracle; da nuvem, sem nenhuma; nunca o
+    analisar_log_complexo."""
+    local = _rodar(main_cli, monkeypatch, _LLMFalso(nome="ferramenta_inexistente", argumentos={}))
+    assert NOMES_ORACLE <= _nomes(local.tools[0]) and "analisar_log_complexo" not in _nomes(local.tools[0])
+
+    nuvem = _rodar(main_cli, monkeypatch, _LLMFalso(base_url=URL_GEMINI, nome="ferramenta_inexistente", argumentos={}))
+    nomes = _nomes(nuvem.tools[0])
+    assert nomes and not (nomes & NOMES_ORACLE) and "analisar_log_complexo" not in nomes
+
+
+@pytest.mark.parametrize("ferramenta", sorted(NOMES_ORACLE))
+def test_cli_c2_nuvem_chamada_inventada_a_ferramenta_oracle_e_recusada(main_cli, monkeypatch, ferramenta):
+    """C2 (mata V8b): com a nuvem, chamada a qualquer ferramenta Oracle devolve a recusa fixa, sem conexão."""
+    import tools.oracle_dba as od
+
+    conexoes = []
+    monkeypatch.setattr(od.oracledb, "connect", lambda *a, **k: conexoes.append(1))
+    monkeypatch.setattr(od, "verificar_acessibilidade_host", lambda *a, **k: pytest.fail("sonda chamada"))
+    monkeypatch.setattr("builtins.input", lambda *a, **k: pytest.fail("prompt HITL exibido"))
+    llm = _rodar(main_cli, monkeypatch, _LLMFalso(base_url=URL_GEMINI, nome=ferramenta, argumentos=dict(ARGS_KILL)))
+
+    assert conexoes == []
+    (tool,) = _tools_vistas(llm)
+    assert tool["content"] == od.RESULTADO_ORACLE_SO_LOCAL
+
+
+def test_cli_c3_erro_execucao_so_com_o_tipo(main_cli, monkeypatch, caplog):
+    """C3, CLI (mata V3 na interface): exceção numa ferramenta vira {"erro_execucao": <tipo>} ao LLM; o texto
+    cru vai só ao log local."""
+    def _quebra(*a, **k):
+        raise RuntimeError("exc-sentinela")
+
+    monkeypatch.setattr(main_cli, "coletar_top_sql", _quebra)
+    caplog.set_level(logging.WARNING)
+    llm = _rodar(main_cli, monkeypatch, _LLMFalso(nome="coletar_top_sql", argumentos={"limite": 3}))
+
+    (tool,) = _tools_vistas(llm)
+    assert json.loads(tool["content"]) == {"erro_execucao": "RuntimeError"}
+    assert not any("exc-sentinela" in json.dumps(m, default=str) for msgs in llm.chamadas for m in msgs)
+    assert "exc-sentinela" in caplog.text
+
+
+def test_cli_historico_com_dado_do_banco_nao_vai_a_nuvem(main_cli, monkeypatch, capsys):
+    """V8c na CLI: com a nuvem e uma mensagem de ferramenta Oracle já no histórico (simulada), a chamada não é feita.
+    Hoje a CLI cria `messages` por chamada (decisao_c1.md §3.4); o teste fixa a checagem mesmo assim."""
+    import tools.oracle_dba as od
+
+    llm = _LLMFalso(base_url=URL_GEMINI, nome="coletar_sessoes_ativas", argumentos={})
+    monkeypatch.setattr(main_cli, "client", llm)
+    original = od.historico_tem_dado_do_banco
+    monkeypatch.setattr(main_cli, "historico_tem_dado_do_banco", lambda msgs: True)
+    main_cli.executar_agente("pedido de teste")
+
+    assert llm.chamadas == [], "a nuvem recebeu o histórico com dado do banco"
+    assert od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in capsys.readouterr().out
+    assert original([{"role": "tool", "name": "coletar_sessoes_ativas", "content": "{}"}]) is True
+
+
+class _LLMSempreFerramenta(_LLMFalso):
+    """Pede uma tool_call em toda chamada (o loop da CLI chega ao limite de 6 passos)."""
+
+    def _create(self, model=None, messages=None, tools=None, **kwargs):
+        self.chamadas.append(list(messages))
+        self.tools.append(tools)
+        tool_call = SimpleNamespace(
+            id=f"call_{len(self.chamadas)}", function=SimpleNamespace(name=self.nome, arguments="{}"),
+        )
+        msg = SimpleNamespace(content=None, tool_calls=[tool_call])
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+
+def test_cli_trava_do_laudo_final_depois_do_limite_de_passos(main_cli, monkeypatch, capsys):
+    """V8c, laudo final da CLI (src/main.py, depois do loop; conferencia_c7.md §6.3): com a nuvem, se o histórico
+    passa a ter dado do banco só na checagem do laudo final (7ª), a nuvem não recebe o laudo: 6 chamadas, não 7."""
+    import tools.oracle_dba as od
+
+    llm = _LLMSempreFerramenta(base_url=URL_GEMINI, nome="ferramenta_inexistente", argumentos={})
+    monkeypatch.setattr(main_cli, "client", llm)
+    checagens = []
+
+    def _historico(mensagens):
+        checagens.append(1)
+        return len(checagens) > 6
+
+    monkeypatch.setattr(main_cli, "historico_tem_dado_do_banco", _historico)
+    main_cli.executar_agente("pedido de teste")
+
+    assert len(checagens) == 7, "a checagem do laudo final não rodou"
+    assert len(llm.chamadas) == 6, "a nuvem recebeu o laudo final com dado do banco"
+    assert od.TEXTO_HISTORICO_COM_DADO_DO_BANCO in capsys.readouterr().out
+
+
+# =============================================================================
+# R1 ampliada fase 2, K1 (fase2/decisao_c1.md §2): gate de produção do kill na CLI (K1-T2 e K1-T4)
+# =============================================================================
+
+def test_cli_k1_t4_sem_gate_kill_fora_do_catalogo_e_despacho_recusa(main_cli, monkeypatch, isolar_log_aprovacao, capsys):
+    """K1-T2 na interface e K1-T4 (mata M_K1_CAT_LOCAL na CLI e M_K1_DESP_CLI): coordenador local e sem
+    OPS_KILL_PKG_VERSAO. O kill não está no catálogo; o LLM o chama mesmo assim e recebe a recusa fixa, sem
+    conduzir_kill_hitl, sem prompt, sem conexão e sem JSONL."""
+    import tools.oracle_dba as od
+
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+    monkeypatch.setattr(main_cli, "conduzir_kill_hitl", lambda *a, **k: pytest.fail("conduzir_kill_hitl chamado"))
+    monkeypatch.setattr("builtins.input", lambda *a, **k: pytest.fail("prompt HITL exibido"))
+    monkeypatch.setattr(od.oracledb, "connect", lambda *a, **k: pytest.fail("conexão com o kill desabilitado"))
+    llm = _rodar(main_cli, monkeypatch, _LLMFalso(nome="matar_sessao_oracle", argumentos=dict(ARGS_KILL)))
+
+    nomes = _nomes(llm.tools[0])
+    assert "matar_sessao_oracle" not in nomes and (NOMES_ORACLE - {"matar_sessao_oracle"}) <= nomes
+    (tool,) = _tools_vistas(llm)
+    assert tool["name"] == "matar_sessao_oracle" and tool["content"] == od.RESULTADO_KILL_DESABILITADO
+    assert not isolar_log_aprovacao.exists()
+    assert "indisponível nesta instalação (OPS_KILL_PKG_VERSAO)" in capsys.readouterr().out
+
+
+def test_cli_k1_t6b_gate_retirado_durante_o_prompt(cenario, monkeypatch):
+    """K1-T6b na CLI (além da lista do §2.4; mata M_K1_TELA_CLI): a variável é retirada entre o aprovador e a
+    confirmação. Uma RESULTADO KILL_DESABILITADO sem INTENCAO, só a pré-consulta DIAG, sem conta KILL e sem
+    e-mail; a tela diz que a intervenção aprovada NÃO foi executada."""
+    def _entradas():
+        yield "dba"
+        monkeypatch.delenv("OPS_KILL_PKG_VERSAO")
+        yield "S"
+
+    r = cenario([_linha_alvo(), _linha_alvo()], "ENCERRADA", _entradas())
+    reg = _um_registro(r)
+    assert reg["fase"] == "RESULTADO" and reg["decisao"] == "APROVADO" and reg["aprovador"] == "dba"
+    assert reg["resultado_banco"] == "KILL_DESABILITADO" and reg["resultado_desconhecido"] is False
+    assert r.consultas_diag == 1 and r.oracle.conexoes_kill == [] and r.emails == []
+    assert "NÃO EXECUTADA: encerramento desabilitado nesta instalação (OPS_KILL_PKG_VERSAO)" in r.tela
+    assert r.json_tool["motivo"] == "KILL_DESABILITADO" and r.json_tool["executado"] is False
+    assert "dba" not in json.dumps(r.json_tool, ensure_ascii=False)
+
+
+# =============================================================================
+# R1 ampliada fase 2, K2 (fase2/decisao_c1.md §1 e §8.2): lista de permissão na CLI (K2-T5)
+# =============================================================================
+
+LIBERADAS_K2 = {"coletar_metricas_hardware", "verificar_espaco_disco"}
+NOVA_K2 = {"type": "function", "function": {"name": "ferramenta_nova", "parameters": {"type": "object"}}}
+
+
+def test_cli_k2_t5_catalogo_da_nuvem_so_com_as_liberadas(main_cli, monkeypatch):
+    """K2-T5 (mata M_K2_CAT_EXCLUSAO e M_K2_CLI_CAT_SOMA): com uma ferramenta nova no registro da CLI, o catálogo
+    local a recebe (o teste não é cego) e o da nuvem é exatamente as 2 de SO."""
+    monkeypatch.setattr(main_cli, "todas_ferramentas", main_cli.todas_ferramentas + [NOVA_K2])
+    local = _rodar(main_cli, monkeypatch, _LLMFalso(nome="ferramenta_inexistente", argumentos={}))
+    assert "ferramenta_nova" in _nomes(local.tools[0])
+
+    nuvem = _rodar(main_cli, monkeypatch, _LLMFalso(base_url=URL_GEMINI, nome="ferramenta_inexistente", argumentos={}))
+    assert _nomes(nuvem.tools[0]) == LIBERADAS_K2
+
+
+@pytest.mark.parametrize(
+    "ferramenta, argumentos", [("buscar_script_interno", {"tema_ou_problema": "x"}), ("ferramenta_nova", {})]
+)
+def test_cli_k2_t5_nuvem_recusa_rag_e_ferramenta_nova(main_cli, monkeypatch, ferramenta, argumentos):
+    """K2-T5 (mata M_K2_DESP_CLI_ORACLE e M_K2_ROTA_ANTES): com a nuvem, o RAG e um nome sem classificação dão a
+    recusa fixa; o RAG não é executado."""
+    import tools.oracle_dba as od
+
+    monkeypatch.setattr(main_cli, "buscar_script_interno", lambda *a, **k: pytest.fail("RAG executado com a nuvem"))
+    llm = _rodar(main_cli, monkeypatch, _LLMFalso(base_url=URL_GEMINI, nome=ferramenta, argumentos=argumentos))
+
+    (tool,) = _tools_vistas(llm)
+    assert tool["content"] == od.RESULTADO_ORACLE_SO_LOCAL
+
+
+def test_cli_k2_t5_nuvem_executa_a_liberada(main_cli, monkeypatch):
+    """K2-T5, controle positivo: com a nuvem, coletar_metricas_hardware é executada e o resultado vai ao LLM."""
+    monkeypatch.setattr(main_cli, "coletar_metricas_hardware", lambda *a, **k: '{"sentinela_hw": 1}')
+    llm = _rodar(main_cli, monkeypatch, _LLMFalso(base_url=URL_GEMINI, nome="coletar_metricas_hardware", argumentos={}))
+
+    (tool,) = _tools_vistas(llm)
+    assert json.loads(tool["content"]) == {"sentinela_hw": 1}
+
+
+# =============================================================================
+# KM2, item 6 (plano 9.10.2): argumentos inválidos não derrubam o laço da CLI
+# =============================================================================
+
+class _LLMArgumentosBrutos(_LLMFalso):
+    """Como o _LLMFalso, mas o arguments da 1ª tool_call é o texto bruto dado (sem json.dumps)."""
+
+    def __init__(self, bruto, **kw):
+        super().__init__(nome="coletar_metricas_hardware", **kw)
+        self.bruto = bruto
+
+    def _create(self, model=None, messages=None, tools=None, **kwargs):
+        resposta = super()._create(model=model, messages=messages, tools=tools, **kwargs)
+        if len(self.chamadas) == 1:
+            resposta.choices[0].message.tool_calls[0].function.arguments = self.bruto
+        return resposta
+
+
+@pytest.mark.parametrize("bruto", ['{"drive": "C:\\\\sentinela-args', '["sentinela-args"]'], ids=["malformado", "lista"])
+def test_cli_km2_argumentos_invalidos_nao_derrubam_o_laco(main_cli, monkeypatch, caplog, bruto):
+    """KM2, item 6 (mata M_KM2_CLI_*): executar_agente termina normal; a 2ª chamada ao LLM recebe uma única resposta
+    da ferramenta, a recusa fixa, sem ecoar o argumento; a ferramenta não roda; o log local registra o motivo."""
+    import tools.oracle_dba as od
+
+    monkeypatch.setattr(main_cli, "coletar_metricas_hardware", lambda *a, **k: pytest.fail("ferramenta executada"))
+    caplog.set_level(logging.WARNING)
+    llm = _rodar(main_cli, monkeypatch, _LLMArgumentosBrutos(bruto))
+
+    assert len(llm.chamadas) == 2, "o laço caiu antes da 2ª chamada ao LLM"
+    (tool,) = _tools_vistas(llm)
+    assert tool["content"] == od.RESULTADO_ARGUMENTOS_INVALIDOS
+    assert "sentinela-args" not in tool["content"]
+    assert "ARGUMENTOS_INVALIDOS" in caplog.text

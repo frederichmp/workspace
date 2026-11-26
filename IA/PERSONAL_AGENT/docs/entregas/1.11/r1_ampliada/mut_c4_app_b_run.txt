@@ -1,0 +1,18 @@
+# Controle de mutação `mut_c4_app_b`
+
+Alvo `app.py`; testes `tests/test_fluxo_cli.py`, `tests/test_fluxo_web.py`, `tests/test_r1_saida_llm.py::test_r1_ast_a2_excecao_so_em_tipo_codigo_registro_ou_log`, `tests/test_r1_saida_llm.py::test_r1_ast_a4_coordenador_sem_analisar_log_complexo`, `tests/test_r1_saida_llm.py::test_r1_system_prompt_sem_regra_de_ouro`, `tests/test_r1_saida_llm.py::test_r1_nomes_ferramentas_oracle_iguais_ao_schema`; cópia `git archive HEAD` + `app.py`, `src/main.py`, `src/tools/oracle_dba.py`, `tests/test_fluxo_web.py`, `tests/test_fluxo_cli.py`, `tests/test_r1_saida_llm.py`.
+
+| Mutação | Troca | Contagem | Resultado | Status |
+|---|---|---|---|---|
+| m0 | sem mutação | - | 48 passed, 13 warnings in 64.21s (0:01:04) | OK |
+| M_R1_WEB_V8A_CATALOGO_COM_ORACLE |             tools=TODAS_FERRAMENTAS if local else FERRAMENTAS_NUVEM,… | 1 substituição | 2 failed, 46 passed, 13 warnings in 65.28s (0:01:05) \| caíram: tests… | DETECTADA |
+| M_R1_WEB_V8B_SEM_RECUSA_NO_DESPACHO |             if not local and nome_funcao in NOMES_FERRAMENTAS_ORACLE:… | 1 substituição | 3 failed, 45 passed, 13 warnings in 65.71s (0:01:05) \| caíram: tests… | DETECTADA |
+| M_R1_WEB_V8C_SEM_TRAVA_NO_LOOP |         if not local and historico_tem_dado_do_banco(st.session_state… | 1 substituição | 1 failed, 47 passed, 13 warnings in 64.72s (0:01:04) \| caíram: tests… | DETECTADA |
+| M_R1_WEB_V8C_SEM_TRAVA_NO_FECHAMENTO |     if not coordenador_e_local(client) and historico_tem_dado_do_banc… | 1 substituição | 1 failed, 47 passed, 13 warnings in 66.64s (0:01:06) \| caíram: tests… | DETECTADA |
+| M_R1_WEB_V8D_SINAL_PELA_SONDA |     local = coordenador_e_local(client)\n ->     local = verificar_s… | 1 substituição | 1 failed, 47 passed, 13 warnings in 65.49s (0:01:05) \| caíram: tests… | DETECTADA |
+| M_R1_WEB_V9A_GEMINI_NO_CATALOGO | TODAS_FERRAMENTAS = os_tools_schema + oracle_tools_schema + rag_tools… | 1 substituição | 2 failed, 46 passed, 13 warnings in 62.88s (0:01:02) \| caíram: tests… | DETECTADA |
+| M_R1_WEB_V9C_REGRA_DE_OURO | - Para problemas simples, responda no formato: Diagnóstico, Evidência… | 1 substituição | 2 failed, 46 passed, 13 warnings in 65.41s (0:01:05) \| caíram: tests… | DETECTADA |
+| M_R1_WEB_V3_ERRO_EXECUCAO_COM_TEXTO |                     {"erro_execucao": type(exc).__name__}, ensure_asc… | 1 substituição | 2 failed, 46 passed, 13 warnings in 65.11s (0:01:05) \| caíram: tests… | DETECTADA |
+
+Resultado: todas DETECTADAS.
+Relatório: docs/entregas/1.11/r1_ampliada/mut_c4_app_b.md

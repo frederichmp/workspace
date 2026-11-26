@@ -1,0 +1,1347 @@
+"""
+R1 ampliada (docs/plans/1.11-R1-ampliada.md; docs/entregas/1.11/r1_ampliada/decisao_c1.md): o que volta ao LLM.
+
+O resultado_tool vai ao coordenador, que pode ser o Gemini em nuvem. Estes testes conferem, com sentinelas, que
+nenhum ramo das ferramentas Oracle leva ao LLM o DSN, host:porta, erro de rede, texto cru de exceção, usuário
+protegido, aprovador, nome do pacote ou hashes (V1-V7), e que o código do erro continua lá (asserção positiva).
+Sem Oracle: oracledb.connect é substituído por fakes; credenciais fictícias; ORACLE_SANDBOX não é tocada.
+"""
+import ast
+import json
+import logging
+import re
+import types
+from datetime import datetime
+from pathlib import Path
+
+import oracledb
+import pytest
+
+from src.tools import oracle_dba as od
+from src.tools.oracle_dba import calcular_hash_identidade
+from tests.fakes_oracle import COLUNAS_ALVO, USER_DIAG_FAKE, USER_KILL_FAKE, _OracleFake, _linha_alvo
+
+RAIZ = Path(__file__).resolve().parent.parent
+DSN_SENTINELA = "host-sentinela-r1:1599/SVC_SENTINELA"
+APROVADOR_SENTINELA = "aprovador-sentinela"
+SENTINELAS = (
+    "host-sentinela-r1", "1599", "SVC_SENTINELA", "rede-sentinela", "texto-sentinela", "exc-sentinela",
+    "STARTUPADMIN", APROVADOR_SENTINELA, "PKG_OPS_KILL", "OPS_OWNER", "KILL_SESSION",
+)
+CHAVES_PROIBIDAS = ('"instancia"', '"detalhe_rede"', '"hash_aprovado"', '"hash_atual"')
+REGEX_HASH = re.compile(r"[0-9a-f]{64}")
+ERRO_ORA = oracledb.DatabaseError("ORA-99999: texto-sentinela")
+ERRO_EXC = RuntimeError("exc-sentinela")
+IDENTIDADE = {"username": "APP_USER", "program": "app.exe", "machine": "srv-app01",
+              "logon_time": datetime(2026, 11, 23, 10, 0, 0)}
+REF = "0123456789abcdef0123456789abcdef"
+ARGS = {"inst_id": 1, "sid": 101, "serial": 202}
+
+
+def _sem_vazamento(texto, caso):
+    for sentinela in SENTINELAS:
+        assert sentinela not in texto, f"{caso}: {sentinela!r} vai ao LLM"
+    for chave in CHAVES_PROIBIDAS:
+        assert chave not in texto, f"{caso}: chave {chave} vai ao LLM"
+    assert not REGEX_HASH.search(texto), f"{caso}: hash de 64 hexadecimais vai ao LLM"
+
+
+@pytest.fixture
+def rede(monkeypatch):
+    """Credenciais fictícias, DSN sentinela e sonda de rede controlável (falha na N-ésima chamada, ou sempre)."""
+    # Fase 2 da R1 (decisao_c1.md §2.3; expectativa alterada, declarada): o kill exige OPS_KILL_PKG_VERSAO=2.
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
+    monkeypatch.setenv("ORACLE_USER_DIAG", USER_DIAG_FAKE)
+    monkeypatch.setenv("ORACLE_PASSWORD_DIAG", "senha-ficticia")
+    monkeypatch.setenv("ORACLE_USER_KILL", USER_KILL_FAKE)
+    monkeypatch.setenv("ORACLE_PASSWORD_KILL", "senha-ficticia")
+    monkeypatch.setenv("ORACLE_DSN", DSN_SENTINELA)
+    estado = {"falha_em": None, "chamadas": 0}
+
+    def sonda(dsn, timeout=3.0):
+        estado["chamadas"] += 1
+        falha = estado["falha_em"] == "sempre" or estado["falha_em"] == estado["chamadas"]
+        return {"acessivel": not falha, "host": "host-sentinela-r1", "porta": 1599, "latencia_ms": 0.1,
+                "erro_rede": "rede-sentinela" if falha else None}
+
+    monkeypatch.setattr(od, "verificar_acessibilidade_host", sonda)
+    monkeypatch.setattr(od, "enviar_alerta_email", lambda assunto, corpo: (True, "mock"))
+    return estado
+
+
+# ---- fake das ferramentas de diagnóstico (o _OracleFake só cobre a consulta de alvo e o kill) ----
+
+class _CursorDiag:
+    def __init__(self):
+        self.description, self._sql = None, ""
+
+    def execute(self, sql, **binds):
+        self._sql = sql
+        if "COUNT(*)" in sql:
+            self.description = [("COUNT(*)",)]
+        elif "gv$sqlarea" in sql.lower():
+            self.description = [(c,) for c in ("SQL_ID", "EXECUTIONS", "ELAPSED_SEG_TOTAL", "ELAPSED_POR_EXEC",
+                                               "SQL_TEXT_CURTO")]
+        elif "DBMS_XPLAN" in sql:
+            self.description = [("PLAN_TABLE_OUTPUT",)]
+        else:
+            self.description = [(c,) for c in ("INST_ID", "SID", "serial#", "SERIAL", "USERNAME", "PROGRAM",
+                                               "MACHINE", "STATUS", "SQL_ID", "EVENT")]
+
+    def fetchone(self):
+        return (3,)
+
+    def fetchall(self):
+        if "gv$sqlarea" in self._sql.lower():
+            return [("abc123def4567", 10, 1.5, 0.15, "SELECT 1 FROM dual")]
+        if "DBMS_XPLAN" in self._sql:
+            return [("Plan hash value: 1",)]
+        return [(1, 101, 202, 202, "APP_USER", "app.exe", "srv-app01", "ACTIVE", "abc123def4567", "ev")]
+
+    def close(self):
+        pass
+
+
+def _instalar_diag(monkeypatch, erro_connect=None, erro_cursor=None):
+    conexoes = []
+
+    class _Conexao:
+        def cursor(self):
+            if erro_cursor is not None:
+                raise erro_cursor
+            return _CursorDiag()
+
+        def close(self):
+            pass
+
+    def connect(*a, **k):
+        conexoes.append(k.get("user"))
+        if erro_connect is not None:
+            raise erro_connect
+        return _Conexao()
+
+    monkeypatch.setattr(oracledb, "connect", connect)
+    return conexoes
+
+
+FERRAMENTAS_DIAG = {
+    "sessoes": lambda: od.coletar_sessoes_ativas(),
+    "top_sql": lambda: od.coletar_top_sql(),
+    "plano": lambda: od.coletar_plano_execucao("abc123def4567"),
+}
+MOTIVO_ORACLE_DIAG = {"sessoes": "OracleError", "top_sql": "DatabaseError", "plano": "DatabaseError"}
+
+
+@pytest.mark.parametrize("ferramenta", list(FERRAMENTAS_DIAG))
+@pytest.mark.parametrize("ramo", ["sucesso", "erro_config", "rede", "erro_oracle", "excecao"])
+def test_r1_varredura_ferramentas_de_diagnostico(monkeypatch, rede, ferramenta, ramo):
+    """V1-V3 (decisao_c1.md §2.1-2.3) nas 3 ferramentas de diagnóstico, em todo ramo (os 15 casos do P0)."""
+    if ramo == "erro_config":
+        monkeypatch.delenv("ORACLE_USER_DIAG")
+    if ramo == "rede":
+        rede["falha_em"] = "sempre"
+    conexoes = _instalar_diag(
+        monkeypatch, erro_connect=ERRO_ORA if ramo == "erro_oracle" else None,
+        erro_cursor=ERRO_EXC if ramo == "excecao" else None,
+    )
+
+    texto = FERRAMENTAS_DIAG[ferramenta]()
+    resultado = json.loads(texto)
+
+    _sem_vazamento(texto, f"{ferramenta}:{ramo}")
+    esperado = {
+        "sucesso": ("status", "sucesso"), "erro_config": ("motivo", "ERRO_CONFIG"),
+        "rede": ("motivo", "HostInacessivelVPN"), "erro_oracle": ("motivo", MOTIVO_ORACLE_DIAG[ferramenta]),
+        "excecao": ("motivo", "RuntimeError"),
+    }[ramo]
+    assert resultado[esperado[0]] == esperado[1]
+    if ramo == "erro_oracle":
+        assert resultado["codigo_erro"] == "ORA-99999" and "ORA-99999" in resultado["mensagem"]
+    if ramo == "excecao":
+        assert resultado["codigo_erro"] == "RuntimeError"
+    if ramo == "rede":
+        assert resultado["mensagem"] == od.TEXTO_HOST_INACESSIVEL_VPN
+    assert (conexoes == []) == (ramo in ("erro_config", "rede"))
+
+
+@pytest.mark.parametrize(
+    "ramo, fake_kw, motivo",
+    [
+        ("erro_config", dict(status_pkg="ENCERRADA"), "ERRO_CONFIG"),
+        ("rede", dict(status_pkg="ENCERRADA"), "HostInacessivelVPN"),
+        ("erro_oracle_antes", dict(erro_connect_kill=ERRO_ORA), "ERRO_ORACLE"),
+        ("erro_oracle_depois", dict(erro_kill=ERRO_ORA), "ERRO_ORACLE"),
+        ("excecao_antes", dict(erro_var_kill=ERRO_EXC), "RuntimeError"),
+        ("d8", dict(status_pkg="ENCERRADA", erro_getvalue_status=ERRO_EXC), "RuntimeError"),
+        ("encerrada", dict(status_pkg="ENCERRADA"), "ENCERRADA"),
+        ("recusa_pkg", dict(status_pkg="NAO_USUARIO"), "NAO_USUARIO"),
+        ("desconhecido", dict(status_pkg=""), od.STATUS_PKG_VAZIO),
+    ],
+)
+def test_r1_varredura_matar_sessao_oracle(monkeypatch, rede, ramo, fake_kw, motivo):
+    """V1, V2, V3 e V6 em matar_sessao_oracle chamada direto, em todo ramo."""
+    monkeypatch.setattr(oracledb, "connect", _OracleFake([], **fake_kw).connect)
+    if ramo == "erro_config":
+        monkeypatch.delenv("ORACLE_USER_KILL")
+    if ramo == "rede":
+        rede["falha_em"] = "sempre"
+
+    texto = od.matar_sessao_oracle(sid=101, serial=202, inst_id=1, identidade_esperada=dict(IDENTIDADE),
+                                   ref_aprovacao=REF)
+    resultado = json.loads(texto)
+
+    _sem_vazamento(texto, f"matar:{ramo}")
+    assert resultado["motivo"] == motivo
+    if ramo.startswith("erro_oracle"):
+        assert resultado["codigo_erro"] == "ORA-99999" and "ORA-99999" in resultado["mensagem"]
+    if ramo == "erro_oracle_depois":
+        assert resultado["resultado_desconhecido"] is True
+        assert od.MENSAGEM_RESULTADO_DESCONHECIDO in resultado["mensagem"]
+    if ramo == "excecao_antes":
+        assert resultado["mensagem"] == "RuntimeError" and resultado["resultado_desconhecido"] is False
+    if ramo == "encerrada":
+        assert resultado["mensagem"].startswith("Encerramento executado para inst_id=1, sid=101, serial=202.")
+
+
+def _connect_diag_falhando_na(fake, numero, erro):
+    """connect do fake, mas a N-ésima conexão DIAG levanta `erro` (a 1ª é a pré-consulta, a 2ª a reconsulta)."""
+    contagem = {"diag": 0}
+
+    def connect(user=None, password=None, dsn=None, **kwargs):
+        if user == USER_DIAG_FAKE:
+            contagem["diag"] += 1
+            if contagem["diag"] == numero:
+                raise erro
+        return fake.connect(user=user, password=password, dsn=dsn, **kwargs)
+
+    return connect
+
+
+@pytest.mark.parametrize("ramo", ["protegido", "erro_oracle", "excecao", "rede"])
+def test_r1_varredura_pre_consulta(monkeypatch, rede, ramo):
+    """V2, V3 e V4 na pré-consulta (preparar_intervencao_kill -> resultado_tool), antes do prompt."""
+    linhas = [_linha_alvo(username="STARTUPADMIN")] if ramo == "protegido" else [_linha_alvo()]
+    fake = _OracleFake(linhas, kill_permitido=False)
+    connect = fake.connect
+    if ramo in ("erro_oracle", "excecao"):
+        connect = _connect_diag_falhando_na(fake, 1, ERRO_ORA if ramo == "erro_oracle" else ERRO_EXC)
+    if ramo == "rede":
+        rede["falha_em"] = "sempre"
+    monkeypatch.setattr(oracledb, "connect", connect)
+
+    prep = od.preparar_intervencao_kill(dict(ARGS), caminho_log=None)
+    texto = prep["resultado_tool"]
+
+    assert prep["requer_aprovacao"] is False
+    _sem_vazamento(texto, f"preparar:{ramo}")
+    motivo = {"protegido": "USUARIO_PROTEGIDO", "erro_oracle": "ERRO_ORACLE", "excecao": "RuntimeError",
+              "rede": "HostInacessivelVPN"}[ramo]
+    assert json.loads(texto)["motivo"] == motivo
+    if ramo == "erro_oracle":
+        assert "ORA-99999" in texto
+
+
+def _aprovar_sentinela(prep):
+    return "APROVADO", APROVADOR_SENTINELA, None
+
+
+@pytest.mark.parametrize("ramo", ["rede", "erro_oracle", "excecao"])
+def test_r1_varredura_reconsulta_no_fluxo_aprovado(monkeypatch, rede, tmp_path, ramo):
+    """Achado novo do C1 (decisao_c1.md §2.8): a reconsulta repassa a mensagem da pré-consulta ao LLM pelo
+    fluxo aprovado (executar_kill_verificado). A correção na origem cobre esse caminho."""
+    fake = _OracleFake([_linha_alvo(), _linha_alvo()], kill_permitido=False)
+    connect = fake.connect
+    if ramo in ("erro_oracle", "excecao"):
+        connect = _connect_diag_falhando_na(fake, 2, ERRO_ORA if ramo == "erro_oracle" else ERRO_EXC)
+    if ramo == "rede":
+        rede["falha_em"] = 2  # 1ª sonda: pré-consulta; 2ª: reconsulta
+    monkeypatch.setattr(oracledb, "connect", connect)
+
+    desfecho = od.conduzir_kill_hitl(dict(ARGS), solicitar_aprovacao=_aprovar_sentinela, canal="TESTE",
+                                     caminho_log=tmp_path / "k.log")
+    texto = desfecho["resultado_tool"]
+
+    _sem_vazamento(texto, f"reconsulta:{ramo}")
+    assert fake.conexoes_kill == []
+    banco = {"rede": "HostInacessivelVPN", "erro_oracle": "ERRO_ORACLE", "excecao": "RuntimeError"}[ramo]
+    assert desfecho["resultado_banco"] == banco
+    if ramo == "erro_oracle":
+        assert "ORA-99999" in texto
+
+
+def test_r1_varredura_reconsulta_usuario_protegido(monkeypatch, rede):
+    """V4 pela reconsulta: o fluxo não alcança este ramo (o hash é conferido antes da elegibilidade e o username
+    entra no hash), então executar_kill_verificado é chamado direto com o hash da identidade protegida."""
+    alvo = dict(zip([c.lower() for c in COLUNAS_ALVO], _linha_alvo(username="STARTUPADMIN")))
+    monkeypatch.setattr(oracledb, "connect", _OracleFake([_linha_alvo(username="STARTUPADMIN")]).connect)
+
+    texto = od.executar_kill_verificado(
+        inst_id=1, sid=101, serial=202, hash_aprovado=calcular_hash_identidade(alvo),
+        aprovacao_expirada=lambda: False, ref_aprovacao=REF,
+    )
+
+    _sem_vazamento(texto, "reconsulta:protegido")
+    assert json.loads(texto)["motivo"] == "USUARIO_PROTEGIDO"
+
+
+@pytest.mark.parametrize("ramo", ["encerrada", "alvo_alterado", "erro_oracle_depois", "rejeitado"])
+def test_r1_varredura_fluxo_hitl(monkeypatch, rede, tmp_path, ramo):
+    """V3, V5, V6 e V7 no resultado_tool do fluxo HITL (o aprovador é a sentinela)."""
+    linhas = [_linha_alvo(), _linha_alvo(machine="outra-maquina")] if ramo == "alvo_alterado" else [_linha_alvo(), _linha_alvo()]
+    fake_kw = {"encerrada": dict(status_pkg="ENCERRADA"), "erro_oracle_depois": dict(erro_kill=ERRO_ORA)}.get(ramo, {})
+    monkeypatch.setattr(oracledb, "connect", _OracleFake(linhas, kill_permitido=ramo != "alvo_alterado", **fake_kw).connect)
+    decisao = "REJEITADO" if ramo == "rejeitado" else "APROVADO"
+
+    desfecho = od.conduzir_kill_hitl(dict(ARGS), solicitar_aprovacao=lambda prep: (decisao, APROVADOR_SENTINELA, None),
+                                     canal="TESTE", caminho_log=tmp_path / "k.log")
+    texto = desfecho["resultado_tool"]
+
+    _sem_vazamento(texto, f"fluxo:{ramo}")
+    esperado = {"encerrada": "ENCERRADA", "alvo_alterado": "ALVO_ALTERADO", "erro_oracle_depois": "ERRO_ORACLE",
+                "rejeitado": None}[ramo]
+    assert desfecho["resultado_banco"] == esperado
+    if ramo == "erro_oracle_depois":
+        assert "ORA-99999" in texto
+
+
+def test_r1_schema_das_ferramentas_oracle_sem_nome_do_pacote():
+    """V6: a descrição das ferramentas vai ao LLM em toda chamada; não nomeia o pacote."""
+    texto = json.dumps(od.oracle_tools_schema, ensure_ascii=False)
+    for proibido in ("PKG_OPS_KILL", "OPS_OWNER", "KILL_SESSION"):
+        assert proibido not in texto
+
+
+# ---- peças comuns (decisao_c1.md §1) ----
+
+@pytest.mark.parametrize(
+    "exc, esperado",
+    [
+        (oracledb.DatabaseError("ORA-00600: erro interno [x]"), "ORA-00600"),
+        (oracledb.DatabaseError("DPY-4008: no bind placeholder"), "DPY-4008"),
+        (oracledb.DatabaseError("TNS-12541: no listener"), "TNS-12541"),
+        (oracledb.DatabaseError("DPI-1047: cannot locate"), "DPI-1047"),
+        (oracledb.DatabaseError("sem código texto-sentinela"), "DatabaseError"),
+        (RuntimeError("ORA-00600 texto-sentinela"), "RuntimeError"),
+    ],
+)
+def test_r1_codigo_erro_so_o_codigo(exc, esperado):
+    """_codigo_erro: o 1º código de um oracledb.Error; senão o nome do tipo. Nunca o texto."""
+    assert od._codigo_erro(exc) == esperado
+
+
+def test_r1_codigo_erro_nunca_levanta():
+    class _StrQuebrado(oracledb.DatabaseError):
+        def __str__(self):
+            raise ValueError("quebrado")
+
+    assert od._codigo_erro(_StrQuebrado()) == "_StrQuebrado"
+
+
+def test_r1_registrar_erro_local_leva_o_detalhe_ao_log_e_nunca_levanta(caplog):
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        od._registrar_erro_local("ferramenta_x", "ERRO_ORACLE", exc=ERRO_ORA,
+                                 rede={"host": "host-sentinela-r1", "porta": 1599, "erro_rede": "rede-sentinela"})
+        od._registrar_erro_local("ferramenta_x", "X", rede="não é dict")
+    texto = caplog.text
+    assert "texto-sentinela" in texto and "host-sentinela-r1:1599" in texto and "rede-sentinela" in texto
+
+
+@pytest.mark.parametrize(
+    "base_url, esperado",
+    [
+        # Fase 2, K5 (expectativa alterada, declarada; decisao_c1.md §8.4): o cliente local é 127.0.0.1, não localhost.
+        ("http://localhost:11434/v1", False), ("http://127.0.0.1:11434/v1", True), ("http://[::1]:11434/v1", True),
+        ("https://generativelanguage.googleapis.com/v1beta/openai/", False),
+        ("http://localhost.evil.com/v1", False), ("http://127.0.0.1.nip.io/v1", False), ("", False),
+    ],
+)
+def test_r1_coordenador_e_local_pelo_hostname_exato(base_url, esperado):
+    class _Cliente:
+        pass
+
+    cliente = _Cliente()
+    cliente.base_url = base_url
+    assert od.coordenador_e_local(cliente) is esperado
+
+
+def test_r1_coordenador_e_local_falha_fechada():
+    class _SemBaseUrl:
+        pass
+
+    class _BaseUrlLevanta:
+        @property
+        def base_url(self):
+            raise RuntimeError("x")
+
+    assert od.coordenador_e_local(_SemBaseUrl()) is False
+    assert od.coordenador_e_local(_BaseUrlLevanta()) is False
+    assert od.coordenador_e_local(None) is False
+
+
+@pytest.mark.parametrize(
+    "mensagens, esperado",
+    [
+        ([], False),
+        ([{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}], False),
+        ([{"role": "tool", "name": "coletar_metricas_hardware", "content": "{}"}], False),
+        # Fase 2, K2 (expectativa alterada, declarada; decisao_c1.md §1.5): o RAG é SO_LOCAL e passa a bloquear.
+        ([{"role": "tool", "name": "buscar_script_interno", "content": "{}"}], True),
+        ([{"role": "tool", "name": "analisar_log_complexo", "content": "{}"}], True),
+        ([{"role": "tool", "name": "matar_sessao_oracle", "content": od.RESULTADO_KILL_DESABILITADO}], True),
+        ([{"role": "tool", "name": "verificar_espaco_disco", "content": "{}"}], False),
+        ([{"role": "tool", "name": "coletar_sessoes_ativas", "content": od.RESULTADO_ORACLE_SO_LOCAL}], False),
+        ([{"role": "tool", "name": "coletar_sessoes_ativas", "content": "{}"}], True),
+        ([{"role": "tool", "name": "matar_sessao_oracle", "content": "{}"}], True),
+        ([{"role": "tool", "content": "{}"}], True),
+        ([{"role": "tool", "name": "ferramenta_nova", "content": "{}"}], True),
+        ("não é lista", True),
+        (None, True),
+    ],
+)
+def test_r1_historico_tem_dado_do_banco(mensagens, esperado):
+    assert od.historico_tem_dado_do_banco(mensagens) is esperado
+
+
+def test_r1_rag_nao_e_liberado_para_a_nuvem():
+    """Fase 2, K2 (substitui test_r1_nomes_sem_dado_do_banco_iguais_aos_schemas_de_so_e_rag; expectativa alterada,
+    declarada em decisao_c1.md §1.5 e §8.2): NOMES_FERRAMENTAS_SEM_DADO_DO_BANCO saiu; a cobertura de "toda
+    ferramenta registrada tem classificação" é o K2-T1, e o RAG passa a SO_LOCAL (plano 9.8.1)."""
+    assert not hasattr(od, "NOMES_FERRAMENTAS_SEM_DADO_DO_BANCO")
+    assert od.CLASSIFICACAO_FERRAMENTAS["buscar_script_interno"] == od.SO_LOCAL
+    assert od.ferramenta_liberada_nuvem("buscar_script_interno") is False
+
+
+# ---- AST (decisao_c1.md §8.4) ----
+
+# Fase 2, K3-T2 (expansão declarada; decisao_c1.md §3.2 e §8.3): as 2 ferramentas liberadas para a nuvem e o RAG.
+ARQUIVOS_AST = [
+    "src/tools/oracle_dba.py", "src/tools/executor.py", "app.py", "src/main.py", "src/tools/os_tools.py",
+    "src/tools/rag_search.py",
+]
+CHAVES_PROIBIDAS_AST = {"instancia", "hash_aprovado", "hash_atual", "detalhe_rede"}
+FUNCOES_PERMITIDAS_COM_EXCECAO = {"type", "isinstance", "getattr", "_codigo_erro", "_registrar_erro_local"}
+FUNCOES_QUE_PODEM_DESCREVER = {"_codigo_erro", "_registrar_erro_local"}
+
+
+def _arvore(rel):
+    return ast.parse((RAIZ / rel).read_text(encoding="utf-8"), filename=rel)
+
+
+def _pais(arvore):
+    pais = {}
+    for no in ast.walk(arvore):
+        for filho in ast.iter_child_nodes(no):
+            pais[filho] = no
+    return pais
+
+
+def _e_chamada_de_log(no):
+    return (
+        isinstance(no, ast.Call) and isinstance(no.func, ast.Attribute)
+        and isinstance(no.func.value, ast.Name) and no.func.value.id in ("logger", "logging")
+    )
+
+
+def _nome_da_chamada(no):
+    if isinstance(no.func, ast.Name):
+        return no.func.id
+    if isinstance(no.func, ast.Attribute):
+        return no.func.attr
+    return None
+
+
+@pytest.mark.parametrize("rel", ARQUIVOS_AST)
+def test_r1_ast_a1_json_dumps_sem_chaves_proibidas(rel):
+    """A1: nenhum json.dumps com dict literal leva instancia, hash_aprovado, hash_atual ou detalhe_rede."""
+    achados = []
+    for no in ast.walk(_arvore(rel)):
+        if isinstance(no, ast.Call) and _nome_da_chamada(no) == "dumps" and no.args:
+            for dicionario in ast.walk(no.args[0]):
+                if isinstance(dicionario, ast.Dict):
+                    for chave in dicionario.keys:
+                        if isinstance(chave, ast.Constant) and chave.value in CHAVES_PROIBIDAS_AST:
+                            achados.append((chave.value, chave.lineno))
+    assert achados == [], f"{rel}: {achados}"
+
+
+@pytest.mark.parametrize("rel", ARQUIVOS_AST)
+def test_r1_ast_a2_excecao_so_em_tipo_codigo_registro_ou_log(rel):
+    """A2: dentro de `except ... as X`, X só aparece em type/isinstance/getattr, como argumento de _codigo_erro ou
+    _registrar_erro_local, ou dentro de uma chamada logger.*/logging.* (nunca str(X) ou f"{X}" ao LLM)."""
+    arvore = _arvore(rel)
+    pais = _pais(arvore)
+    achados = []
+    for handler in ast.walk(arvore):
+        if not (isinstance(handler, ast.ExceptHandler) and handler.name):
+            continue
+        for comando in handler.body:
+            for no in ast.walk(comando):
+                if not (isinstance(no, ast.Name) and no.id == handler.name and isinstance(no.ctx, ast.Load)):
+                    continue
+                ancestral, permitido = pais.get(no), False
+                while ancestral is not None and ancestral is not handler:
+                    if isinstance(ancestral, ast.Call) and (
+                        _nome_da_chamada(ancestral) in FUNCOES_PERMITIDAS_COM_EXCECAO or _e_chamada_de_log(ancestral)
+                    ):
+                        permitido = True
+                        break
+                    ancestral = pais.get(ancestral)
+                if not permitido:
+                    achados.append((handler.name, no.lineno))
+    assert achados == [], f"{rel}: uso da exceção fora do permitido em {achados}"
+
+
+@pytest.mark.parametrize("rel", ARQUIVOS_AST)
+def test_r1_ast_a3_descrever_erro_so_nas_pecas_ou_no_log(rel):
+    """A3: _descrever_erro (texto cru) só é chamado dentro de _codigo_erro, _registrar_erro_local ou de log."""
+    arvore = _arvore(rel)
+    pais = _pais(arvore)
+    achados = []
+    for no in ast.walk(arvore):
+        if not (isinstance(no, ast.Call) and _nome_da_chamada(no) == "_descrever_erro"):
+            continue
+        ancestral, permitido = pais.get(no), False
+        while ancestral is not None:
+            if isinstance(ancestral, ast.FunctionDef) and ancestral.name in FUNCOES_QUE_PODEM_DESCREVER:
+                permitido = True
+                break
+            if _e_chamada_de_log(ancestral):
+                permitido = True
+                break
+            ancestral = pais.get(ancestral)
+        if not permitido:
+            achados.append(no.lineno)
+    assert achados == [], f"{rel}: _descrever_erro fora do permitido nas linhas {achados}"
+
+
+# ---- C3: executor.py (V1 e, pela decisão 1a do responsável, V3 e caminho; decisao_c1.md §6) ----
+
+class _VarExecutor:
+    def setvalue(self, pos, valor):
+        pass
+
+    def getvalue(self):
+        return None  # dbms_output.get_line: status None != 0 encerra o laço
+
+
+class _CursorExecutor:
+    def __init__(self, erro_execute=None):
+        self.description, self.rowcount, self._erro, self._execucoes = None, 1, erro_execute, 0
+
+    def execute(self, sql, binds=None, **kwargs):
+        self._execucoes += 1
+        if self._erro is not None and self._execucoes == 2:  # a 1ª é a consulta da instância
+            raise self._erro
+        self.description = [("DUMMY",)]
+
+    def fetchone(self):
+        return ("1",)
+
+    def fetchmany(self, limite):
+        return [("X",)]
+
+    def callproc(self, nome, argumentos=None):
+        pass
+
+    def var(self, tipo):
+        return _VarExecutor()
+
+    def close(self):
+        pass
+
+
+class _ConexaoExecutor:
+    def __init__(self, erro_execute=None):
+        self.call_timeout = None
+        self._cursor = _CursorExecutor(erro_execute)
+
+    def cursor(self):
+        return self._cursor
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+@pytest.fixture
+def ambiente_executor(monkeypatch):
+    for conta in ("READ", "MUT"):
+        monkeypatch.setenv(f"ORACLE_USER_{conta}", f"usuario_{conta.lower()}_ficticio")
+        monkeypatch.setenv(f"ORACLE_PASSWORD_{conta}", "senha-ficticia")
+    monkeypatch.setenv("ORACLE_DSN", DSN_SENTINELA)
+
+
+@pytest.mark.parametrize(
+    "script_id, binds, ramo, motivo",
+    [
+        ("verificar_dual", {}, "sucesso", None),
+        ("dml_simples", {"id": 1, "nome": "x"}, "sucesso", None),
+        ("plsql_bloco_t6", {}, "sucesso", None),
+        ("verificar_dual", {}, "erro_oracle", "ERRO_ORACLE"),
+        ("verificar_dual", {}, "excecao", "ERRO_ORACLE"),
+    ],
+    ids=["select", "dml", "plsql", "erro_oracle", "excecao"],
+)
+def test_r1_varredura_executor(monkeypatch, ambiente_executor, script_id, binds, ramo, motivo):
+    """C3: o retorno do executor não leva o DSN (V1) nem o texto cru do erro (V3); o código continua."""
+    from src.tools.executor import executar_script
+
+    def connect(*a, **k):
+        if ramo == "erro_oracle":
+            raise ERRO_ORA
+        return _ConexaoExecutor(ERRO_EXC if ramo == "excecao" else None)
+
+    monkeypatch.setattr(oracledb, "connect", connect)
+    texto = executar_script(script_id, binds)
+    resultado = json.loads(texto)
+
+    # O sha256_verificado é o hash do arquivo homologado (o mesmo do registry/ versionado), não um hash de
+    # identidade (V7): só esse valor exato sai da varredura; qualquer outro hash de 64 hexadecimais reprova.
+    sha_do_script = resultado.get("sha256_verificado") or ""
+    _sem_vazamento(texto.replace(sha_do_script, "") if sha_do_script else texto, f"executor:{script_id}:{ramo}")
+    if ramo == "sucesso":
+        assert resultado["status"] == "sucesso" and resultado["inst_id"] == "1"
+    else:
+        assert resultado["motivo"] == motivo
+        assert resultado["codigo_erro"] == ("ORA-99999" if ramo == "erro_oracle" else "RuntimeError")
+        assert resultado["codigo_erro"] in resultado["mensagem"]
+
+
+def test_r1_executor_path_invalido_sem_o_diretorio_de_scripts(monkeypatch, ambiente_executor):
+    """C3 (decisao_c1.md §6): a recusa PATH_INVALIDO não mostra o caminho absoluto do diretório de scripts (que
+    traz o perfil do Windows)."""
+    from unittest.mock import patch
+
+    from src.tools.executor import executar_script
+    from src.tools.registry import obter_caminho_scripts_dir, obter_script
+
+    entrada = obter_script("verificar_dual").model_copy(update={"arquivo": "../../fora.sql"})
+    monkeypatch.setattr(oracledb, "connect", lambda *a, **k: pytest.fail("connect com caminho inválido"))
+    with patch("src.tools.executor.obter_script", return_value=entrada):
+        texto = executar_script("verificar_dual", {})
+
+    resultado = json.loads(texto)
+    assert resultado["motivo"] == "PATH_INVALIDO"
+    diretorio = str(obter_caminho_scripts_dir())
+    assert diretorio not in texto and diretorio.replace("\\", "\\\\") not in texto
+    assert str(RAIZ) not in texto and str(RAIZ).replace("\\", "\\\\") not in texto
+
+
+# ---- C4: interfaces (V8 catálogo e despacho, V9 e prompt; decisao_c1.md §3-§4 e §8.4 A4) ----
+
+def test_r1_nomes_ferramentas_oracle_iguais_ao_schema():
+    """O despacho das interfaces recusa, com a nuvem, todo nome de oracle_tools_schema (inclusive o kill, §3.5)."""
+    assert od.NOMES_FERRAMENTAS_ORACLE == frozenset(f["function"]["name"] for f in od.oracle_tools_schema)
+    assert "matar_sessao_oracle" in od.NOMES_FERRAMENTAS_ORACLE
+    # Fase 2, K2 (decisao_c1.md §1.5): a constante removida dá lugar a "nenhuma Oracle liberada para a nuvem".
+    assert not any(od.ferramenta_liberada_nuvem(nome) for nome in od.NOMES_FERRAMENTAS_ORACLE)
+
+
+@pytest.mark.parametrize("rel", ["app.py", "src/main.py"])
+def test_r1_ast_a4_coordenador_sem_analisar_log_complexo(rel):
+    """A4, ajustada pela opção (a) do responsável (2026-11-24): o import de tools.gemini_router fica, sem uso, como
+    sonda do test_d63; o coordenador não recebe gemini_tools_schema e nenhuma constante de texto nem nome do código
+    usa analisar_log_complexo (nem catálogo, nem despacho, nem prompt)."""
+    arvore = _arvore(rel)
+    nomes = {no.id for no in ast.walk(arvore) if isinstance(no, ast.Name)}
+    atributos = {no.attr for no in ast.walk(arvore) if isinstance(no, ast.Attribute)}
+    textos = [no.value for no in ast.walk(arvore) if isinstance(no, ast.Constant) and isinstance(no.value, str)]
+    importados = {a.asname or a.name for no in ast.walk(arvore) if isinstance(no, ast.ImportFrom) for a in no.names}
+    assert "gemini_tools_schema" not in nomes | atributos | importados
+    assert "analisar_log_complexo" not in nomes | atributos | importados
+    assert not any("analisar_log_complexo" in t for t in textos)
+    assert any(isinstance(no, ast.Import) and any(a.name == "tools.gemini_router" for a in no.names)
+               for no in ast.walk(arvore)), "a sonda do test_d63 (import de tools.gemini_router) sumiu"
+
+
+@pytest.mark.parametrize("rel", ["app.py", "src/main.py"])
+def test_r1_system_prompt_sem_regra_de_ouro(rel):
+    """V9 (decisao_c1.md §4): o prompt não manda o LLM terceirizar o plano ao Gemini."""
+    arvore = _arvore(rel)
+    prompts = [
+        no.value.value for no in ast.walk(arvore)
+        if isinstance(no, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "SYSTEM_PROMPT" for t in no.targets)
+        and isinstance(no.value, ast.Constant)
+    ]
+    assert len(prompts) == 1
+    assert "REGRA DE OURO" not in prompts[0] and "analisar_log_complexo" not in prompts[0]
+    assert "matar_sessao_oracle" in prompts[0], "o prompt perdeu a regra de HITL"
+
+
+# =============================================================================
+# R1 ampliada fase 2, K2 (fase2/decisao_c1.md §1 e §8.2): lista de permissão para a nuvem
+# =============================================================================
+
+LIBERADAS_ESPERADAS_K2 = {"coletar_metricas_hardware", "verificar_espaco_disco"}  # plano 9.8.1
+AUXILIARES_DO_LACO_K2 = {
+    "coordenador_e_local", "historico_tem_dado_do_banco", "ferramenta_liberada_nuvem", "kill_habilitado",
+    "ferramentas_do_coordenador", "_registrar_erro_local",
+    # KM2 (plano 9.10.2, item 6; ampliação declarada): lê os argumentos antes da recusa da nuvem, não é rota.
+    "ler_argumentos_da_ferramenta",
+}
+
+
+def _valor_da_chave_k2(no, chave):
+    if not isinstance(no, ast.Dict):
+        return None
+    for k, v in zip(no.keys, no.values):
+        if isinstance(k, ast.Constant) and k.value == chave:
+            return v
+    return None
+
+
+def _schemas_por_ast_k2(texto, rel):
+    """{"<rel>:<variável>:<linha>": nomes} de toda atribuição (Assign, AnnAssign, AugAssign) a um nome terminado em
+    _tools_schema. Só lista literal de dicts com "function": {"name": "<literal>"} rende nomes; outra forma rende None
+    (o teste falha: schema não literal não pode escapar da classificação)."""
+    achados = {}
+    for no in ast.walk(ast.parse(texto, filename=rel)):
+        if isinstance(no, ast.Assign):
+            alvos, valor = no.targets, no.value
+        elif isinstance(no, (ast.AnnAssign, ast.AugAssign)):
+            alvos, valor = [no.target], no.value
+        else:
+            continue
+        for alvo in alvos:
+            if not (isinstance(alvo, ast.Name) and alvo.id.endswith("_tools_schema")):
+                continue
+            chave = f"{rel}:{alvo.id}:{no.lineno}"
+            if isinstance(no, ast.AugAssign) or not isinstance(valor, ast.List):
+                achados[chave] = None
+                continue
+            nomes = []
+            for elemento in valor.elts:
+                nome = _valor_da_chave_k2(_valor_da_chave_k2(elemento, "function"), "name")
+                if not (isinstance(nome, ast.Constant) and isinstance(nome.value, str)):
+                    nomes = None
+                    break
+                nomes.append(nome.value)
+            achados[chave] = nomes
+    return achados
+
+
+def _ferramentas_registradas_k2():
+    achados = {}
+    for arquivo in sorted((RAIZ / "src" / "tools").glob("*.py")):
+        rel = arquivo.relative_to(RAIZ).as_posix()
+        achados.update(_schemas_por_ast_k2(arquivo.read_text(encoding="utf-8"), rel))
+    return achados
+
+
+def test_k2_t1_toda_ferramenta_registrada_tem_classificacao():
+    """K2-T1 (mata M_K2_CLASSIF_FALTA, M_K2_RAG_LIBERADO e M_K2_EXTRATOR): toda atribuição *_tools_schema de
+    src/tools/*.py, achada por AST (sem lista manual e sem importar gemini_router nem rag_search), rende nomes
+    literais, únicos entre os módulos, e o conjunto é exatamente o da classificação; só as 2 de SO liberadas."""
+    achados = _ferramentas_registradas_k2()
+    assert achados, "nenhum *_tools_schema achado em src/tools"
+    invalidos = sorted(c for c, nomes in achados.items() if not nomes)
+    assert invalidos == [], f"schema não literal ou vazio: {invalidos}"
+    todos = [nome for nomes in achados.values() for nome in nomes]
+    assert len(todos) == len(set(todos)), f"nome repetido entre módulos: {sorted(todos)}"
+    assert set(od.CLASSIFICACAO_FERRAMENTAS) == set(todos)
+    assert set(od.CLASSIFICACAO_FERRAMENTAS.values()) <= {od.LIBERADA_NUVEM, od.SO_LOCAL}
+    liberadas = {n for n, v in od.CLASSIFICACAO_FERRAMENTAS.items() if v == od.LIBERADA_NUVEM}
+    assert liberadas == LIBERADAS_ESPERADAS_K2
+    assert isinstance(od.CLASSIFICACAO_FERRAMENTAS, types.MappingProxyType)
+    with pytest.raises(TypeError):
+        od.CLASSIFICACAO_FERRAMENTAS["ferramenta_nova"] = od.LIBERADA_NUVEM
+
+
+def test_k2_t1_extrator_acha_annassign_e_recusa_schema_nao_literal():
+    """K2-T1, autoteste do extrator (mata M_K2_EXTRATOR): AnnAssign e Assign rendem o nome; compreensão de lista,
+    nome não literal e AugAssign rendem None."""
+    texto = (
+        'novo_tools_schema: list = [{"type": "function", "function": {"name": "ferramenta_x"}}]\n'
+        'outro_tools_schema = [{"type": "function", "function": {"name": "ferramenta_y"}}]\n'
+        'gerado_tools_schema = [{"type": "function", "function": {"name": n}} for n in ("a",)]\n'
+        'variavel_tools_schema = [{"type": "function", "function": {"name": NOME}}]\n'
+        'somado_tools_schema += []\n'
+        'nao_e_schema = [{"type": "function", "function": {"name": "ignorada"}}]\n'
+    )
+    por_variavel = {c.split(":")[1]: v for c, v in _schemas_por_ast_k2(texto, "sintetico.py").items()}
+    assert por_variavel == {
+        "novo_tools_schema": ["ferramenta_x"], "outro_tools_schema": ["ferramenta_y"],
+        "gerado_tools_schema": None, "variavel_tools_schema": None, "somado_tools_schema": None,
+    }
+
+
+def _parcelas_da_soma_k2(no):
+    if isinstance(no, ast.BinOp) and isinstance(no.op, ast.Add):
+        return _parcelas_da_soma_k2(no.left) + _parcelas_da_soma_k2(no.right)
+    return [no]
+
+
+@pytest.mark.parametrize("rel, registro", [("app.py", "TODAS_FERRAMENTAS"), ("src/main.py", "todas_ferramentas")])
+def test_k2_t2_catalogo_so_por_ferramentas_do_coordenador(rel, registro):
+    """K2-T2 (mata M_K2_TOOLS_SEM_FILTRO e M_K2_CAT_SOMA): todo .create( com tools= recebe
+    ferramentas_do_coordenador(<registro>, ...), e o registro é soma de *_tools_schema achados pelo K2-T1."""
+    arvore = _arvore(rel)
+    com_tools = [
+        no for no in ast.walk(arvore)
+        if isinstance(no, ast.Call) and isinstance(no.func, ast.Attribute) and no.func.attr == "create"
+        and any(k.arg == "tools" for k in no.keywords)
+    ]
+    assert com_tools, "nenhum create com tools="
+    for chamada in com_tools:
+        valor = next(k.value for k in chamada.keywords if k.arg == "tools")
+        assert isinstance(valor, ast.Call) and _nome_da_chamada(valor) == "ferramentas_do_coordenador", ast.unparse(valor)
+        assert isinstance(valor.args[0], ast.Name) and valor.args[0].id == registro, ast.unparse(valor)
+    atribuicoes = [
+        no for no in arvore.body
+        if isinstance(no, ast.Assign) and any(isinstance(a, ast.Name) and a.id == registro for a in no.targets)
+    ]
+    assert len(atribuicoes) == 1
+    variaveis = {c.split(":")[1] for c in _ferramentas_registradas_k2()}
+    parcelas = _parcelas_da_soma_k2(atribuicoes[0].value)
+    assert all(isinstance(p, ast.Name) and p.id in variaveis for p in parcelas), ast.unparse(atribuicoes[0].value)
+
+
+@pytest.mark.parametrize("rel, funcao", [("app.py", "executar_agente_ui"), ("src/main.py", "executar_agente")])
+def test_k2_t3_recusa_da_nuvem_antes_de_toda_rota(rel, funcao):
+    """K2-T3, R-e por construção (mata M_K2_ROTA_ANTES): no laço de tool_calls, o If com ferramenta_liberada_nuvem vem
+    antes de toda chamada a função importada de tools.* (salvo os auxiliares). Rota nova fica coberta sem editar o
+    teste."""
+    arvore = _arvore(rel)
+    importados = {
+        a.asname or a.name
+        for no in arvore.body if isinstance(no, ast.ImportFrom) and (no.module or "").startswith("tools.")
+        for a in no.names
+    }
+    (definicao,) = [no for no in ast.walk(arvore) if isinstance(no, ast.FunctionDef) and no.name == funcao]
+    lacos = [no for no in ast.walk(definicao) if isinstance(no, ast.For) and "tool_call" in ast.unparse(no.target)]
+    assert len(lacos) == 1, [ast.unparse(l.target) for l in lacos]
+    checagens = [
+        no for no in ast.walk(lacos[0])
+        if isinstance(no, ast.If)
+        and any(isinstance(c, ast.Call) and _nome_da_chamada(c) == "ferramenta_liberada_nuvem" for c in ast.walk(no.test))
+    ]
+    assert len(checagens) == 1
+    rotas = [
+        no for no in ast.walk(lacos[0])
+        if isinstance(no, ast.Call) and _nome_da_chamada(no) in importados - AUXILIARES_DO_LACO_K2
+    ]
+    assert rotas, "nenhuma rota de ferramenta achada no laço (o teste ficaria vazio)"
+    antes = [(ast.unparse(no)[:60], no.lineno) for no in rotas if no.lineno <= checagens[0].lineno]
+    assert antes == [], f"rota antes da recusa da nuvem: {antes}"
+
+
+@pytest.mark.parametrize(
+    "nome",
+    [None, [], 3, "", "ferramenta_nova", "buscar_script_interno", "analisar_log_complexo", "coletar_sessoes_ativas",
+     "coletar_top_sql", "coletar_plano_execucao", "matar_sessao_oracle", "COLETAR_METRICAS_HARDWARE",
+     " verificar_espaco_disco"],
+)
+def test_k2_t4_nao_liberada(nome):
+    """K2-T4 (mata M_K2_DIF_SO_LOCAL e M_K2_DEFAULT_LIBERADA): fora das 2 de SO, nada é liberado; nome exato."""
+    assert od.ferramenta_liberada_nuvem(nome) is False
+
+
+@pytest.mark.parametrize("nome", sorted(LIBERADAS_ESPERADAS_K2))
+def test_k2_t4_liberada(nome):
+    assert od.ferramenta_liberada_nuvem(nome) is True
+
+
+def test_k2_t4_classificacao_lida_em_tempo_de_chamada_e_so_o_valor_exato(monkeypatch):
+    """K2-T4: a classificação é lida a cada chamada; "LIBERADA" ou caixa trocada (erro de digitação) não liberam."""
+    monkeypatch.setattr(
+        od, "CLASSIFICACAO_FERRAMENTAS",
+        types.MappingProxyType({"x": "LIBERADA", "y": od.LIBERADA_NUVEM, "z": "liberada_nuvem"}),
+    )
+    assert od.ferramenta_liberada_nuvem("x") is False
+    assert od.ferramenta_liberada_nuvem("y") is True
+    assert od.ferramenta_liberada_nuvem("z") is False
+    assert od.ferramenta_liberada_nuvem("coletar_metricas_hardware") is False
+
+
+def test_k2_t4_catalogo_com_ferramenta_nova(monkeypatch):
+    """K2-T4 (mata M_K2_CAT_EXCLUSAO): com a nuvem, o catálogo é exatamente as 2 de SO, mesmo com uma ferramenta
+    nova registrada; com o coordenador local e o gate ligado, tudo passa, na ordem."""
+    from src.tools.os_tools import os_tools_schema
+    from src.tools.rag_search import rag_tools_schema
+
+    nova = {"type": "function", "function": {"name": "ferramenta_nova", "parameters": {"type": "object"}}}
+    todas = os_tools_schema + od.oracle_tools_schema + rag_tools_schema + [nova]
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
+    nuvem = {s["function"]["name"] for s in od.ferramentas_do_coordenador(todas, False)}
+    assert nuvem == LIBERADAS_ESPERADAS_K2
+    assert od.ferramentas_do_coordenador(todas, True) == todas
+
+
+# =============================================================================
+# R1 ampliada fase 2, K3 (fase2/decisao_c1.md §3 e §8.3): R-c, D3 e RAG
+# =============================================================================
+
+SENTINELA_RC = "texto-sentinela-rc"
+
+
+class _UsoDisco:
+    total, free, percent = 100 * 1024 ** 3, 40 * 1024 ** 3, 60.0
+
+
+def test_k3_t1_excecao_das_ferramentas_de_so_so_com_o_tipo(monkeypatch, caplog):
+    """K3-T1 (mata M_K3_STR_HW, M_K3_STR_DISCO, M_K3_FSTRING_EXC e M_K3_SEM_LOG*): o retorno ao LLM só tem o tipo;
+    o texto da exceção (com caminho) vai ao log local. O "unidade" igual ao pedido é residual aceito (9.8.3)."""
+    from src.tools import os_tools
+
+    def _disco(drive):
+        raise OSError(f"{SENTINELA_RC} C:\\sentinela-dir")
+
+    def _cpu(interval=None):
+        raise RuntimeError(SENTINELA_RC)
+
+    monkeypatch.setattr(os_tools.psutil, "disk_usage", _disco)
+    monkeypatch.setattr(os_tools.psutil, "cpu_percent", _cpu)
+    with caplog.at_level(logging.WARNING, logger=os_tools.logger.name):
+        disco = os_tools.verificar_espaco_disco("C:\\")
+        hw = os_tools.coletar_metricas_hardware()
+
+    for texto in (disco, hw):
+        assert SENTINELA_RC not in texto and "sentinela-dir" not in texto
+    assert json.loads(disco) == {"status": "erro", "coleta": "disco_local", "unidade": "C:\\", "mensagem": "Erro OSError."}
+    assert json.loads(hw) == {"status": "erro", "coleta": "hardware_base", "mensagem": "Erro RuntimeError."}
+    detalhes = [r.getMessage() for r in caplog.records if "DETALHE LOCAL" in r.getMessage()]
+    assert any("verificar_espaco_disco" in m and "sentinela-dir" in m for m in detalhes), detalhes
+    assert any("coletar_metricas_hardware" in m and SENTINELA_RC in m for m in detalhes), detalhes
+
+
+@pytest.mark.parametrize(
+    "drive",
+    ["\\\\host-sentinela\\share\\", "\\\\?\\C:\\", "C:\\x", "C:\n", "C:\\\n", "C:/", "CC:", "C", "1:", "", " C:", None, 5,
+     ["C:\\"]],
+    ids=["unc", "unc_longo", "subpasta", "c_quebra", "c_barra_quebra", "barra_normal", "duas_letras", "sem_dois_pontos",
+         "digito", "vazio", "espaco", "none", "int", "lista"],
+)
+def test_k3_t3_disco_so_raiz_de_unidade_sem_chamar_o_psutil(monkeypatch, caplog, drive):
+    """K3-T3, D3 (mata M_K3_D3_*): fora de raiz de unidade local, recusa fixa, sem chamar o psutil e sem ecoar o
+    argumento; o log local registra o argumento com %r (sem quebra de linha crua)."""
+    from src.tools import os_tools
+
+    chamadas = []
+    monkeypatch.setattr(os_tools.psutil, "disk_usage", lambda d: chamadas.append(d) or _UsoDisco())
+    with caplog.at_level(logging.WARNING, logger=os_tools.logger.name):
+        texto = os_tools.verificar_espaco_disco(drive)
+
+    assert chamadas == []
+    assert texto == os_tools.RESULTADO_UNIDADE_INVALIDA
+    assert json.loads(texto)["motivo"] == "UNIDADE_INVALIDA"
+    assert "host-sentinela" not in texto
+    recusas = [r.getMessage() for r in caplog.records if "UNIDADE RECUSADA" in r.getMessage()]
+    assert len(recusas) == 1 and "\n" not in recusas[0]
+
+
+@pytest.mark.parametrize("drive", ["C:", "C:\\", "d:\\", "Z:"])
+def test_k3_t3_disco_aceita_raiz_de_unidade(monkeypatch, drive):
+    """K3-T3, controle positivo: raiz de unidade vai ao psutil e o retorno é o payload de sempre."""
+    from src.tools import os_tools
+
+    chamadas = []
+    monkeypatch.setattr(os_tools.psutil, "disk_usage", lambda d: chamadas.append(d) or _UsoDisco())
+    resultado = json.loads(os_tools.verificar_espaco_disco(drive))
+
+    assert chamadas == [drive]
+    assert resultado["status"] == "sucesso" and resultado["dados"]["unidade"] == drive
+
+
+def test_k3_t4_rag_sem_base_nao_leva_o_caminho(monkeypatch, caplog, tmp_path):
+    """K3-T4 (mata M_K3_RAG_DIR): base vetorial ausente: mensagem fixa, sem o caminho (perfil do Windows); o caminho
+    vai ao log local."""
+    from src.tools import rag_search
+
+    ausente = tmp_path / "chroma-sentinela-dir"
+    monkeypatch.setattr(rag_search, "CHROMA_DB_DIR", ausente)
+    with caplog.at_level(logging.WARNING, logger=rag_search.logger.name):
+        texto = rag_search.buscar_script_interno("x")
+
+    assert json.loads(texto) == {"status": "erro", "mensagem": rag_search.TEXTO_BASE_VETORIAL_AUSENTE}
+    assert "chroma-sentinela-dir" not in texto and str(tmp_path) not in texto
+    assert "chroma-sentinela-dir" in caplog.text
+
+
+def test_k3_t4_rag_excecao_so_com_o_tipo(monkeypatch, caplog, tmp_path):
+    """K3-T4 (mata M_K3_RAG_STR_EXC e M_K3_RAG_SEM_LOG): exceção na busca: ao LLM só o tipo; o texto vai ao log."""
+    from src.tools import rag_search
+
+    def _quebra():
+        raise RuntimeError(f"{SENTINELA_RC} C:\\sentinela-dir")
+
+    monkeypatch.setattr(rag_search, "CHROMA_DB_DIR", tmp_path)
+    monkeypatch.setattr(rag_search, "_obter_vectorstore", _quebra)
+    with caplog.at_level(logging.WARNING, logger=rag_search.logger.name):
+        texto = rag_search.buscar_script_interno("tema")
+
+    assert SENTINELA_RC not in texto and "sentinela-dir" not in texto
+    assert json.loads(texto) == {"status": "erro", "consulta": "tema", "mensagem": "Erro RuntimeError."}
+    assert SENTINELA_RC in caplog.text and "sentinela-dir" in caplog.text
+
+
+# =============================================================================
+# R1 ampliada fase 2, K5 (fase2/decisao_c1.md §8.4; A3 e A4 da revisão adversarial): cliente local
+# =============================================================================
+
+PROXY_SENTINELA = "http://proxy-sentinela.invalid:3128"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://localhost:80/v1", "http://localhost:9999/v1", "https://localhost/v1", "ftp://localhost/v1",
+     "http://user:pass@127.0.0.1:11434/v1", "http://@127.0.0.1:11434/v1", "//127.0.0.1:11434/v1",
+     "http://evil-localhost:11434/v1", "http://notlocalhost:11434/v1", "http://localhost:11434/v1",
+     "http://127.0.0.1:99999/v1", "http://127.0.0.1:11434/v1?x=1", "http://127.0.0.1:11434/v1#x",
+     "http://127.0.0.1:11434/outro", "http://127.0.0.1/v1", "https://127.0.0.1:11434/v1", "HTTP://127.0.0.2:11434/v1"],
+)
+def test_k5_t1_coordenador_e_local_estrito_recusa(base_url):
+    """K5-T1 (mata R1_M12 e M_K5_SEM_*): esquema, porta, userinfo, caminho, query, fragmento e host (inclusive
+    localhost e sufixo/prefixo de localhost) fora do exato dão False."""
+    class _Cliente:
+        pass
+
+    cliente = _Cliente()
+    cliente.base_url = base_url
+    assert od.coordenador_e_local(cliente) is False
+
+
+@pytest.mark.parametrize("base_url", ["http://127.0.0.1:11434/v1", "http://127.0.0.1:11434/v1/", "http://[::1]:11434/v1"])
+def test_k5_t1_coordenador_e_local_estrito_aceita(base_url):
+    class _Cliente:
+        pass
+
+    cliente = _Cliente()
+    cliente.base_url = base_url
+    assert od.coordenador_e_local(cliente) is True
+
+
+def test_k5_t2_fabrica_ignora_proxy_do_ambiente_e_nao_segue_redirect(monkeypatch):
+    """K5-T2 (mata M_K5_TRUST_ENV, M_K5_REDIRECT e M_K5_SEM_HTTP_CLIENT): com HTTP_PROXY, HTTPS_PROXY e ALL_PROXY
+    (e minúsculas) no ambiente, a chamada do cliente da fábrica só tenta 127.0.0.1:11434, nunca o proxy; o cliente
+    HTTP tem trust_env e follow_redirects desligados (propriedades públicas). Sem rede: create_connection levanta."""
+    import socket
+    import openai
+
+    for nome in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        monkeypatch.setenv(nome, PROXY_SENTINELA)
+    criados = []
+    original = openai.DefaultHttpxClient
+
+    def _registrar(*a, **k):
+        cliente_http = original(*a, **k)
+        criados.append(cliente_http)
+        return cliente_http
+
+    monkeypatch.setattr(openai, "DefaultHttpxClient", _registrar)
+    destinos = []
+
+    def _create_connection(endereco, *a, **k):
+        destinos.append(tuple(endereco)[:2])
+        raise OSError("rede neutralizada no teste")
+
+    monkeypatch.setattr(socket, "create_connection", _create_connection)
+    cliente = od.criar_cliente_coordenador_local()
+    assert od.coordenador_e_local(cliente) is True
+    with pytest.raises(openai.APIConnectionError):
+        cliente.with_options(max_retries=0).chat.completions.create(model="x", messages=[{"role": "user", "content": "x"}])
+
+    assert destinos == [("127.0.0.1", 11434)], destinos
+    assert len(criados) == 1
+    assert criados[0].trust_env is False and criados[0].follow_redirects is False
+
+
+def _literais_de_loopback(no):
+    return [
+        c.value for c in ast.walk(no)
+        if isinstance(c, ast.Constant) and isinstance(c.value, str)
+        and any(x in c.value for x in ("localhost", "127.0.0.1", "::1", "11434"))
+    ]
+
+
+@pytest.mark.parametrize("rel", ["app.py", "src/main.py"])
+def test_k5_t3_cliente_local_so_pela_fabrica(rel):
+    """K5-T3, AST (mata M_K5_*_CLIENTE_DIRETO): nenhum OpenAI( nas interfaces recebe base_url de loopback; o cliente
+    local vem só de criar_cliente_coordenador_local()."""
+    arvore = _arvore(rel)
+    chamadas = [no for no in ast.walk(arvore) if isinstance(no, ast.Call)]
+    openai_locais = [
+        ast.unparse(no)[:80] for no in chamadas
+        if _nome_da_chamada(no) == "OpenAI" and any(_literais_de_loopback(k.value) for k in no.keywords)
+    ]
+    assert openai_locais == []
+    assert any(_nome_da_chamada(no) == "criar_cliente_coordenador_local" for no in chamadas)
+
+
+@pytest.mark.parametrize("rel", ["app.py", "src/main.py"])
+def test_k5_t4_sonda_e_fabrica_no_mesmo_destino(rel):
+    """K5-T4 (mata M_K5_*_SONDA_LITERAL e M_K5_URL_LOCALHOST): a sonda usa (HOST_COORDENADOR_LOCAL,
+    PORTA_COORDENADOR_LOCAL), sem literal; e a URL da fábrica é feita dessas mesmas constantes."""
+    sondas = [no for no in ast.walk(_arvore(rel)) if isinstance(no, ast.Call) and _nome_da_chamada(no) == "create_connection"]
+    assert sondas
+    for sonda in sondas:
+        alvo = sonda.args[0]
+        assert isinstance(alvo, ast.Tuple) and [getattr(e, "id", None) for e in alvo.elts] == [
+            "HOST_COORDENADOR_LOCAL", "PORTA_COORDENADOR_LOCAL"], ast.unparse(sonda)
+    assert od.URL_COORDENADOR_LOCAL == f"http://{od.HOST_COORDENADOR_LOCAL}:{od.PORTA_COORDENADOR_LOCAL}/v1"
+    assert od.URL_COORDENADOR_LOCAL == "http://127.0.0.1:11434/v1"
+
+
+# =============================================================================
+# R1 ampliada fase 2, K7 (fase2/decisao_c1.md §8.6): histórico, executor, restos do V9 e reforço da fase 1
+# =============================================================================
+
+class _MensagemObjeto:
+    def __init__(self, role, name=None, content=None):
+        self.role, self.name, self.content = role, name, content
+
+
+class _DictQueLevanta(dict):
+    def get(self, *a, **k):
+        raise RuntimeError("leitura quebrada")
+
+
+@pytest.mark.parametrize(
+    "mensagens, esperado",
+    [
+        ([_MensagemObjeto("tool", "coletar_sessoes_ativas", "{}")], True),
+        ([_MensagemObjeto("tool", "coletar_metricas_hardware", "{}")], False),
+        ([_MensagemObjeto("assistant", None, "texto")], False),
+        ([_MensagemObjeto(None)], True),
+        ([object()], True),
+        ([{"role": "desconhecido", "content": "x"}], True),
+        ([{"content": "x"}], True),
+        ([{"role": ["tool"], "content": "x"}], True),
+        ([_DictQueLevanta(role="tool")], True),
+        ([{"role": "tool", "name": "coletar_sessoes_ativas", "content": '{"x": "COORDENADOR_NUVEM"}'}], True),
+        ([{"role": "tool", "name": "coletar_sessoes_ativas", "content": od.RESULTADO_ORACLE_SO_LOCAL}], False),
+        ([{"role": "system", "content": "p"}, {"role": "user", "content": "u"}], False),
+    ],
+    ids=["objeto_tool_oracle", "objeto_tool_liberada", "objeto_assistant", "objeto_sem_role", "objeto_qualquer",
+         "role_desconhecido", "sem_role", "role_lista", "leitura_levanta", "literal_no_conteudo", "recusa_exata",
+         "system_user"],
+)
+def test_k7_t1_historico_falha_fechado(mensagens, esperado):
+    """K7-T1 (A7.1; mata R1_M7, R1_M8 e M_K7_*): objeto com role "tool" vale como dict; role desconhecido ou ausente,
+    e leitura que levanta, dão True; o salto da recusa é por igualdade exata (o literal COORDENADOR_NUVEM dentro de um
+    dado do banco não salta a trava)."""
+    assert od.historico_tem_dado_do_banco(mensagens) is esperado
+
+
+def test_k7_t2_executor_falha_de_leitura_sem_o_caminho(monkeypatch, ambiente_executor, caplog):
+    """K7-T2 (A7.2; mata M_K7_EXEC_SEM_TRY e M_K7_EXEC_SEM_LOG): o open do arquivo homologado levanta PermissionError
+    com o caminho; o retorno só tem o tipo, e o detalhe vai ao log local."""
+    import builtins
+    from src.tools import executor
+
+    original = builtins.open
+
+    def _open(arquivo, modo="r", *a, **k):
+        if "b" in modo and str(arquivo).endswith(".sql"):
+            raise PermissionError(13, "Permission denied", "C:\\dir-sentinela-scripts\\bloqueado.sql")
+        return original(arquivo, modo, *a, **k)
+
+    monkeypatch.setattr(executor, "open", _open, raising=False)
+    monkeypatch.setattr(oracledb, "connect", lambda *a, **k: pytest.fail("connect com o arquivo ilegível"))
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        texto = executor.executar_script("verificar_dual", {})
+
+    assert "dir-sentinela-scripts" not in texto
+    resultado = json.loads(texto)
+    assert resultado["motivo"] == "ERRO_LEITURA_ARQUIVO"
+    assert resultado["mensagem"] == "Falha ao ler o arquivo homologado: PermissionError."
+    assert "dir-sentinela-scripts" in caplog.text
+
+
+def test_k7_t3_pacote_e_prompt_sem_analisar_log_complexo():
+    """K7-T3 (A7.3; mata M_K7_INIT_* e M_K7_PROMPT_REGRA): src.tools não exporta analisar_log_complexo nem
+    gemini_tools_schema, e o system_prompt.txt não manda terceirizar o plano ao Gemini."""
+    import src.tools as pacote
+
+    for nome in ("analisar_log_complexo", "gemini_tools_schema"):
+        assert nome not in pacote.__all__ and not hasattr(pacote, nome)
+    espaco = {}
+    exec("from src.tools import *", espaco)
+    assert "analisar_log_complexo" not in espaco and "gemini_tools_schema" not in espaco
+    prompt = (RAIZ / "src" / "prompts" / "system_prompt.txt").read_text(encoding="utf-8")
+    assert "analisar_log_complexo" not in prompt and "REGRA DE OURO" not in prompt
+
+
+def test_k7_t4_erro_config_na_pre_consulta_sem_o_dsn(monkeypatch, rede):
+    """K7-T4 (mata R1_M4): ERRO_CONFIG de consultar_alvo_sessao_diag na pré-consulta, sem DSN e sem conexão."""
+    monkeypatch.delenv("ORACLE_USER_DIAG")
+    monkeypatch.setattr(oracledb, "connect", lambda *a, **k: pytest.fail("connect sem credencial DIAG"))
+    prep = od.preparar_intervencao_kill(dict(ARGS), caminho_log=None)
+
+    _sem_vazamento(prep["resultado_tool"], "preparar:erro_config")
+    assert json.loads(prep["resultado_tool"])["motivo"] == "ERRO_CONFIG"
+
+
+def test_k7_t4_erro_config_na_reconsulta_sem_o_dsn(monkeypatch, rede, tmp_path):
+    """K7-T4 (mata R1_M4 pela reconsulta): a conta DIAG some entre o prompt e a reconsulta; o ERRO_CONFIG da
+    reconsulta vai ao LLM sem o DSN, e a conta KILL não é conectada."""
+    fake = _OracleFake([_linha_alvo(), _linha_alvo()], kill_permitido=False)
+    monkeypatch.setattr(oracledb, "connect", fake.connect)
+
+    def _aprovar_e_tirar_diag(prep):
+        monkeypatch.delenv("ORACLE_USER_DIAG")
+        return "APROVADO", APROVADOR_SENTINELA, None
+
+    desfecho = od.conduzir_kill_hitl(dict(ARGS), solicitar_aprovacao=_aprovar_e_tirar_diag, canal="TESTE",
+                                     caminho_log=tmp_path / "k.log")
+
+    _sem_vazamento(desfecho["resultado_tool"], "reconsulta:erro_config")
+    assert desfecho["resultado_banco"] == "ERRO_CONFIG"
+    assert fake.conexoes_kill == []
+
+
+def test_k7_t5_executor_ddl_sem_o_dsn(monkeypatch, ambiente_executor, tmp_path):
+    """K7-T5 (mata R1_M5): o ramo DDL do executor não leva o DSN. Registro fake por monkeypatch (obter_script e
+    obter_caminho_scripts_dir), com o sha256 calculado aqui: registry/ não é tocado."""
+    import hashlib
+    from src.tools import executor
+    from src.tools.registry import obter_script
+
+    sql = b"CREATE TABLE t_k7_sentinela (id NUMBER)\n"
+    (tmp_path / "ddl_k7.sql").write_bytes(sql)
+    entrada = obter_script("verificar_dual").model_copy(
+        update={"script_id": "ddl_k7", "arquivo": "ddl_k7.sql", "sha256": hashlib.sha256(sql).hexdigest(),
+                "tipo": "DDL", "binds": []}
+    )
+    monkeypatch.setattr(executor, "obter_script", lambda script_id: entrada)
+    monkeypatch.setattr(executor, "obter_caminho_scripts_dir", lambda: tmp_path)
+    monkeypatch.setattr(oracledb, "connect", lambda *a, **k: _ConexaoExecutor())
+    texto = executor.executar_script("ddl_k7", {})
+    resultado = json.loads(texto)
+
+    assert resultado["status"] == "sucesso" and resultado["tipo"] == "DDL", texto
+    _sem_vazamento(texto.replace(resultado["sha256_verificado"], ""), "executor:ddl")
+
+
+def test_k7_t5_executor_excecao_no_caminho_sem_o_diretorio(monkeypatch, ambiente_executor, caplog):
+    """K7-T5 (mata R1_M6): uma exceção no resolve() do caminho do script (ramo except, não o is_relative_to) dá
+    PATH_INVALIDO só com o tipo; o diretório vai ao log local."""
+    from src.tools import executor
+
+    class _Alvo:
+        def resolve(self):
+            raise OSError("falha em C:\\dir-sentinela-scripts\\x.sql")
+
+    class _Diretorio:
+        def resolve(self):
+            return self
+
+        def __truediv__(self, outro):
+            return _Alvo()
+
+        def __str__(self):
+            return "C:\\dir-sentinela-scripts"
+
+    monkeypatch.setattr(executor, "obter_caminho_scripts_dir", lambda: _Diretorio())
+    monkeypatch.setattr(oracledb, "connect", lambda *a, **k: pytest.fail("connect com caminho inválido"))
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        texto = executor.executar_script("verificar_dual", {})
+
+    assert "dir-sentinela-scripts" not in texto
+    resultado = json.loads(texto)
+    assert resultado["motivo"] == "PATH_INVALIDO" and resultado["mensagem"].endswith("OSError.")
+    assert "dir-sentinela-scripts" in caplog.text
+
+
+SENTINELA_DO_RAMO_K7 = {"erro_oracle": "texto-sentinela", "excecao": "exc-sentinela", "rede": "rede-sentinela"}
+
+
+@pytest.mark.parametrize("ferramenta", list(FERRAMENTAS_DIAG))
+@pytest.mark.parametrize("ramo", ["erro_oracle", "excecao", "rede"])
+def test_k7_t6_diagnostico_leva_o_detalhe_ao_log_local(monkeypatch, rede, caplog, ferramenta, ramo):
+    """K7-T6 (mata R1_M11): o texto que sai do retorno ao LLM chega ao log local (_registrar_erro_local), em cada
+    ramo de erro das 3 ferramentas de diagnóstico."""
+    if ramo == "rede":
+        rede["falha_em"] = "sempre"
+    _instalar_diag(monkeypatch, erro_connect=ERRO_ORA if ramo == "erro_oracle" else None,
+                   erro_cursor=ERRO_EXC if ramo == "excecao" else None)
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        texto = FERRAMENTAS_DIAG[ferramenta]()
+
+    _sem_vazamento(texto, f"{ferramenta}:{ramo}")
+    detalhes = [r.getMessage() for r in caplog.records if "DETALHE LOCAL" in r.getMessage()]
+    assert any(SENTINELA_DO_RAMO_K7[ramo] in m for m in detalhes), detalhes
+
+
+@pytest.mark.parametrize("ramo", ["erro_oracle", "excecao", "rede", "protegido"])
+def test_k7_t6_pre_consulta_leva_o_detalhe_ao_log_local(monkeypatch, rede, caplog, ramo):
+    """K7-T6 (mata R1_M11 na pré-consulta): o detalhe do erro, ou o usuário protegido, fica no log local."""
+    linhas = [_linha_alvo(username="STARTUPADMIN")] if ramo == "protegido" else [_linha_alvo()]
+    fake = _OracleFake(linhas, kill_permitido=False)
+    connect = fake.connect
+    if ramo in ("erro_oracle", "excecao"):
+        connect = _connect_diag_falhando_na(fake, 1, ERRO_ORA if ramo == "erro_oracle" else ERRO_EXC)
+    if ramo == "rede":
+        rede["falha_em"] = "sempre"
+    monkeypatch.setattr(oracledb, "connect", connect)
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        prep = od.preparar_intervencao_kill(dict(ARGS), caminho_log=None)
+
+    _sem_vazamento(prep["resultado_tool"], f"preparar:{ramo}")
+    assert ({**SENTINELA_DO_RAMO_K7, "protegido": "STARTUPADMIN"}[ramo]) in caplog.text
+
+
+def test_k7_t6_reconsulta_de_usuario_protegido_leva_o_username_ao_log_local(monkeypatch, rede, caplog):
+    """K7-T6 (mata R1_M11 no log de usuário protegido da reconsulta): o username fica no log local, nunca no LLM."""
+    alvo = dict(zip([c.lower() for c in COLUNAS_ALVO], _linha_alvo(username="STARTUPADMIN")))
+    monkeypatch.setattr(oracledb, "connect", _OracleFake([_linha_alvo(username="STARTUPADMIN")]).connect)
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        texto = od.executar_kill_verificado(
+            inst_id=1, sid=101, serial=202, hash_aprovado=calcular_hash_identidade(alvo),
+            aprovacao_expirada=lambda: False, ref_aprovacao=REF,
+        )
+
+    _sem_vazamento(texto, "reconsulta:protegido")
+    assert "STARTUPADMIN" in caplog.text
+
+
+@pytest.mark.parametrize("ramo", ["erro_oracle", "excecao"])
+def test_k7_t6_executor_leva_o_detalhe_ao_log_local(monkeypatch, ambiente_executor, caplog, ramo):
+    """K7-T6 (mata R1_M11 no executor): o texto do erro do Oracle ou da exceção fica no log local."""
+    from src.tools.executor import executar_script
+
+    def connect(*a, **k):
+        if ramo == "erro_oracle":
+            raise ERRO_ORA
+        return _ConexaoExecutor(ERRO_EXC)
+
+    monkeypatch.setattr(oracledb, "connect", connect)
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        texto = executar_script("verificar_dual", {})
+
+    assert SENTINELA_DO_RAMO_K7[ramo] not in texto
+    assert SENTINELA_DO_RAMO_K7[ramo] in caplog.text
+
+
+# =============================================================================
+# KM2, item 6 (docs/plans/1.11-R1-ampliada.md 9.10.2): argumentos da tool_call inválidos
+# =============================================================================
+
+@pytest.mark.parametrize(
+    "bruto, esperado",
+    [("", {}), (None, {}), ('{"drive": "C:\\\\"}', {"drive": "C:\\"}), ("{}", {})],
+    ids=["vazio", "none", "objeto", "objeto_vazio"],
+)
+def test_km2_ler_argumentos_validos(bruto, esperado):
+    assert od.ler_argumentos_da_ferramenta("ferramenta_x", bruto) == esperado
+
+
+@pytest.mark.parametrize(
+    "bruto",
+    ['{"drive": "C:\\\\sentinela-args', "[]", "3", "null", '"texto-sentinela-args"', 5, b"\xff"],
+    ids=["malformado", "lista", "numero", "null", "string", "int", "bytes_invalidos"],
+)
+def test_km2_ler_argumentos_invalidos_sem_ecoar_e_com_log(caplog, bruto):
+    """KM2, item 6 (mata M_KM2_SEM_DICT e M_KM2_SEM_LOG): o que não é JSON de objeto dá None e o motivo vai ao log
+    local; nunca levanta."""
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        assert od.ler_argumentos_da_ferramenta("ferramenta_x", bruto) is None
+    assert "ARGUMENTOS_INVALIDOS" in caplog.text and "ferramenta_x" in caplog.text
+    assert json.loads(od.RESULTADO_ARGUMENTOS_INVALIDOS) == {
+        "status": "recusado", "motivo": "ARGUMENTOS_INVALIDOS",
+        "mensagem": "Argumentos da ferramenta inválidos; nada foi executado.",
+    }

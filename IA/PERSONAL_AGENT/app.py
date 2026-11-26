@@ -43,6 +43,8 @@ for path_str in (str(ROOT_DIR), str(SRC_DIR)):
 # - override=False: o ambiente (shell ou perfil) vence o arquivo.
 # - ORACLE_SANDBOX só vale se já estava no ambiente antes da carga (incidente 01:27). Se vier do arquivo, o finally
 #   a remove, inclusive quando a carga falha (C1); "ok" só é gravado depois disso.
+# - OPS_KILL_PKG_VERSAO, idem (R1 ampliada fase 2, D1): só o ambiente da sessão habilita o encerramento de sessão.
+#   Se vier do arquivo, o finally a remove e marca o descarte; a subida com o kill habilitado também é marcada.
 # - OSError antes de qualquer escrita em os.environ (inclusive .env ausente): nada entrou, nova tentativa na
 #   próxima subida. Qualquer outra falha (escrita parcial, .env que não é arquivo regular, decodificação, NUL,
 #   interrupção): fail-closed até reiniciar o processo. Mensagens fixas, sem valores.
@@ -52,6 +54,14 @@ _AVISO_SANDBOX_DESCARTADA = (
 )
 _AVISO_SOMBREADAS = "Variáveis do .env ignoradas porque o ambiente já as define com outro valor: "
 _AVISO_MALFORMADAS = "Linhas do .env com erro de sintaxe foram ignoradas. Quantidade: "
+_AVISO_KILL_DESCARTADA = (
+    "OPS_KILL_PKG_VERSAO encontrada no .env foi DESCARTADA: o encerramento de sessão só é habilitado pelo ambiente "
+    "da sessão. Remova a chave do .env."
+)
+_AVISO_KILL_HABILITADO = (
+    "Encerramento de sessão HABILITADO nesta subida por OPS_KILL_PKG_VERSAO no ambiente (shell ou perfil do "
+    "Windows). Confira se é intencional."
+)
 
 
 def _carregar_env(caminho):
@@ -81,13 +91,15 @@ def _carregar_env(caminho):
 _ESTADO_ENV = vars(sys).setdefault(
     "_personal_agent_estado_env",
     {"lock": threading.Lock(), "estado": None, "falha": None, "sandbox_descartada": False, "sombreadas": (),
-     "malformadas": 0},
+     "malformadas": 0, "kill_descartada": False, "kill_habilitado": False},
 )
 _CARREGOU_AGORA = False
 with _ESTADO_ENV["lock"]:
     if _ESTADO_ENV["estado"] is None:
-        _ESTADO_ENV.update(estado="falhou", falha=None, sandbox_descartada=False, sombreadas=(), malformadas=0)
+        _ESTADO_ENV.update(estado="falhou", falha=None, sandbox_descartada=False, sombreadas=(), malformadas=0,
+                           kill_descartada=False, kill_habilitado=False)
         _sandbox_do_shell = "ORACLE_SANDBOX" in os.environ
+        _kill_do_shell = "OPS_KILL_PKG_VERSAO" in os.environ
         _proximo = "falhou"
         try:
             _proximo, _ESTADO_ENV["falha"], _ESTADO_ENV["sombreadas"], _ESTADO_ENV["malformadas"] = (
@@ -98,6 +110,9 @@ with _ESTADO_ENV["lock"]:
         finally:
             if not _sandbox_do_shell and os.environ.pop("ORACLE_SANDBOX", None) is not None:
                 _ESTADO_ENV["sandbox_descartada"] = True
+            if not _kill_do_shell and os.environ.pop("OPS_KILL_PKG_VERSAO", None) is not None:
+                _ESTADO_ENV["kill_descartada"] = True
+            _ESTADO_ENV["kill_habilitado"] = os.environ.get("OPS_KILL_PKG_VERSAO") == "2"
         _ESTADO_ENV["estado"] = _proximo  # só depois do descarte de ORACLE_SANDBOX
         _CARREGOU_AGORA = _proximo == "ok"
     _ESTADO_DESTA_SUBIDA, _FALHA_DESTA_SUBIDA = _ESTADO_ENV["estado"], _ESTADO_ENV["falha"]  # lidos sob o lock
@@ -136,6 +151,10 @@ if _CARREGOU_AGORA:  # avisos da carga: uma vez por processo, depois do basicCon
         _log_carga.warning(_AVISO_SOMBREADAS + ", ".join(_ESTADO_ENV["sombreadas"]))
     if _ESTADO_ENV["malformadas"]:  # Achado 3: só a contagem
         _log_carga.warning(_AVISO_MALFORMADAS + str(_ESTADO_ENV["malformadas"]))
+    if _ESTADO_ENV.get("kill_descartada"):  # fase 2, D1
+        _log_carga.warning(_AVISO_KILL_DESCARTADA)
+    if _ESTADO_ENV.get("kill_habilitado"):  # fase 2, P4: toda subida com o kill habilitado
+        _log_carga.warning(_AVISO_KILL_HABILITADO)
 
 # Importação das Ferramentas do Agente
 from tools.os_tools import (
@@ -155,20 +174,35 @@ from tools.oracle_dba import (
     APROVACAO_TTL_SEGUNDOS,
     MENSAGEM_RESULTADO_DESCONHECIDO,
     MENSAGEM_DESFECHO_NAO_CONFIRMADO,
+    HOST_COORDENADOR_LOCAL,
+    NOME_FERRAMENTA_KILL,
+    PORTA_COORDENADOR_LOCAL,
+    RESULTADO_ARGUMENTOS_INVALIDOS,
+    RESULTADO_KILL_DESABILITADO,
+    RESULTADO_ORACLE_SO_LOCAL,
+    TEXTO_HISTORICO_COM_DADO_DO_BANCO,
+    _registrar_erro_local,
+    criar_cliente_coordenador_local,
+    ferramenta_liberada_nuvem,
+    ler_argumentos_da_ferramenta,
+    ferramentas_do_coordenador,
+    kill_habilitado,
+    coordenador_e_local,
+    historico_tem_dado_do_banco,
 )
-from tools.gemini_router import (
-    gemini_tools_schema,
-    analisar_log_complexo,
-)
+# R1 ampliada V9 (docs/plans/1.11-R1-ampliada.md §5.2.2; decisão do responsável de 2026-11-24, opção a): o
+# analisar_log_complexo não é oferecido nem despachado ao coordenador. O import fica, sem uso, porque o
+# tools.gemini_router lê GEMINI_API_KEY no import e é a sonda do test_d63 (carga do .env antes de tools.*).
+import tools.gemini_router  # noqa: F401  (sonda da carga do .env; nenhuma função é usada)
 from tools.rag_search import (
     rag_tools_schema,
     buscar_script_interno,
 )
 
-# Catálogo Unificado de Ferramentas (Windows + Oracle + Gemini Cloud + RAG Local)
-TODAS_FERRAMENTAS = (
-    os_tools_schema + oracle_tools_schema + gemini_tools_schema + rag_tools_schema
-)
+# Registro de Ferramentas da interface. O catálogo entregue ao LLM a cada chamada é
+# ferramentas_do_coordenador(TODAS_FERRAMENTAS, local): sem OPS_KILL_PKG_VERSAO=2 o kill sai, e com o coordenador em
+# nuvem só ficam as liberadas (lista de permissão; R1 ampliada V8; fase 2, decisao_c1.md §1.2 e §2.2-i).
+TODAS_FERRAMENTAS = os_tools_schema + oracle_tools_schema + rag_tools_schema
 
 SYSTEM_PROMPT = """Você é o Agente Coordenador, o cérebro central de um sistema autônomo local de administração de TI e Banco de Dados.
 Seus princípios absolutos são:
@@ -178,7 +212,6 @@ Seus princípios absolutos são:
 DIRETRIZES DE COMPORTAMENTO E DELEGAÇÃO:
 - Nunca invente métricas, queries, logs ou estados do sistema. Chame as ferramentas.
 - Para problemas simples, responda no formato: Diagnóstico, Evidências, Possíveis Causas e Próximo Passo.
-- REGRA DE OURO: Se você extrair um plano de execução (DBMS_XPLAN) ou quando o usuário pedir uma análise profunda do plano de execução, acione IMEDIATAMENTE a ferramenta 'analisar_log_complexo' passando o plano extraído para terceirizar a análise. Não tente adivinhar.
 - SEGURANÇA (HITL): Acione 'matar_sessao_oracle' apenas quando o usuário solicitar explicitamente para matar, derrubar ou encerrar uma sessão (usando o SID e SERIAL informados pelo usuário ou identificados via 'coletar_sessoes_ativas').
 """
 
@@ -187,9 +220,10 @@ DIRETRIZES DE COMPORTAMENTO E DELEGAÇÃO:
 # 2. CONEXÃO COM O MOTOR LLM E VERIFICAÇÕES DE STATUS
 # ==============================================================================
 def verificar_status_ollama() -> bool:
-    """Verifica via socket rápido se o serviço Ollama local está respondendo na porta 11434."""
+    """Verifica via socket rápido se o serviço Ollama local está respondendo na porta 11434 (mesmo destino do
+    cliente local; K5)."""
     try:
-        with socket.create_connection(("127.0.0.1", 11434), timeout=0.4):
+        with socket.create_connection((HOST_COORDENADOR_LOCAL, PORTA_COORDENADOR_LOCAL), timeout=0.4):
             return True
     except OSError:
         return False
@@ -202,7 +236,7 @@ def obter_cliente_llm() -> tuple[OpenAI, str, bool]:
     """
     if verificar_status_ollama():
         return (
-            OpenAI(base_url="http://localhost:11434/v1", api_key="local"),
+            criar_cliente_coordenador_local(),  # K5: 127.0.0.1, sem proxy e sem redirect
             os.getenv("MODEL_NAME", "qwen2.5:7b"),
             True,
         )
@@ -248,6 +282,8 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
     st.session_state.hitl_pendente e pausa imediatamente o loop aguardando decisão nos botões da UI.
     """
     client, modelo_ativo, _ = obter_cliente_llm()
+    # R1 ampliada V8 (decisao_c1.md §3.1): o sinal é o base_url do próprio cliente que envia, não o bool.
+    local = coordenador_e_local(client)
 
     # Adiciona a pergunta do usuário ao contexto do LLM
     st.session_state.llm_messages.append({"role": "user", "content": prompt_usuario})
@@ -257,12 +293,18 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
 
     while passo < max_passos:
         passo += 1
+        # V8, trava de histórico (decisao_c1.md §3.4): o histórico da sessão com dado do banco não vai à nuvem
+        # (o Ollama pode ter caído entre um turno e outro).
+        if not local and historico_tem_dado_do_banco(st.session_state.llm_messages):
+            st.session_state.messages.append({"role": "assistant", "content": TEXTO_HISTORICO_COM_DADO_DO_BANCO})
+            yield f"⚠️ {TEXTO_HISTORICO_COM_DADO_DO_BANCO}"
+            return
         yield f"🧠 Consultando Agente Coordenador (`{modelo_ativo}` - Passo {passo})..."
 
         response = client.chat.completions.create(
             model=modelo_ativo,
             messages=st.session_state.llm_messages,
-            tools=TODAS_FERRAMENTAS,
+            tools=ferramentas_do_coordenador(TODAS_FERRAMENTAS, local),
         )
         mensagem_resposta = response.choices[0].message
 
@@ -286,19 +328,57 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
         # Processa cada ferramenta solicitada
         for idx, tool_call in enumerate(mensagem_resposta.tool_calls):
             nome_funcao = tool_call.function.name
-            argumentos = (
-                json.loads(tool_call.function.arguments)
-                if tool_call.function.arguments
-                else {}
-            )
+            # KM2 (plano 9.10.2, item 6; P6a): argumento malformado não derruba o laço nem deixa o tool_call sem
+            # resposta no histórico; recusa fixa ao LLM e segue para a próxima tool_call.
+            argumentos = ler_argumentos_da_ferramenta(nome_funcao, tool_call.function.arguments)
+            if argumentos is None:
+                st.session_state.llm_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": nome_funcao,
+                        "content": RESULTADO_ARGUMENTOS_INVALIDOS,
+                    }
+                )
+                yield f"⛔ `{nome_funcao}` recusada: argumentos inválidos; nada foi executado."
+                continue
 
             # Auditoria: Registra intenção do Agente
             if (
                 nome_funcao.startswith("coletar_")
-                or nome_funcao == "analisar_log_complexo"
                 or nome_funcao == "matar_sessao_oracle"
             ):
                 logging.info(f"AGENTE ACIONOU: {nome_funcao} | PARÂMETROS: {argumentos}")
+
+            # V8, despacho (decisao_c1.md §3.3; fase 2, K2), antes de toda rota e do ramo HITL: o LLM pode chamar
+            # ferramenta que não foi oferecida; com o coordenador em nuvem, toda ferramenta não liberada (Oracle, RAG,
+            # nome sem classificação) devolve a recusa fixa, sem consulta, sem sonda, sem conexão e sem painel.
+            if not local and not ferramenta_liberada_nuvem(nome_funcao):
+                st.session_state.llm_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": nome_funcao,
+                        "content": RESULTADO_ORACLE_SO_LOCAL,
+                    }
+                )
+                yield f"⛔ `{nome_funcao}` recusada: só com o coordenador local."
+                continue
+
+            # Gate de produção do kill (fase 2, decisao_c1.md §2.2-ii), antes do ramo HITL: sem
+            # OPS_KILL_PKG_VERSAO=2, recusa fixa, sem pré-consulta e sem painel.
+            if nome_funcao == NOME_FERRAMENTA_KILL and not kill_habilitado():
+                logging.warning("KILL BLOQUEADO NO DESPACHO (Web): KILL_DESABILITADO (OPS_KILL_PKG_VERSAO)")
+                st.session_state.llm_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": nome_funcao,
+                        "content": RESULTADO_KILL_DESABILITADO,
+                    }
+                )
+                yield "⛔ Encerramento de sessão indisponível nesta instalação (OPS_KILL_PKG_VERSAO)."
+                continue
 
             # ------------------------------------------------------------------
             # BARREIRA HITL BASEADA EM ESTADO COM PRÉ-CONSULTA DIAG E TRILHA
@@ -374,14 +454,6 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
                     resultado_tool = coletar_top_sql(argumentos.get("limite", 3))
                 elif nome_funcao == "coletar_plano_execucao":
                     resultado_tool = coletar_plano_execucao(argumentos.get("sql_id"))
-                elif nome_funcao == "analisar_log_complexo":
-                    resultado_tool = analisar_log_complexo(
-                        dados_brutos=argumentos.get("dados_brutos", ""),
-                        contexto_solicitacao=argumentos.get(
-                            "contexto_solicitacao",
-                            "Análise de performance solicitada pelo DBA.",
-                        ),
-                    )
                 elif nome_funcao == "buscar_script_interno":
                     resultado_tool = buscar_script_interno(
                         tema_ou_problema=argumentos.get("tema_ou_problema", "")
@@ -392,15 +464,14 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
                         ensure_ascii=False,
                     )
             except Exception as exc:
+                # R1 ampliada V3 (decisao_c1.md §2.3): ao LLM só o tipo; o texto cru vai ao log local.
+                _registrar_erro_local(nome_funcao, "erro_execucao", exc=exc)
                 resultado_tool = json.dumps(
-                    {"erro_execucao": str(exc)}, ensure_ascii=False
+                    {"erro_execucao": type(exc).__name__}, ensure_ascii=False
                 )
 
             # Auditoria: Registra o resultado retornado pela ferramenta
-            if (
-                nome_funcao.startswith("coletar_")
-                or nome_funcao == "analisar_log_complexo"
-            ):
+            if nome_funcao.startswith("coletar_"):
                 logging.info(f"RESULTADO ORACLE: {resultado_tool}")
 
             st.session_state.llm_messages.append(
@@ -501,6 +572,13 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
             f"🛑 **Ação Abortada pelo Aprovador (`{aprovador_registro}`):** "
             f"O encerramento da sessão `{sid},{serial}` foi negado. Nenhuma execução no banco."
         )
+    elif desfecho.get("motivo") == "KILL_DESABILITADO":
+        # Fase 2, decisao_c1.md §2.2-iii-b (tela): HITL pendente com o gate desligado antes do clique.
+        aviso_ui = (
+            f"❌ **Intervenção aprovada por `{id_aprovador_limpo}`, mas NÃO EXECUTADA:** encerramento desabilitado "
+            "nesta instalação (OPS_KILL_PKG_VERSAO); nenhuma consulta nem chamada à conta KILL."
+        )
+        st.error(aviso_ui)
     elif desfecho.get("motivo") == "FALHA_LOG_APROVACAO":
         aviso_ui = (
             f"❌ **Intervenção APROVADA por `{id_aprovador_limpo}`, mas NÃO EXECUTADA:** falha ao gravar o "
@@ -565,6 +643,11 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
 
     # Solicita ao LLM a resposta de fechamento pós-decisão HITL
     client, modelo_ativo, _ = obter_cliente_llm()
+    # V8, trava de histórico (decisao_c1.md §3.4): se o Ollama caiu entre o painel e o clique, o fechamento não
+    # vai à nuvem. O desfecho já foi gravado (JSONL) e exibido (aviso_ui) acima.
+    if not coordenador_e_local(client) and historico_tem_dado_do_banco(st.session_state.llm_messages):
+        st.session_state.messages.append({"role": "assistant", "content": TEXTO_HISTORICO_COM_DADO_DO_BANCO})
+        return True
     resposta_pos_hitl = client.chat.completions.create(
         model=modelo_ativo,
         messages=st.session_state.llm_messages,
@@ -599,6 +682,10 @@ if _ESTADO_ENV["sombreadas"]:
     st.warning(_AVISO_SOMBREADAS + ", ".join(_ESTADO_ENV["sombreadas"]))
 if _ESTADO_ENV["malformadas"]:
     st.warning(_AVISO_MALFORMADAS + str(_ESTADO_ENV["malformadas"]))
+if _ESTADO_ENV.get("kill_descartada"):  # fase 2, D1
+    st.warning(_AVISO_KILL_DESCARTADA)
+if _ESTADO_ENV.get("kill_habilitado"):  # fase 2, P4
+    st.warning(_AVISO_KILL_HABILITADO)
 
 # Inicialização de estados persistentes no st.session_state
 if "messages" not in st.session_state:
@@ -607,9 +694,8 @@ if "messages" not in st.session_state:
             "role": "assistant",
             "content": (
                 "Olá! Sou o **Agente Coordenador de TI e Banco de Dados**. "
-                "Posso monitorar recursos da sua máquina Windows, analisar sessões e *Top SQL* no Oracle, "
-                "escalar planos `DBMS_XPLAN` complexos para o Gemini em nuvem e executar intervenções "
-                "protegidas por aprovação **HITL**."
+                "Posso monitorar recursos da sua máquina Windows, analisar sessões, *Top SQL* e planos "
+                "`DBMS_XPLAN` no Oracle e executar intervenções protegidas por aprovação **HITL**."
             ),
         }
     ]
@@ -800,7 +886,7 @@ with col_chat:
     prompt_atalho = None
     if atalho1.button("🔍 Health Check Geral", use_container_width=True):
         prompt_atalho = "Verifique o consumo de hardware da minha máquina e quantas sessões ativas temos no Oracle."
-    if atalho2.button("📈 Analisar Top SQL (Gemini)", use_container_width=True):
+    if atalho2.button("📈 Analisar Top SQL", use_container_width=True):  # K7 (A7.3): o Gemini não analisa o plano
         prompt_atalho = "Descubra a query mais pesada do banco e me dê uma análise profunda do plano de execução."
     if atalho3.button("⚡ Testar Barreira HITL", use_container_width=True):
         prompt_atalho = "Preciso derrubar imediatamente a sessão travada de SID 9999 e SERIAL 12345 no banco Oracle."

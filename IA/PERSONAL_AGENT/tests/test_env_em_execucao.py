@@ -6,6 +6,7 @@ import types
 import dotenv
 import dotenv.main
 import oracledb
+import pytest
 
 from src.tools import executor, gemini_router, notificador, oracle_dba, rag_search
 from src.tools.oracle_dba import conduzir_kill_hitl
@@ -61,6 +62,8 @@ class _SmtpFake:
 
 
 def test_kill_apos_alteracao_do_env_usa_valores_do_start(monkeypatch, tmp_path):
+    # Fase 2 da R1 (decisao_c1.md §2.3; expectativa alterada, declarada): o kill exige OPS_KILL_PKG_VERSAO=2.
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
     for chave, valor in VALORES_START.items():
         monkeypatch.setenv(chave, valor)
 
@@ -113,6 +116,8 @@ def test_fluxo_nao_le_nem_recarrega_dotenv(monkeypatch, tmp_path):
     funções que também registram. Uma leitura levantaria AssertionError (que o notificador captura), por
     isso a lista de leituras é a asserção principal.
     """
+    # Fase 2 da R1 (decisao_c1.md §2.3; expectativa alterada, declarada): o kill exige OPS_KILL_PKG_VERSAO=2.
+    monkeypatch.setenv("OPS_KILL_PKG_VERSAO", "2")
     leituras = []
 
     def _registrar(origem):
@@ -238,3 +243,39 @@ def test_fluxo_nao_le_nem_recarrega_dotenv(monkeypatch, tmp_path):
     assert conexoes_read == ["read_inicio"]
     assert busca is not None and busca["status"] == "sucesso"
     assert busca["total_encontrado"] == 1 and busca["scripts_homologados"][0]["arquivo"] == "script_fictico.sql"
+
+
+def test_k1_t10_gate_nao_rele_o_dotenv(monkeypatch, tmp_path):
+    """K1-T10, L13 (mata M_K1_RELE_DOTENV): sem a variável no ambiente e com um .env em disco que a define como 2,
+    o kill segue indisponível. O gate lê só os.environ: construir um DotEnv falha o teste."""
+    monkeypatch.delenv("OPS_KILL_PKG_VERSAO", raising=False)
+    for chave, valor in VALORES_START.items():
+        monkeypatch.setenv(chave, valor)
+    arquivo = tmp_path / ".env"
+    arquivo.write_text("OPS_KILL_PKG_VERSAO=2\n", encoding="utf-8")
+    monkeypatch.setattr(dotenv.main, "find_dotenv", lambda *a, **k: str(arquivo))
+
+    def _guarda_init(self, *a, **k):
+        pytest.fail("DotEnv construído: o gate releu o .env")
+
+    monkeypatch.setattr(dotenv.main.DotEnv, "__init__", _guarda_init)
+    monkeypatch.setattr(
+        oracle_dba,
+        "verificar_acessibilidade_host",
+        lambda dsn, timeout=3.0: {"acessivel": True, "host": "host-teste", "porta": 1521, "latencia_ms": 0.1},
+    )
+    fake = _OracleFakeValoresStart([_linha_alvo()], status_pkg="ENCERRADA")
+    monkeypatch.setattr(oracledb, "connect", fake.connect)
+
+    def _sem_prompt(prep):
+        pytest.fail("prompt exibido com o kill desabilitado")
+
+    desfecho = conduzir_kill_hitl(
+        {"inst_id": 1, "sid": 101, "serial": 202},
+        solicitar_aprovacao=_sem_prompt,
+        canal="TESTE",
+        caminho_log=tmp_path / "kill.log",
+    )
+    assert desfecho["motivo"] == "KILL_DESABILITADO" and desfecho["executado"] is False
+    assert fake.usuarios_recebidos == []
+    assert "OPS_KILL_PKG_VERSAO" not in os.environ

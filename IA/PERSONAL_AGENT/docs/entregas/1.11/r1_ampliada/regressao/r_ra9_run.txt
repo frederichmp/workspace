@@ -1,0 +1,11 @@
+# Controle de mutação `r_ra9`
+
+Alvo `src/tools/oracle_dba.py`; testes `tests/test_item1_intencao.py::test_ra_toda_chamada_de_producao_passa_resultado_desconhecido`; cópia `git archive HEAD`.
+
+| Mutação | Troca | Contagem | Resultado | Status |
+|---|---|---|---|---|
+| m0 | sem mutação | - | 1 passed, 13 warnings in 1.62s | OK |
+| R-a9_interrompido_sem_o_argumento_so_ast |                 id_intervencao=id_intervencao,\n                resu… | 1 substituição | 1 failed, 13 warnings in 1.73s \| caíram: tests/test_item1_intencao.p… | DETECTADA |
+
+Resultado: todas DETECTADAS.
+Relatório: docs/entregas/1.11/r1_ampliada/regressao/r_ra9.md

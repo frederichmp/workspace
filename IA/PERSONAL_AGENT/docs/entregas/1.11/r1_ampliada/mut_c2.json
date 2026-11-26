@@ -1,0 +1,82 @@
+[
+ {
+  "nome": "M_R1_V1_INSTANCIA_SUCESSO_SESSOES",
+  "de": "                \"status\": \"sucesso\",\r\n                \"host_acessivel\": True,\r\n                \"latencia_rede_ms\"",
+  "para": "                \"status\": \"sucesso\",\r\n                \"instancia\": dsn,\r\n                \"host_acessivel\": True,\r\n                \"latencia_rede_ms\""
+ },
+ {
+  "nome": "M_R1_V1_INSTANCIA_ERRO_CONFIG_KILL",
+  "de": "                \"resultado_desconhecido\": False,\r\n                \"mensagem\": (\r\n                    \"Configuração incompleta no cofre (.env). \"\r\n                    \"Variáveis ORACLE_USER_KILL",
+  "para": "                \"resultado_desconhecido\": False,\r\n                \"instancia\": dsn or \"NAO_CONFIGURADO\",\r\n                \"mensagem\": (\r\n                    \"Configuração incompleta no cofre (.env). \"\r\n                    \"Variáveis ORACLE_USER_KILL"
+ },
+ {
+  "nome": "M_R1_V2_HOST_NA_PRE_CONSULTA",
+  "de": "            \"mensagem\": TEXTO_HOST_INACESSIVEL,\r\n",
+  "para": "            \"mensagem\": f\"Host {check_rede['host']}:{check_rede['porta']} inacessível.\",\r\n"
+ },
+ {
+  "nome": "M_R1_V2_DETALHE_REDE_NO_KILL",
+  "de": "                \"resultado_desconhecido\": False,\r\n                \"host_acessivel\": False,\r\n                \"mensagem\": TEXTO_HOST_INACESSIVEL_VPN,\r\n",
+  "para": "                \"resultado_desconhecido\": False,\r\n                \"host_acessivel\": False,\r\n                \"mensagem\": TEXTO_HOST_INACESSIVEL_VPN,\r\n                \"detalhe_rede\": check_rede[\"erro_rede\"],\r\n"
+ },
+ {
+  "nome": "M_R1_V2_ERRO_REDE_COM_TEXTO",
+  "de": "            \"erro_rede\": f\"{type(net_err).__name__} errno={getattr(net_err, 'errno', None)}\",\r\n",
+  "para": "            \"erro_rede\": str(net_err),\r\n"
+ },
+ {
+  "nome": "M_R1_V3_STR_NA_PRE_CONSULTA",
+  "de": "\r\n            \"mensagem\": f\"Erro do Oracle {_codigo_erro(db_err)}.\",\r\n",
+  "para": "\r\n            \"mensagem\": str(db_err),\r\n"
+ },
+ {
+  "nome": "M_R1_V3_CODIGO_ERRO_DEVOLVE_TEXTO",
+  "de": "                return achado.group(0)\r\n",
+  "para": "                return _descrever_erro(exc)\r\n"
+ },
+ {
+  "nome": "M_R1_V3_KILL_DEPOIS_COM_TEXTO",
+  "de": "                f\"{_codigo_erro(db_err)}\"\r\n",
+  "para": "                f\"{_descrever_erro(db_err)}\"\r\n"
+ },
+ {
+  "nome": "M_R1_V4_USERNAME_NA_RECUSA",
+  "de": "                    \"pertence a usuário protegido. Encerramento não permitido.\"\r\n",
+  "para": "                    f\"pertence a usuário protegido ({username or 'NULO'}). Encerramento não permitido.\"\r\n"
+ },
+ {
+  "nome": "M_R1_V5_APROVADOR_NA_MENSAGEM",
+  "de": "                f\"Intervenção não aprovada ({decisao}/{motivo}). \"\r\n",
+  "para": "                f\"Intervenção não aprovada ({decisao}/{motivo}) por '{aprovador_registro}'. \"\r\n"
+ },
+ {
+  "nome": "M_R1_V6_PKG_NO_EXECUTADO",
+  "de": "                f\"Encerramento executado para \"\r\n",
+  "para": "                f\"Procedimento OPS_OWNER.PKG_OPS_KILL.KILL_SESSION executado para \"\r\n"
+ },
+ {
+  "nome": "M_R1_V6_PKG_NO_SCHEMA",
+  "de": "                \"de encerramento. Requer aprovação humana prévia (HITL).\"\r\n",
+  "para": "                \"OPS_OWNER.PKG_OPS_KILL.KILL_SESSION. Requer aprovação humana prévia (HITL).\"\r\n"
+ },
+ {
+  "nome": "M_R1_V7_HASH_ATUAL_DE_VOLTA",
+  "de": "                # R1 ampliada V7 (R2; decisao_c1.md §2.7): os hashes ficam só no log acima e no JSONL.\r\n",
+  "para": "                \"hash_atual\": hash_atual,\r\n"
+ },
+ {
+  "nome": "M_R1_V8E_COORDENADOR_POR_SUBSTRING",
+  "de": "        return host in _HOSTS_COORDENADOR_LOCAL\r\n",
+  "para": "        return \"localhost\" in str(client.base_url) or \"127.0.0.1\" in str(client.base_url)\r\n"
+ },
+ {
+  "nome": "M_R1_HISTORICO_POR_LISTA_NEGADA",
+  "de": "            if mensagem.get(\"name\") not in NOMES_FERRAMENTAS_SEM_DADO_DO_BANCO:\r\n",
+  "para": "            if str(mensagem.get(\"name\", \"\")).startswith(\"coletar_\"):\r\n"
+ },
+ {
+  "nome": "M_R1_REGISTRO_LOCAL_MUDO",
+  "de": "        logger.warning(\" | \".join(partes))\r\n",
+  "para": "        pass\r\n"
+ }
+]

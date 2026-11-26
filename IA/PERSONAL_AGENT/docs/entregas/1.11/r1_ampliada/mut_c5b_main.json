@@ -1,0 +1,7 @@
+[
+ {
+  "nome": "M_R1_CLI_SEM_TRAVA_NO_LAUDO_FINAL",
+  "de": "\r\n    if not local and historico_tem_dado_do_banco(messages):\r\n",
+  "para": "\r\n    if False:\r\n"
+ }
+]

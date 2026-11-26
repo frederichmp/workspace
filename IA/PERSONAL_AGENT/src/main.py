@@ -28,6 +28,8 @@ for path_str in (str(ROOT_DIR), str(SRC_DIR)):
 # - override=False: o ambiente (shell ou perfil) vence o arquivo.
 # - ORACLE_SANDBOX só vale se já estava no ambiente antes da carga (incidente 01:27). Se vier do arquivo, o finally
 #   a remove, inclusive quando a carga falha (C1); "ok" só é gravado depois disso.
+# - OPS_KILL_PKG_VERSAO, idem (R1 ampliada fase 2, D1): só o ambiente da sessão habilita o encerramento de sessão.
+#   Se vier do arquivo, o finally a remove e marca o descarte; a subida com o kill habilitado também é marcada.
 # - OSError antes de qualquer escrita em os.environ (inclusive .env ausente): nada entrou, nova tentativa na
 #   próxima subida. Qualquer outra falha (escrita parcial, .env que não é arquivo regular, decodificação, NUL,
 #   interrupção): fail-closed até reiniciar o processo. Mensagens fixas, sem valores.
@@ -37,6 +39,14 @@ _AVISO_SANDBOX_DESCARTADA = (
 )
 _AVISO_SOMBREADAS = "Variáveis do .env ignoradas porque o ambiente já as define com outro valor: "
 _AVISO_MALFORMADAS = "Linhas do .env com erro de sintaxe foram ignoradas. Quantidade: "
+_AVISO_KILL_DESCARTADA = (
+    "OPS_KILL_PKG_VERSAO encontrada no .env foi DESCARTADA: o encerramento de sessão só é habilitado pelo ambiente "
+    "da sessão. Remova a chave do .env."
+)
+_AVISO_KILL_HABILITADO = (
+    "Encerramento de sessão HABILITADO nesta subida por OPS_KILL_PKG_VERSAO no ambiente (shell ou perfil do "
+    "Windows). Confira se é intencional."
+)
 
 
 def _carregar_env(caminho):
@@ -66,13 +76,15 @@ def _carregar_env(caminho):
 _ESTADO_ENV = vars(sys).setdefault(
     "_personal_agent_estado_env",
     {"lock": threading.Lock(), "estado": None, "falha": None, "sandbox_descartada": False, "sombreadas": (),
-     "malformadas": 0},
+     "malformadas": 0, "kill_descartada": False, "kill_habilitado": False},
 )
 _CARREGOU_AGORA = False
 with _ESTADO_ENV["lock"]:
     if _ESTADO_ENV["estado"] is None:
-        _ESTADO_ENV.update(estado="falhou", falha=None, sandbox_descartada=False, sombreadas=(), malformadas=0)
+        _ESTADO_ENV.update(estado="falhou", falha=None, sandbox_descartada=False, sombreadas=(), malformadas=0,
+                           kill_descartada=False, kill_habilitado=False)
         _sandbox_do_shell = "ORACLE_SANDBOX" in os.environ
+        _kill_do_shell = "OPS_KILL_PKG_VERSAO" in os.environ
         _proximo = "falhou"
         try:
             _proximo, _ESTADO_ENV["falha"], _ESTADO_ENV["sombreadas"], _ESTADO_ENV["malformadas"] = (
@@ -83,6 +95,9 @@ with _ESTADO_ENV["lock"]:
         finally:
             if not _sandbox_do_shell and os.environ.pop("ORACLE_SANDBOX", None) is not None:
                 _ESTADO_ENV["sandbox_descartada"] = True
+            if not _kill_do_shell and os.environ.pop("OPS_KILL_PKG_VERSAO", None) is not None:
+                _ESTADO_ENV["kill_descartada"] = True
+            _ESTADO_ENV["kill_habilitado"] = os.environ.get("OPS_KILL_PKG_VERSAO") == "2"
         _ESTADO_ENV["estado"] = _proximo  # só depois do descarte de ORACLE_SANDBOX
         _CARREGOU_AGORA = _proximo == "ok"
     _ESTADO_DESTA_SUBIDA, _FALHA_DESTA_SUBIDA = _ESTADO_ENV["estado"], _ESTADO_ENV["falha"]  # lidos sob o lock
@@ -127,6 +142,12 @@ if _CARREGOU_AGORA:  # avisos da carga: uma vez por processo, depois do basicCon
     if _ESTADO_ENV["malformadas"]:  # Achado 3: só a contagem
         _log_carga.warning(_AVISO_MALFORMADAS + str(_ESTADO_ENV["malformadas"]))
         print(f"[Sistema]: AVISO: {_AVISO_MALFORMADAS}{_ESTADO_ENV['malformadas']}", file=sys.stderr)
+    if _ESTADO_ENV.get("kill_descartada"):  # fase 2, D1
+        _log_carga.warning(_AVISO_KILL_DESCARTADA)
+        print(f"[Sistema]: AVISO: {_AVISO_KILL_DESCARTADA}", file=sys.stderr)
+    if _ESTADO_ENV.get("kill_habilitado"):  # fase 2, P4: toda subida com o kill habilitado
+        _log_carga.warning(_AVISO_KILL_HABILITADO)
+        print(f"[Sistema]: AVISO: {_AVISO_KILL_HABILITADO}", file=sys.stderr)
 
 # 1. Importando as Ferramentas de SO
 from tools.os_tools import (
@@ -146,13 +167,28 @@ from tools.oracle_dba import (
     APROVACAO_TTL_SEGUNDOS,
     MENSAGEM_RESULTADO_DESCONHECIDO,
     MENSAGEM_DESFECHO_NAO_CONFIRMADO,
+    HOST_COORDENADOR_LOCAL,
+    NOME_FERRAMENTA_KILL,
+    PORTA_COORDENADOR_LOCAL,
+    RESULTADO_ARGUMENTOS_INVALIDOS,
+    RESULTADO_KILL_DESABILITADO,
+    RESULTADO_ORACLE_SO_LOCAL,
+    TEXTO_HISTORICO_COM_DADO_DO_BANCO,
+    _registrar_erro_local,
+    criar_cliente_coordenador_local,
+    ferramenta_liberada_nuvem,
+    ler_argumentos_da_ferramenta,
+    ferramentas_do_coordenador,
+    kill_habilitado,
+    coordenador_e_local,
+    historico_tem_dado_do_banco,
 )
 
-# 3. Importando a Ferramenta de Nuvem (Gemini), o Notificador SMTP e a Busca RAG Local
-from tools.gemini_router import (
-    gemini_tools_schema,
-    analisar_log_complexo,
-)
+# 3. Gemini e Busca RAG Local
+# R1 ampliada V9 (docs/plans/1.11-R1-ampliada.md §5.2.2; decisão do responsável de 2026-11-24, opção a): o
+# analisar_log_complexo não é oferecido nem despachado ao coordenador. O import fica, sem uso, porque o
+# tools.gemini_router lê GEMINI_API_KEY no import e é a sonda do test_d63 (carga do .env antes de tools.*).
+import tools.gemini_router  # noqa: F401  (sonda da carga do .env; nenhuma função é usada)
 from tools.rag_search import (
     rag_tools_schema,
     buscar_script_interno,
@@ -161,14 +197,15 @@ from tools.rag_search import (
 
 def _inicializar_cliente_coordenador() -> tuple[OpenAI, str]:
     """
-    Conecta prioritariamente ao Ollama local (http://localhost:11434/v1 com qwen2.5:7b).
+    Conecta prioritariamente ao Ollama local (URL_COORDENADOR_LOCAL, http://127.0.0.1:11434/v1, com qwen2.5:7b),
+    pela fábrica única (K5: sem proxy e sem redirect).
     Caso o serviço local do Ollama não esteja ativo na máquina no momento do teste,
     ativa automaticamente o endpoint compatível OpenAI usando a GEMINI_API_KEY do .env.
     """
     try:
-        with socket.create_connection(("127.0.0.1", 11434), timeout=0.5):
+        with socket.create_connection((HOST_COORDENADOR_LOCAL, PORTA_COORDENADOR_LOCAL), timeout=0.5):
             return (
-                OpenAI(base_url="http://localhost:11434/v1", api_key="local"),
+                criar_cliente_coordenador_local(),
                 "qwen2.5:7b",
             )
     except OSError:
@@ -184,10 +221,10 @@ def _inicializar_cliente_coordenador() -> tuple[OpenAI, str]:
 
 client, MODELO = _inicializar_cliente_coordenador()
 
-# 4. Unificando o Catálogo de Ferramentas (Agora com 4 frentes: SO + Oracle + Gemini Cloud + RAG Local)
-todas_ferramentas = (
-    os_tools_schema + oracle_tools_schema + gemini_tools_schema + rag_tools_schema
-)
+# 4. Registro de Ferramentas da interface. O catálogo entregue ao LLM a cada chamada é
+# ferramentas_do_coordenador(todas_ferramentas, local): sem OPS_KILL_PKG_VERSAO=2 o kill sai, e com o coordenador
+# em nuvem só ficam as liberadas (lista de permissão; R1 ampliada V8; fase 2, decisao_c1.md §1.2 e §2.2-i).
+todas_ferramentas = os_tools_schema + oracle_tools_schema + rag_tools_schema
 
 # 5. System Prompt do Coordenador
 SYSTEM_PROMPT = """Você é o Agente Coordenador, o cérebro central de um sistema autônomo local de administração de TI e Banco de Dados.
@@ -198,7 +235,6 @@ Seus princípios absolutos são:
 DIRETRIZES DE COMPORTAMENTO E DELEGAÇÃO:
 - Nunca invente métricas, queries, logs ou estados do sistema. Chame as ferramentas.
 - Para problemas simples, responda no formato: Diagnóstico, Evidências, Possíveis Causas e Próximo Passo.
-- REGRA DE OURO: Se você extrair um plano de execução (DBMS_XPLAN) ou quando o usuário pedir uma análise profunda do plano de execução, acione IMEDIATAMENTE a ferramenta 'analisar_log_complexo' passando o plano extraído para terceirizar a análise. Não tente adivinhar.
 - SEGURANÇA (HITL): Apenas acione 'matar_sessao_oracle' quando o usuário solicitar explicitamente para matar ou encerrar uma sessão informando SID e SERIAL.
 """
 
@@ -248,6 +284,13 @@ def _exibir_desfecho_kill_cli(desfecho: dict) -> None:
         )
     elif desfecho["decisao"] != "APROVADO":
         print(f"[Sistema]: Intervenção NÃO aprovada ({desfecho['motivo']}). Nenhuma execução no banco.")
+    elif desfecho.get("motivo") == "KILL_DESABILITADO":
+        # Fase 2, decisao_c1.md §2.2-iii-b (tela): gate desligado depois do prompt.
+        print(
+            f"\033[91m[Sistema]: Intervenção aprovada por '{desfecho['aprovador']}', mas NÃO EXECUTADA: "
+            "encerramento desabilitado nesta instalação (OPS_KILL_PKG_VERSAO); nenhuma consulta nem chamada "
+            "à conta KILL.\033[0m"
+        )
     elif desfecho.get("motivo") == "FALHA_LOG_APROVACAO":
         print(
             f"\033[91m[Sistema]: Intervenção APROVADA por '{desfecho['aprovador']}', mas NÃO EXECUTADA: "
@@ -311,16 +354,23 @@ def executar_agente(prompt_usuario: str) -> None:
         {"role": "user", "content": prompt_usuario},
     ]
 
+    # R1 ampliada V8 (decisao_c1.md §3.1): o sinal é o base_url do próprio cliente que envia.
+    local = coordenador_e_local(client)
+
     # Loop de Tool Calling
     max_passos = 6
     passo = 0
 
     while passo < max_passos:
         passo += 1
+        # V8, trava de histórico (decisao_c1.md §3.4): dado do banco nunca vai à nuvem.
+        if not local and historico_tem_dado_do_banco(messages):
+            print(f"\n[Sistema]: {TEXTO_HISTORICO_COM_DADO_DO_BANCO}")
+            return
         response = client.chat.completions.create(
             model=MODELO,
             messages=messages,
-            tools=todas_ferramentas,
+            tools=ferramentas_do_coordenador(todas_ferramentas, local),
         )
 
         mensagem_resposta = response.choices[0].message
@@ -334,17 +384,24 @@ def executar_agente(prompt_usuario: str) -> None:
 
         for tool_call in mensagem_resposta.tool_calls:
             nome_funcao = tool_call.function.name
-            argumentos = (
-                json.loads(tool_call.function.arguments)
-                if tool_call.function.arguments
-                else {}
-            )
+            # KM2 (plano 9.10.2, item 6): argumento malformado não derruba o laço; recusa fixa ao LLM e segue.
+            argumentos = ler_argumentos_da_ferramenta(nome_funcao, tool_call.function.arguments)
+            if argumentos is None:
+                print(f"[Sistema]: Argumentos inválidos para '{nome_funcao}'; nada foi executado.")
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": nome_funcao,
+                        "content": RESULTADO_ARGUMENTOS_INVALIDOS,
+                    }
+                )
+                continue
             print(f"[Sistema]: O Agente decidiu executar '{nome_funcao}'...")
 
             # 2. Auditoria: Registra a intenção do LLM (O que ele decidiu fazer)
             if (
                 nome_funcao.startswith("coletar_")
-                or nome_funcao == "analisar_log_complexo"
                 or nome_funcao == "matar_sessao_oracle"
                 or nome_funcao == "buscar_script_interno"
             ):
@@ -352,8 +409,21 @@ def executar_agente(prompt_usuario: str) -> None:
 
             # 3. Roteamento Dinâmico (Switch Case / If-Elif) com Barreira HITL + Notificador SMTP
             try:
+                # V8, despacho (decisao_c1.md §3.3; fase 2, K2), antes de toda rota: o LLM pode chamar ferramenta que
+                # não foi oferecida; com o coordenador em nuvem, toda ferramenta não liberada (Oracle, RAG, nome sem
+                # classificação) devolve a recusa fixa, sem consultar nada.
+                if not local and not ferramenta_liberada_nuvem(nome_funcao):
+                    resultado_tool = RESULTADO_ORACLE_SO_LOCAL
+
+                # Gate de produção do kill (fase 2, decisao_c1.md §2.2-ii): sem OPS_KILL_PKG_VERSAO=2, recusa fixa;
+                # conduzir_kill_hitl não é chamado (sem pré-consulta e sem prompt).
+                elif nome_funcao == NOME_FERRAMENTA_KILL and not kill_habilitado():
+                    logging.warning("KILL BLOQUEADO NO DESPACHO (CLI): KILL_DESABILITADO (OPS_KILL_PKG_VERSAO)")
+                    print("[Sistema]: Encerramento de sessão indisponível nesta instalação (OPS_KILL_PKG_VERSAO).")
+                    resultado_tool = RESULTADO_KILL_DESABILITADO
+
                 # Rotas do Windows
-                if nome_funcao == "coletar_metricas_hardware":
+                elif nome_funcao == "coletar_metricas_hardware":
                     resultado_tool = coletar_metricas_hardware()
                 elif nome_funcao == "verificar_espaco_disco":
                     resultado_tool = verificar_espaco_disco(
@@ -378,16 +448,6 @@ def executar_agente(prompt_usuario: str) -> None:
                     )
                     resultado_tool = desfecho["resultado_tool"]
                     _exibir_desfecho_kill_cli(desfecho)
-
-                # Rota: Nuvem / Gemini
-                elif nome_funcao == "analisar_log_complexo":
-                    resultado_tool = analisar_log_complexo(
-                        dados_brutos=argumentos.get("dados_brutos", ""),
-                        contexto_solicitacao=argumentos.get(
-                            "contexto_solicitacao",
-                            "Análise de performance solicitada pelo DBA.",
-                        ),
-                    )
 
                 # Rota: Base de Conhecimento RAG Local (Scripts DBA Homologados)
                 elif nome_funcao == "buscar_script_interno":
@@ -415,14 +475,15 @@ def executar_agente(prompt_usuario: str) -> None:
                         ensure_ascii=False,
                     )
                 else:
+                    # R1 ampliada V3 (decisao_c1.md §2.3): ao LLM só o tipo; o texto cru vai ao log local.
+                    _registrar_erro_local(nome_funcao, "erro_execucao", exc=e)
                     resultado_tool = json.dumps(
-                        {"erro_execucao": str(e)}, ensure_ascii=False
+                        {"erro_execucao": type(e).__name__}, ensure_ascii=False
                     )
 
             # 4. Auditoria: Registra a evidência/resultado retornado pelo banco ou pelo bloqueio HITL
             if (
                 nome_funcao.startswith("coletar_")
-                or nome_funcao == "analisar_log_complexo"
                 or nome_funcao == "matar_sessao_oracle"
                 or nome_funcao == "buscar_script_interno"
             ):
@@ -439,6 +500,9 @@ def executar_agente(prompt_usuario: str) -> None:
             )
 
     # Caso atinja o limite de passos de ferramentas, gera o laudo final com o que foi coletado
+    if not local and historico_tem_dado_do_banco(messages):
+        print(f"\n[Sistema]: {TEXTO_HISTORICO_COM_DADO_DO_BANCO}")
+        return
     resposta_final = client.chat.completions.create(
         model=MODELO,
         messages=messages,
