@@ -21,7 +21,7 @@ git -C <raiz> archive --format=tar -o <tmp>.tar 673ceb1 IA/PERSONAL_AGENT
 tar -xf <tmp>.tar -C <pasta>
 ```
 
-Raiz do repositório git: `C:/Users/Frederich/OneDrive - Startup Dados e Sistemas Ltda - EPP/Workspace`
+Raiz do repositório git: `C:/Users/<usuario>/OneDrive - <organizacao>/Workspace`
 
 | Cópia | Rev | Arquivos extraídos | `.env` herdado |
 |---|---|---|---|

@@ -9,7 +9,7 @@
 - Shell: Git Bash (comandos em Bash); `cygpath` para conversão de caminhos
 - Python: `pythoncore-3.15-64` (caminho de site-packages observado no pytest)
 - Verificador: `verifica_crlf.py` no scratchpad (`crlf_1_11`), executado com `python -I`, `PYTHONDONTWRITEBYTECODE=1` e `env -u ORACLE_SANDBOX`
-- Projeto real: `c:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT`
+- Projeto real: `c:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT`
 - Clone de simulação: `<scratchpad>\crlf_1_11\clone\IA\PERSONAL_AGENT` (sparse-checkout, com commit de simulação que adiciona `.gitattributes` com `*.sql text eol=lf`)
 
 **Escopo do "antes" e do "depois":**
@@ -26,7 +26,7 @@
 **Comando:**
 
 ```bash
-cd "/c/Users/Frederich/OneDrive - Startup Dados e Sistemas Ltda - EPP/Workspace/IA/PERSONAL_AGENT" && env -u ORACLE_SANDBOX PYTHONDONTWRITEBYTECODE=1 python -I "$W/verifica_crlf.py" "$P"; echo "EXIT=$?"
+cd "/c/Users/<usuario>/OneDrive - <organizacao>/Workspace/IA/PERSONAL_AGENT" && env -u ORACLE_SANDBOX PYTHONDONTWRITEBYTECODE=1 python -I "$W/verifica_crlf.py" "$P"; echo "EXIT=$?"
 ```
 
 (`$W` = scratchpad `crlf_1_11`; `$P` = projeto real, convertido com `cygpath -u`.)
@@ -34,7 +34,7 @@ cd "/c/Users/Frederich/OneDrive - Startup Dados e Sistemas Ltda - EPP/Workspace/
 **Saída bruta:**
 
 ```
-RAIZ=C:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT
+RAIZ=C:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT
 core.autocrlf=true
 check-attr: scripts/procedure_t7.sql: text: unspecified | scripts/procedure_t7.sql: eol: unspecified
 CRLF 128 db/ops_kill.sql
@@ -74,7 +74,7 @@ env -u ORACLE_SANDBOX PYTHONDONTWRITEBYTECODE=1 python -I "$W/verifica_crlf.py" 
 **Saída bruta:**
 
 ```
-RAIZ=C:\Users\Frederich\AppData\Local\Temp\claude\db29872ef7336ab6\474bbbe3-4d4e-49c8-bd9d-de39a3da8825\scratchpad\crlf_1_11\clone\IA\PERSONAL_AGENT
+RAIZ=C:\Users\<usuario>\AppData\Local\Temp\claude\db29872ef7336ab6\474bbbe3-4d4e-49c8-bd9d-de39a3da8825\scratchpad\crlf_1_11\clone\IA\PERSONAL_AGENT
 core.autocrlf=true
 check-attr: scripts/procedure_t7.sql: text: set | scripts/procedure_t7.sql: eol: lf
 CRLF 128 db/ops_kill.sql
@@ -158,7 +158,7 @@ env -u ORACLE_SANDBOX PYTHONDONTWRITEBYTECODE=1 python -I "$W/verifica_crlf.py" 
 **Saída bruta:**
 
 ```
-RAIZ=C:\Users\Frederich\AppData\Local\Temp\claude\db29872ef7336ab6\474bbbe3-4d4e-49c8-bd9d-de39a3da8825\scratchpad\crlf_1_11\clone\IA\PERSONAL_AGENT
+RAIZ=C:\Users\<usuario>\AppData\Local\Temp\claude\db29872ef7336ab6\474bbbe3-4d4e-49c8-bd9d-de39a3da8825\scratchpad\crlf_1_11\clone\IA\PERSONAL_AGENT
 core.autocrlf=true
 check-attr: scripts/procedure_t7.sql: text: set | scripts/procedure_t7.sql: eol: lf
 TOTAL_SQL=75 COM_CRLF=0
@@ -189,7 +189,7 @@ cd "$W/clone/IA/PERSONAL_AGENT" && env -u ORACLE_SANDBOX PYTHONDONTWRITEBYTECODE
 .........................................................ssssssss        [100%]
 ============================== warnings summary ===============================
 ..\..\..\..\..\..\..\..\..\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
     if asyncio.iscoroutinefunction(func):
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
@@ -206,7 +206,7 @@ EXIT=0
 **Comando:**
 
 ```bash
-cd "c:/Users/Frederich/OneDrive - Startup Dados e Sistemas Ltda - EPP/Workspace/IA/PERSONAL_AGENT" && git status --short .; echo "EXIT=$?"
+cd "c:/Users/<usuario>/OneDrive - <organizacao>/Workspace/IA/PERSONAL_AGENT" && git status --short .; echo "EXIT=$?"
 ```
 
 **Saída bruta:**

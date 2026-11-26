@@ -8,7 +8,7 @@ inicio=16:40:38
 .........................................................ssssssss        [100%]
 ============================== warnings summary ===============================
 ..\..\..\..\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
     if asyncio.iscoroutinefunction(func):
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
@@ -17,7 +17,7 @@ exit_code=0 tempo=22s
 
 === 4. git show --stat HEAD
 commit 3eb65a664094b3696fc1bf4f320a7922f842adf3
-Author: frederichmp <frederichmartins@gmail.com>
+Author: frederichmp <<usuario>martins@gmail.com>
 Date:   Tue Nov 17 16:40:21 2026 -0300
 
     fix(web): rerun apos aprovacao + smoke AppTest
@@ -40,7 +40,7 @@ Date:   Tue Nov 17 16:40:21 2026 -0300
 
 === 4b. git show HEAD -- app.py
 commit 3eb65a664094b3696fc1bf4f320a7922f842adf3
-Author: frederichmp <frederichmartins@gmail.com>
+Author: frederichmp <<usuario>martins@gmail.com>
 Date:   Tue Nov 17 16:40:21 2026 -0300
 
     fix(web): rerun apos aprovacao + smoke AppTest

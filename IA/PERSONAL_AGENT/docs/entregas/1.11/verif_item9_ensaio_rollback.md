@@ -51,7 +51,7 @@ python -I "$W/verifica_crlf.py" "<projeto real>"
 Saída:
 
 ```
-RAIZ=C:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT
+RAIZ=C:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT
 core.autocrlf=true
 check-attr: scripts/procedure_t7.sql: text: set | scripts/procedure_t7.sql: eol: lf
 TOTAL_SQL=75 COM_CRLF=0
@@ -80,7 +80,7 @@ Saída (final):
 .........................................................ssssssss        [100%]
 ============================== warnings summary ===============================
 ..\..\..\..\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
     if asyncio.iscoroutinefunction(func):
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
@@ -208,8 +208,8 @@ Saída:
 
 ```
 ============================= test session starts =============================
-platform win32 -- Python 3.15.2, pytest-9.2.0, pluggy-1.7.0 -- C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\python.exe
-rootdir: C:\Users\Frederich\AppData\Local\Temp\claude\db29872ef7336ab6\474bbbe3-4d4e-49c8-bd9d-de39a3da8825\scratchpad\crlf_1_11\clone\IA\PERSONAL_AGENT
+platform win32 -- Python 3.15.2, pytest-9.2.0, pluggy-1.7.0 -- C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\python.exe
+rootdir: C:\Users\<usuario>\AppData\Local\Temp\claude\db29872ef7336ab6\474bbbe3-4d4e-49c8-bd9d-de39a3da8825\scratchpad\crlf_1_11\clone\IA\PERSONAL_AGENT
 configfile: pytest.ini
 plugins: anyio-4.16.0, langsmith-0.14.17
 collecting ... collected 39 items
@@ -256,7 +256,7 @@ tests/test_oracle_kill.py::test_sandbox_privilegio_negativo_startup_kill SKIPPED
 
 ============================== warnings summary ===============================
 ..\..\..\..\..\..\..\..\..\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
     if asyncio.iscoroutinefunction(func):
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html

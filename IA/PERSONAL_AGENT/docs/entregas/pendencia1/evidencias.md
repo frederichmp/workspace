@@ -8,13 +8,13 @@ Horários em -03:00 (fuso do Windows: E. South America Standard Time), todos de 
 
 ## 1. Resposta
 
-A tag foi criada às **23:06:14.82**, e os branches foram removidos entre **23:06:14.9 e 23:07:18.5**. Os comandos foram colados num **console PowerShell interativo** da conta Windows `Frederich` e estão no histórico do PSReadLine, linhas 327 a 345. Isso aconteceu cerca de 5 minutos depois do commit do P2 (`3f2db49`, 23:01:31). Não foi sessão do Claude Code nem o Codex. Os mesmos comandos também removeram `docs/protocolo` e `´` e descartaram o stash. Nada se perdeu.
+A tag foi criada às **23:06:14.82**, e os branches foram removidos entre **23:06:14.9 e 23:07:18.5**. Os comandos foram colados num **console PowerShell interativo** da conta Windows `<usuario>` e estão no histórico do PSReadLine, linhas 327 a 345. Isso aconteceu cerca de 5 minutos depois do commit do P2 (`3f2db49`, 23:01:31). Não foi sessão do Claude Code nem o Codex. Os mesmos comandos também removeram `docs/protocolo` e `´` e descartaram o stash. Nada se perdeu.
 
 | # | Conclusão | Classe | Base |
 |---|---|---|---|
 | C1 | `ref/item1-v1-nao-aceito` é tag **lightweight**: o ref aponta direto para o commit `8fd66781…` (`cat-file -t` = `commit`), sem objeto tag. Não há tagger nem data de tag. O `creatordate` (00:03:44) é a data do commit do stash, não da tag. | COMPROVADO | §3.1, §3.2 |
 | C2 | Criada às **23:06:14.82**: CreationTime = LastWriteTime do ref solto `.git/refs/tags/ref/item1-v1-nao-aceito`. Não existe `.git/packed-refs`, então esse arquivo é a única cópia do ref. | COMPROVADO (metadado NTFS) | §3.5 |
-| C3 | Os comandos de criação da tag e de remoção dos branches estão literais no histórico do **PowerShell interativo** (PSReadLine, `ConsoleHost_history.txt`) da conta `Frederich`. Aparecem em dois blocos multilinha idênticos (L327–333 e L339–345) e em três comandos avulsos entre eles (L334, L335, L337). | COMPROVADO | §4.1 |
+| C3 | Os comandos de criação da tag e de remoção dos branches estão literais no histórico do **PowerShell interativo** (PSReadLine, `ConsoleHost_history.txt`) da conta `<usuario>`. Aparecem em dois blocos multilinha idênticos (L327–333 e L339–345) e em três comandos avulsos entre eles (L334, L335, L337). | COMPROVADO | §4.1 |
 | C4 | Quem executou: o **responsável, à mão**, colando blocos no console. Só entrada interativa (teclado ou colagem) vai para o PSReadLine. O mesmo usuário escrevia na sessão `6a0fdc5e` às 23:05:03 e 23:05:48. Não há rastro de automação de tela na janela. O histórico prova a conta e o console, não a pessoa. | FORTE CORRELAÇÃO | §4.1, §4.3, §4.4 |
 | C5 | **Nenhuma sessão do Claude Code** executou esses comandos. Nenhuma transcrição do projeto tem `git tag`, `branch -d/-D` ou `stash drop` executados na janela. A `442f9f24` terminou às 23:02:18. A `6a0fdc5e` só leu arquivos e rodou scripts de análise e `git log`. Esta sessão só recebeu a 1ª mensagem às 23:10:09. As ferramentas do Claude Code não gravam no PSReadLine (controle em §4.5). | FORTE CORRELAÇÃO | §4.3, §4.5 |
 | C6 | **O Codex não participou.** Sua última escrita em `refs/codex` foi às 10:44:15.99, 12 h 22 min antes da tag. As 3 `refs/codex` são idênticas nos bundles das 20:26 e das 23:08. Nenhum arquivo do `~/.codex` foi gravado entre 23:05:30 e 23:08:30, e o último log de sessão do Codex é das 10:38:49. | FORTE CORRELAÇÃO | §2, §4.2, §4.4 |
@@ -396,8 +396,8 @@ Só as linhas de git; as demais aparecem como `<omitida>`. A crase final é a ma
 
 ```text
  314: <omitida: não-git, 5 caracteres>
- 315: git -C "C:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\"  bundle create 'C:\Users\Frederich\Downloads\personal_agent_8810b6e.bundle' --all
- 316: git bundle verify "C:\Users\Frederich\Downloads\personal_agent_8810b6e.bundle"
+ 315: git -C "C:\Users\<usuario>\OneDrive - <organizacao>\Workspace\"  bundle create 'C:\Users\<usuario>\Downloads\personal_agent_8810b6e.bundle' --all
+ 316: git bundle verify "C:\Users\<usuario>\Downloads\personal_agent_8810b6e.bundle"
  317: git log -1 --format="%h %ad %an %s" --date=iso 54f813c`
  318: git merge-base --is-ancestor 54f813c main; echo "ancestral_main=$LASTEXITCODE"`
  319: git stash list`
@@ -429,8 +429,8 @@ Só as linhas de git; as demais aparecem como `<omitida>`. A crase final é a ma
  345: git branch --list; git stash list
  346: git fsck --no-dangling`
  347: git for-each-ref --format="%(refname) %(objectname:short)"`
- 348: git bundle create 'C:\Users\Frederich\Downloads\personal_agent_3f2db49.bundle' --all`
- 349: git bundle verify 'C:\Users\Frederich\Downloads\personal_agent_3f2db49.bundle'
+ 348: git bundle create 'C:\Users\<usuario>\Downloads\personal_agent_3f2db49.bundle' --all`
+ 349: git bundle verify 'C:\Users\<usuario>\Downloads\personal_agent_3f2db49.bundle'
 ```
 
 ### A.7 Bundles (`git bundle list-heads`, hash abreviado)

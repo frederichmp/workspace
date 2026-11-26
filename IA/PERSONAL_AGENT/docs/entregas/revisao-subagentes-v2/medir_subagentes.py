@@ -7,7 +7,7 @@ Imprime só agregados e caminhos lidos; nunca conteúdo de arquivo.
 import argparse, collections, glob, json, os, statistics as st
 
 PADRAO = os.path.join(os.environ.get("USERPROFILE", ""), ".claude", "projects",
-                      "c--Users-Frederich-OneDrive---Startup-Dados-e-Sistemas-Ltda---EPP-Workspace-IA-PERSONAL-AGENT")
+                      "c--Users-<usuario>-OneDrive---<organizacao>-Workspace-IA-PERSONAL-AGENT")
 
 
 def medir(arquivo):

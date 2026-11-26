@@ -101,5 +101,5 @@ Todos os itens dos passos 0 a 4 e dos greps extras estão OK. A contagem é 226 
 
 ## Saídas e limpeza
 
-- Saída desta verificação: `c:/Users/Frederich/OneDrive - Startup Dados e Sistemas Ltda - EPP/Workspace/IA/PERSONAL_AGENT/docs/entregas/isolamento_env/verificacao_fase3_passo4.md`.
+- Saída desta verificação: `c:/Users/<usuario>/OneDrive - <organizacao>/Workspace/IA/PERSONAL_AGENT/docs/entregas/isolamento_env/verificacao_fase3_passo4.md`.
 - Temporários em `%TEMP%` (cópias `427adfc` e `673ceb1`, tars, `.env` fictícios, saídas brutas do pytest), removidos ao final.

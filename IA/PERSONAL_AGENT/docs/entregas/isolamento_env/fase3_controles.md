@@ -13,10 +13,10 @@ FFFFFF                                                                   [100%]
 ================================== FAILURES ===================================
 ________________ test_b4_web_chave_nova_entre_reruns_nao_entra ________________
 
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-109/test_b4_web_chave_nova_entre_r0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-109/test_b4_web_chave_nova_entre_r0')
 
 >       assert dados["sentinela_tardia"] == "AUSENTE", resumo
-E       AssertionError: por_run=[{'sandbox': 'AUSENTE', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': []}, {'sandbox': 'AUSENTE', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': '1', 'excecoes': []}], chamadas=[{'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}]
+E       AssertionError: por_run=[{'sandbox': 'AUSENTE', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': []}, {'sandbox': 'AUSENTE', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': '1', 'excecoes': []}], chamadas=[{'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}]
 E       assert '1' == 'AUSENTE'
 E         
 E         - AUSENTE
@@ -26,10 +26,10 @@ tests\test_carga_env_entrada.py:218: AssertionError
 __________________ test_c1_nul_nao_deixa_oracle_sandbox[cli] __________________
 
 entrada = 'cli'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-109/test_c1_nul_nao_deixa_oracle_s0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-109/test_c1_nul_nao_deixa_oracle_s0')
 
 >       assert [r["sandbox"] for r in dados["por_run"]] == ["AUSENTE", "AUSENTE"], resumo
-E       AssertionError: por_run=[{'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['ValueError: embedded null character']}, {'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['ValueError: embedded null character']}], chamadas=[{'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}]
+E       AssertionError: por_run=[{'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['ValueError: embedded null character']}, {'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['ValueError: embedded null character']}], chamadas=[{'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}]
 E       assert ['1', '1'] == ['AUSENTE', 'AUSENTE']
 E         
 E         At index 0 diff: '1' != 'AUSENTE'
@@ -39,10 +39,10 @@ tests\test_carga_env_entrada.py:232: AssertionError
 __________________ test_c1_nul_nao_deixa_oracle_sandbox[web] __________________
 
 entrada = 'web'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-109/test_c1_nul_nao_deixa_oracle_s1')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-109/test_c1_nul_nao_deixa_oracle_s1')
 
 >       assert [r["sandbox"] for r in dados["por_run"]] == ["AUSENTE", "AUSENTE"], resumo
-E       AssertionError: por_run=[{'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['Exception: embedded null character']}, {'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['Exception: embedded null character']}], chamadas=[{'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}]
+E       AssertionError: por_run=[{'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['Exception: embedded null character']}, {'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['Exception: embedded null character']}], chamadas=[{'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}]
 E       assert ['1', '1'] == ['AUSENTE', 'AUSENTE']
 E         
 E         At index 0 diff: '1' != 'AUSENTE'
@@ -52,10 +52,10 @@ tests\test_carga_env_entrada.py:232: AssertionError
 _____________ test_c2a_rerun_apos_falha_nao_promove_a_shell[web] ______________
 
 entrada = 'web'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-109/test_c2a_rerun_apos_falha_nao_0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-109/test_c2a_rerun_apos_falha_nao_0')
 
 >       assert dados["por_run"][1]["sandbox"] == "AUSENTE", resumo
-E       AssertionError: por_run=[{'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['Exception: embedded null character']}, {'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': []}], chamadas=[{'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}]
+E       AssertionError: por_run=[{'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['Exception: embedded null character']}, {'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': []}], chamadas=[{'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}]
 E       assert '1' == 'AUSENTE'
 E         
 E         - AUSENTE
@@ -65,10 +65,10 @@ tests\test_carga_env_entrada.py:247: AssertionError
 _____________ test_c2a_rerun_apos_falha_nao_promove_a_shell[cli] ______________
 
 entrada = 'cli'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-109/test_c2a_rerun_apos_falha_nao_1')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-109/test_c2a_rerun_apos_falha_nao_1')
 
 >       assert dados["por_run"][1]["sandbox"] == "AUSENTE", resumo
-E       AssertionError: por_run=[{'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['ValueError: embedded null character']}, {'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': []}], chamadas=[{'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}]
+E       AssertionError: por_run=[{'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': ['ValueError: embedded null character']}, {'sandbox': '1', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': []}], chamadas=[{'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}]
 E       assert '1' == 'AUSENTE'
 E         
 E         - AUSENTE
@@ -77,12 +77,12 @@ E         + 1
 tests\test_carga_env_entrada.py:247: AssertionError
 _____________________ test_r_f2_1_duas_sessoes_uma_carga ______________________
 
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-109/test_r_f2_1_duas_sessoes_uma_c0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-109/test_r_f2_1_duas_sessoes_uma_c0')
 
 >       assert len(dados["chamadas"]) == 1, resumo
-E       AssertionError: sandbox=AUSENTE, chamadas=[{'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}], por_run=[{'sandbox': 'AUSENTE', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': []}]
+E       AssertionError: sandbox=AUSENTE, chamadas=[{'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}, {'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}], por_run=[{'sandbox': 'AUSENTE', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'excecoes': []}]
 E       assert 2 == 1
-E        +  where 2 = len([{'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override'...ho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}])
+E        +  where 2 = len([{'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override'...ho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.UNyZGN3i8K\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False}])
 
 tests\test_carga_env_entrada.py:261: AssertionError
 ============================== warnings summary ===============================
@@ -126,22 +126,22 @@ FF                                                                       [100%]
 ____________ test_a3_src_tools_antes_da_entrada_mesmo_destino[cli] ____________
 
 entrada = 'cli'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-115/test_a3_src_tools_antes_da_ent0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-115/test_a3_src_tools_antes_da_ent0')
 
 >       assert destinos["src"] is not None and Path(destinos["src"]) == esperado, resumo
-E       AssertionError: destino_log={'src': 'C:\\AgentDBA\\logs\\kill_approval.log', 'tools': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\pytest-of-Frederich\\pytest-115\\test_a3_src_tools_antes_da_ent0\\dir_env\\kill_approval.log'}, esperado=C:\Users\Frederich\AppData\Local\Temp\pytest-of-Frederich\pytest-115\test_a3_src_tools_antes_da_ent0\dir_env\kill_approval.log, chamadas=[{'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.1joxfvmnKl\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False, 'src_oracle_dba_importado': True}]
-E       assert ('C:\\AgentDBA\\logs\\kill_approval.log' is not None and WindowsPath('C:/AgentDBA/logs/kill_approval.log') == WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-115/test_a3_src_tools_antes_da_ent0/dir_env/kill_approval.log'))
+E       AssertionError: destino_log={'src': 'C:\\AgentDBA\\logs\\kill_approval.log', 'tools': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\pytest-of-<usuario>\\pytest-115\\test_a3_src_tools_antes_da_ent0\\dir_env\\kill_approval.log'}, esperado=C:\Users\<usuario>\AppData\Local\Temp\pytest-of-<usuario>\pytest-115\test_a3_src_tools_antes_da_ent0\dir_env\kill_approval.log, chamadas=[{'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.1joxfvmnKl\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False, 'src_oracle_dba_importado': True}]
+E       assert ('C:\\AgentDBA\\logs\\kill_approval.log' is not None and WindowsPath('C:/AgentDBA/logs/kill_approval.log') == WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-115/test_a3_src_tools_antes_da_ent0/dir_env/kill_approval.log'))
 E        +  where WindowsPath('C:/AgentDBA/logs/kill_approval.log') = Path('C:\\AgentDBA\\logs\\kill_approval.log')
 
 tests\test_carga_env_entrada.py:304: AssertionError
 ____________ test_a3_src_tools_antes_da_entrada_mesmo_destino[web] ____________
 
 entrada = 'web'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-115/test_a3_src_tools_antes_da_ent1')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-115/test_a3_src_tools_antes_da_ent1')
 
 >       assert destinos["src"] is not None and Path(destinos["src"]) == esperado, resumo
-E       AssertionError: destino_log={'src': 'C:\\AgentDBA\\logs\\kill_approval.log', 'tools': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\pytest-of-Frederich\\pytest-115\\test_a3_src_tools_antes_da_ent1\\dir_env\\kill_approval.log'}, esperado=C:\Users\Frederich\AppData\Local\Temp\pytest-of-Frederich\pytest-115\test_a3_src_tools_antes_da_ent1\dir_env\kill_approval.log, chamadas=[{'caminho': 'C:\\Users\\Frederich\\AppData\\Local\\Temp\\tmp.1joxfvmnKl\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False, 'src_oracle_dba_importado': True}]
-E       assert ('C:\\AgentDBA\\logs\\kill_approval.log' is not None and WindowsPath('C:/AgentDBA/logs/kill_approval.log') == WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-115/test_a3_src_tools_antes_da_ent1/dir_env/kill_approval.log'))
+E       AssertionError: destino_log={'src': 'C:\\AgentDBA\\logs\\kill_approval.log', 'tools': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\pytest-of-<usuario>\\pytest-115\\test_a3_src_tools_antes_da_ent1\\dir_env\\kill_approval.log'}, esperado=C:\Users\<usuario>\AppData\Local\Temp\pytest-of-<usuario>\pytest-115\test_a3_src_tools_antes_da_ent1\dir_env\kill_approval.log, chamadas=[{'caminho': 'C:\\Users\\<usuario>\\AppData\\Local\\Temp\\tmp.1joxfvmnKl\\copia\\IA\\PERSONAL_AGENT\\.env', 'override': False, 'src_oracle_dba_importado': True}]
+E       assert ('C:\\AgentDBA\\logs\\kill_approval.log' is not None and WindowsPath('C:/AgentDBA/logs/kill_approval.log') == WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-115/test_a3_src_tools_antes_da_ent1/dir_env/kill_approval.log'))
 E        +  where WindowsPath('C:/AgentDBA/logs/kill_approval.log') = Path('C:\\AgentDBA\\logs\\kill_approval.log')
 
 tests\test_carga_env_entrada.py:304: AssertionError
@@ -177,7 +177,7 @@ FFFFF                                                                    [100%]
 __________________ test_b3_nomes_sombreados_sem_valores[cli] __________________
 
 entrada = 'cli'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-118/test_b3_nomes_sombreados_sem_v0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-118/test_b3_nomes_sombreados_sem_v0')
 
 >       assert len(sombreados) == 1, resumo
 E       AssertionError: avisos=[], stderr='', por_run=[{'sandbox': 'AUSENTE', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'oracle_dsn_do_shell': True, 'excecoes': [], 'warning_tela': [], 'tela_texto': ''}]
@@ -188,7 +188,7 @@ tests\test_carga_env_entrada.py:350: AssertionError
 __________________ test_b3_nomes_sombreados_sem_valores[web] __________________
 
 entrada = 'web'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-118/test_b3_nomes_sombreados_sem_v1')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-118/test_b3_nomes_sombreados_sem_v1')
 
 >       assert len(sombreados) == 1, resumo
 E       AssertionError: avisos=[], stderr="2026-11-18 14:09:11.909 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n", por_run=[{'sandbox': 'AUSENTE', 'sentinela': 'AUSENTE', 'sentinela_fase3': '1', 'sentinela_tardia': 'AUSENTE', 'oracle_dsn_do_shell': True, 'excecoes': [], 'warning_tela': ['Conecte a VPN para visualizar o Top SQL da instância Oracle.', '**Ollama Local (11434):** Offline\n\n⚡ *Failover Ativo:* `gemini-3.1-flash-lite-preview`'], 'tela_texto': 'SpecialBlock(\n    type=\'main\',\n    children={\n        0: Markdown(),\n        1: Block(\n            type=\'f
@@ -198,7 +198,7 @@ E        +  where 0 = len([])
 tests\test_carga_env_entrada.py:350: AssertionError
 _________________________ test_c3_cli_aviso_em_stderr _________________________
 
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-118/test_c3_cli_aviso_em_stderr0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-118/test_c3_cli_aviso_em_stderr0')
 
 >       assert dados["stderr"].count(_PREFIXO_CLI + _TEXTO_DESCARTE) == 1, resumo
 E       AssertionError: stderr='', avisos=['ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell.']
@@ -209,7 +209,7 @@ E        +    where <built-in method count of str object at 0x00007FFF08EB5828> 
 tests\test_carga_env_entrada.py:372: AssertionError
 _____________________ test_c3_cli_aviso_com_raiz_em_error _____________________
 
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-118/test_c3_cli_aviso_com_raiz_em_0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-118/test_c3_cli_aviso_com_raiz_em_0')
 
 >       assert _TEXTO_DESCARTE in dados["stderr"], resumo
 E       AssertionError: stderr='', avisos=[]
@@ -218,7 +218,7 @@ E       assert 'ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quand
 tests\test_carga_env_entrada.py:381: AssertionError
 ____________________ test_c3_web_st_warning_em_todo_rerun _____________________
 
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-118/test_c3_web_st_warning_em_todo0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-118/test_c3_web_st_warning_em_todo0')
 
 >           assert any(_TEXTO_DESCARTE in w for w in run["warning_tela"]), resumo
 E           AssertionError: por_run=[['Conecte a VPN para visualizar o Top SQL da instância Oracle.', '**Ollama Local (11434):** Offline\n\n⚡ *Failover Ativo:* `gemini-3.1-flash-lite-preview`'], ['Conecte a VPN para visualizar o Top SQL da instância Oracle.', '**Ollama Local (11434):** Offline\n\n⚡ *Failover Ativo:* `gemini-3.1-flash-lite-preview`']]
@@ -268,7 +268,7 @@ mutação d61a_remove_and_v: 1 substituição(ões) em tests/conftest.py; CRLF=T
 F                                                                        [100%]
 ================================== FAILURES ===================================
 _________ test_credenciais_sandbox_valor_vazio_ou_sem_valor_nao_entra _________
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-127/test_credenciais_sandbox_valor0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-127/test_credenciais_sandbox_valor0')
 >       assert credenciais_sandbox_do_env(arq, "1", {}) == {"ORACLE_USER_KILL": "kill_ficticio"}
 E       AssertionError: assert {'ORACLE_DSN'...ill_ficticio'} == {'ORACLE_USER...ill_ficticio'}
 E         
@@ -290,7 +290,7 @@ mutação d61b_load_dotenv_override: 1 substituição(ões) em tests/conftest.py
 FF                                                                       [100%]
 ================================== FAILURES ===================================
 _____ test_ligacao_real_do_conftest_nao_carrega_env_sem_operador[ausente] _____
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-129/test_ligacao_real_do_conftest_0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-129/test_ligacao_real_do_conftest_0')
 sandbox_shell = None
 >       assert dados["presentes"] == [], f"chaves do .env fictício entraram em os.environ: {dados['presentes']}"
 E       AssertionError: chaves do .env fictício entraram em os.environ: ['ORACLE_DSN', 'ORACLE_USER_READ', 'ORACLE_PASSWORD_READ', 'ORACLE_USER_MUT', 'ORACLE_PASSWORD_MUT', 'ORACLE_USER_DIAG', 'ORACLE_PASSWORD_DIAG', 'ORACLE_USER_KILL', 'ORACLE_PASSWORD_KILL', 'ORACLE_CALL_TIMEOUT_MS', 'ORACLE_SELECT_LIMIT', 'ORACLE_LOB_LIMIT', 'SENTINELA_D61_A', 'SENTINELA_D61_B']
@@ -300,7 +300,7 @@ E         Left contains 14 more items, first extra item: 'ORACLE_DSN'
 E         Use -v to get more diff
 tests\test_conftest_sandbox_env.py:99: AssertionError
 ______ test_ligacao_real_do_conftest_nao_carrega_env_sem_operador[zero] _______
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-129/test_ligacao_real_do_conftest_1')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-129/test_ligacao_real_do_conftest_1')
 sandbox_shell = '0'
 >       assert dados["presentes"] == [], f"chaves do .env fictício entraram em os.environ: {dados['presentes']}"
 E       AssertionError: chaves do .env fictício entraram em os.environ: ['ORACLE_DSN', 'ORACLE_USER_READ', 'ORACLE_PASSWORD_READ', 'ORACLE_USER_MUT', 'ORACLE_PASSWORD_MUT', 'ORACLE_USER_DIAG', 'ORACLE_PASSWORD_DIAG', 'ORACLE_USER_KILL', 'ORACLE_PASSWORD_KILL', 'ORACLE_CALL_TIMEOUT_MS', 'ORACLE_SELECT_LIMIT', 'ORACLE_LOB_LIMIT', 'SENTINELA_D61_A', 'SENTINELA_D61_B']
@@ -323,7 +323,7 @@ F                                                                        [100%]
 ================================== FAILURES ===================================
 ___________________ test_fluxo_nao_le_nem_recarrega_dotenv ____________________
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000020DD2F0FE10>
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-131/test_fluxo_nao_le_nem_recarreg0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-131/test_fluxo_nao_le_nem_recarreg0')
 >       assert leituras == []
 E       AssertionError: assert ['DotEnv.__init__'] == []
 E         
@@ -344,7 +344,7 @@ F                                                                        [100%]
 ================================== FAILURES ===================================
 ___________________ test_fluxo_nao_le_nem_recarrega_dotenv ____________________
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001FCBAC13E10>
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-133/test_fluxo_nao_le_nem_recarreg0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-133/test_fluxo_nao_le_nem_recarreg0')
 >       assert leituras == []
 E       AssertionError: assert ['DotEnv.__init__'] == []
 E         
@@ -366,14 +366,14 @@ FF                                                                       [100%]
 ================================== FAILURES ===================================
 ______ test_d63_valor_lido_no_import_prova_carga_antes_dos_imports[cli] _______
 entrada = 'cli'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-135/test_d63_valor_lido_no_import_0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-135/test_d63_valor_lido_no_import_0')
 >       assert dados["gemini_key_igual"] is True, resumo
 E       AssertionError: gemini_key_igual=False, sentinela_fase3=1
 E       assert False is True
 tests\test_carga_env_entrada.py:423: AssertionError
 ______ test_d63_valor_lido_no_import_prova_carga_antes_dos_imports[web] _______
 entrada = 'web'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-135/test_d63_valor_lido_no_import_1')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-135/test_d63_valor_lido_no_import_1')
 >       assert dados["gemini_key_igual"] is True, resumo
 E       AssertionError: gemini_key_igual=False, sentinela_fase3=1
 E       assert False is True
@@ -393,14 +393,14 @@ FF                                                                       [100%]
 ================================== FAILURES ===================================
 ___________ test_d63_warning_de_descarte_depois_do_basicconfig[cli] ___________
 entrada = 'cli'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-137/test_d63_warning_de_descarte_d0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-137/test_d63_warning_de_descarte_d0')
 >       assert idx_basic and idx_basic[0] < idx_warn[0], resumo
 E       AssertionError: eventos=[['WARNING', 'ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell.'], ['basicConfig']]
 E       assert ([1] and 1 < 0)
 tests\test_carga_env_entrada.py:437: AssertionError
 ___________ test_d63_warning_de_descarte_depois_do_basicconfig[web] ___________
 entrada = 'web'
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-137/test_d63_warning_de_descarte_d1')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-137/test_d63_warning_de_descarte_d1')
 >       assert idx_basic and idx_basic[0] < idx_warn[0], resumo
 E       AssertionError: eventos=[['WARNING', 'ORACLE_SANDBOX encontrada no .env foi DESCARTADA: só vale quando definida pelo operador no shell.'], ['basicConfig']]
 E       assert ([1] and 1 < 0)
@@ -454,7 +454,7 @@ mutação d64b_operador_fixo_none: 1 substituição(ões) em tests/conftest.py; 
 .F                                                                       [100%]
 ================================== FAILURES ===================================
 ________ test_operador_e_lido_do_ambiente_no_inicio_do_processo[zero] _________
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-141/test_operador_e_lido_do_ambien1')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-141/test_operador_e_lido_do_ambien1')
 sandbox_shell = '0'
 >       assert json.loads(res.stdout.strip().splitlines()[-1])["operador_visto"] == sandbox_shell
 E       AssertionError: assert None == '0'
@@ -472,7 +472,7 @@ mutação d65_settings_load_dotenv: 1 substituição(ões) em src/config/setting
 F                                                                        [100%]
 ================================== FAILURES ===================================
 __________________ test_imports_de_teste_nao_alteram_environ __________________
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-143/test_imports_de_teste_nao_alte0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-143/test_imports_de_teste_nao_alte0')
 >       assert dados["adicionadas_n"] == 0 and dados["removidas_n"] == 0, resumo
 E       AssertionError: adicionadas_n=3, removidas_n=0, alteradas_n=0, nomes_nao_sensiveis=['SENTINELA_CTL']
 E       assert (3 == 0)

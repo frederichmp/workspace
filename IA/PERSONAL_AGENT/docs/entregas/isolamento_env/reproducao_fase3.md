@@ -86,7 +86,7 @@ Previstos ausentes: []
 
 ### c1_min
 
-- Comando: `C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_min\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_min\ficticio.env`
+- Comando: `C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_min\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_min\ficticio.env`
 - returncode: 0
 - Variáveis extras acrescentadas ao env (nomes): []
 - Chaves com prefixo proibido passadas ao subprocesso (nomes): []
@@ -111,7 +111,7 @@ RESULTADO_JSON={"excecao": "ValueError: embedded null character", "foo_first_em_
 
 ### b4_web
 
-- Comando: `C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\b4_web\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\b4_web\ficticio.env`
+- Comando: `C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\b4_web\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\b4_web\ficticio.env`
 - returncode: 0
 - Variáveis extras acrescentadas ao env (nomes): ['AGENTDBA_LOG_DIR', 'SCRIPTS_REGISTRY_PATH']
 - Chaves com prefixo proibido passadas ao subprocesso (nomes): ['AGENTDBA_LOG_DIR']
@@ -139,7 +139,7 @@ RESULTADO_JSON={"run1": null, "run2": "kill_tardio_ficticio", "e1": [], "e2": []
 
 ### b4_cli
 
-- Comando: `C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\b4_cli\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\b4_cli\ficticio.env`
+- Comando: `C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\b4_cli\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\b4_cli\ficticio.env`
 - returncode: 0
 - Variáveis extras acrescentadas ao env (nomes): ['AGENTDBA_LOG_DIR', 'SCRIPTS_REGISTRY_PATH']
 - Chaves com prefixo proibido passadas ao subprocesso (nomes): ['AGENTDBA_LOG_DIR']
@@ -166,7 +166,7 @@ RESULTADO_JSON={"run1": null, "run2": null, "chamadas": 1}
 
 ### c1_web
 
-- Comando: `C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_web\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_web\ficticio.env`
+- Comando: `C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_web\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_web\ficticio.env`
 - returncode: 0
 - Variáveis extras acrescentadas ao env (nomes): ['AGENTDBA_LOG_DIR', 'SCRIPTS_REGISTRY_PATH']
 - Chaves com prefixo proibido passadas ao subprocesso (nomes): ['AGENTDBA_LOG_DIR']
@@ -179,13 +179,13 @@ RESULTADO_JSON={"run1": null, "run2": null, "chamadas": 1}
 ```text
 PRE | ORACLE_SANDBOX no processo antes da carga = AUSENTE
 ────────────────────────── Traceback (most recent call last) ───────────────────────────
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\streaml  
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\streaml  
   it\runtime\scriptrunner\exec_code.py:136 in exec_func_with_error_handling             
                                                                                         
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\streaml  
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\streaml  
   it\runtime\scriptrunner\script_runner.py:936 in code_to_exec                          
                                                                                         
-  c:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda -                         
+  c:\Users\<usuario>\OneDrive - <organizacao> -                         
   EPP\Workspace\IA\PERSONAL_AGENT\app.py:39 in <module>                                 
                                                                                         
      36 # ORACLE_SANDBOX só vale se definida pelo operador no shell (incidente 01:27):  
@@ -206,7 +206,7 @@ PRE | ORACLE_SANDBOX no processo antes da carga = AUSENTE
     19 CAPTURA = []                                                                     
     20 class _Captura(logging.Handler):                                                 
                                                                                         
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\dotenv\  
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\dotenv\  
   main.py:435 in load_dotenv                                                            
                                                                                         
     432 │   │   override=override,                                                      
@@ -217,7 +217,7 @@ PRE | ORACLE_SANDBOX no processo antes da carga = AUSENTE
     437                                                                                 
     438 def dotenv_values(                                                              
                                                                                         
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\dotenv\  
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\dotenv\  
   main.py:108 in set_as_environment_variables                                           
                                                                                         
     105 │   │   │   if k in os.environ and not self.override:                           
@@ -234,13 +234,13 @@ C1 web | run1 | excecoes = ['embedded null character']
 C1 web | run1 | os.environ ORACLE_SANDBOX = 1
 C1 web | run1 | avisos DESCARTADA = []
 ────────────────────────── Traceback (most recent call last) ───────────────────────────
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\streaml  
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\streaml  
   it\runtime\scriptrunner\exec_code.py:136 in exec_func_with_error_handling             
                                                                                         
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\streaml  
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\streaml  
   it\runtime\scriptrunner\script_runner.py:936 in code_to_exec                          
                                                                                         
-  c:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda -                         
+  c:\Users\<usuario>\OneDrive - <organizacao> -                         
   EPP\Workspace\IA\PERSONAL_AGENT\app.py:39 in <module>                                 
                                                                                         
      36 # ORACLE_SANDBOX só vale se definida pelo operador no shell (incidente 01:27):  
@@ -261,7 +261,7 @@ C1 web | run1 | avisos DESCARTADA = []
     19 CAPTURA = []                                                                     
     20 class _Captura(logging.Handler):                                                 
                                                                                         
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\dotenv\  
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\dotenv\  
   main.py:435 in load_dotenv                                                            
                                                                                         
     432 │   │   override=override,                                                      
@@ -272,7 +272,7 @@ C1 web | run1 | avisos DESCARTADA = []
     437                                                                                 
     438 def dotenv_values(                                                              
                                                                                         
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\dotenv\  
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\dotenv\  
   main.py:108 in set_as_environment_variables                                           
                                                                                         
     105 │   │   │   if k in os.environ and not self.override:                           
@@ -302,7 +302,7 @@ RESULTADO_JSON={"e1": ["embedded null character"], "s1": "1", "d1": [], "e2": ["
 
 ### c1_cli
 
-- Comando: `C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_cli\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_cli\ficticio.env`
+- Comando: `C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_cli\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\c1_cli\ficticio.env`
 - returncode: 0
 - Variáveis extras acrescentadas ao env (nomes): ['AGENTDBA_LOG_DIR', 'SCRIPTS_REGISTRY_PATH']
 - Chaves com prefixo proibido passadas ao subprocesso (nomes): ['AGENTDBA_LOG_DIR']
@@ -330,7 +330,7 @@ RESULTADO_JSON={"excecao": "ValueError: embedded null character", "s1": "1", "d1
 
 ### a3a_cli
 
-- Comando: `C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3a_cli\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3a_cli\ficticio.env`
+- Comando: `C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3a_cli\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3a_cli\ficticio.env`
 - returncode: 0
 - Variáveis extras acrescentadas ao env (nomes): ['SCRIPTS_REGISTRY_PATH']
 - Chaves com prefixo proibido passadas ao subprocesso (nomes): []
@@ -345,8 +345,8 @@ PRE | ORACLE_SANDBOX no processo antes da carga = AUSENTE
 A3a cli | src.tools.* em sys.modules antes do import main = ['src.tools', 'src.tools.gemini_router', 'src.tools.notificador', 'src.tools.oracle_dba', 'src.tools.os_tools', 'src.tools.payloads', 'src.tools.rag_search']
 A3a cli | ausentes em sys.modules = []
 A3a cli | src.tools.* / tools.* em sys.modules ao fim = ['src.tools', 'src.tools.gemini_router', 'src.tools.notificador', 'src.tools.oracle_dba', 'src.tools.os_tools', 'src.tools.payloads', 'src.tools.rag_search', 'tools.gemini_router', 'tools.notificador', 'tools.oracle_dba', 'tools.os_tools', 'tools.rag_search']
-A3a cli | src.tools.oracle_dba.__file__ = c:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
-A3a cli | tools.oracle_dba.__file__ = C:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
+A3a cli | src.tools.oracle_dba.__file__ = c:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
+A3a cli | tools.oracle_dba.__file__ = C:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
 A3a cli | src.tools.oracle_dba.DIRETORIO_LOG_APROVACAO = C:\AgentDBA\logs
 A3a cli | tools.oracle_dba.DIRETORIO_LOG_APROVACAO = C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\dir_env_a3
 A3a cli | DIRETORIO_LOG_APROVACAO iguais = False
@@ -367,7 +367,7 @@ RESULTADO_JSON={"out": {"ausentes": [], "dir_iguais": false, "key_iguais": false
 
 ### a3a_web
 
-- Comando: `C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3a_web\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3a_web\ficticio.env`
+- Comando: `C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3a_web\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3a_web\ficticio.env`
 - returncode: 0
 - Variáveis extras acrescentadas ao env (nomes): ['SCRIPTS_REGISTRY_PATH']
 - Chaves com prefixo proibido passadas ao subprocesso (nomes): []
@@ -383,8 +383,8 @@ A3a web | src.tools.* em sys.modules antes do AppTest = ['src.tools', 'src.tools
 A3a web | excecoes = []
 A3a web | ausentes em sys.modules = []
 A3a web | src.tools.* / tools.* em sys.modules ao fim = ['src.tools', 'src.tools.gemini_router', 'src.tools.notificador', 'src.tools.oracle_dba', 'src.tools.os_tools', 'src.tools.payloads', 'src.tools.rag_search', 'tools.gemini_router', 'tools.notificador', 'tools.oracle_dba', 'tools.os_tools', 'tools.rag_search']
-A3a web | src.tools.oracle_dba.__file__ = c:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
-A3a web | tools.oracle_dba.__file__ = C:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
+A3a web | src.tools.oracle_dba.__file__ = c:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
+A3a web | tools.oracle_dba.__file__ = C:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
 A3a web | src.tools.oracle_dba.DIRETORIO_LOG_APROVACAO = C:\AgentDBA\logs
 A3a web | tools.oracle_dba.DIRETORIO_LOG_APROVACAO = C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\dir_env_a3
 A3a web | DIRETORIO_LOG_APROVACAO iguais = False
@@ -406,7 +406,7 @@ RESULTADO_JSON={"out": {"ausentes": [], "dir_iguais": false, "key_iguais": false
 
 ### a3b_cli
 
-- Comando: `C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3b_cli\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3b_cli\ficticio.env`
+- Comando: `C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3b_cli\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3b_cli\ficticio.env`
 - returncode: 0
 - Variáveis extras acrescentadas ao env (nomes): ['SCRIPTS_REGISTRY_PATH']
 - Chaves com prefixo proibido passadas ao subprocesso (nomes): []
@@ -420,8 +420,8 @@ RESULTADO_JSON={"out": {"ausentes": [], "dir_iguais": false, "key_iguais": false
 PRE | ORACLE_SANDBOX no processo antes da carga = AUSENTE
 A3b cli | ausentes em sys.modules = []
 A3b cli | src.tools.* / tools.* em sys.modules ao fim = ['src.tools', 'src.tools.gemini_router', 'src.tools.notificador', 'src.tools.oracle_dba', 'src.tools.os_tools', 'src.tools.payloads', 'src.tools.rag_search', 'tools.gemini_router', 'tools.notificador', 'tools.oracle_dba', 'tools.os_tools', 'tools.rag_search']
-A3b cli | src.tools.oracle_dba.__file__ = C:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
-A3b cli | tools.oracle_dba.__file__ = C:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
+A3b cli | src.tools.oracle_dba.__file__ = C:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
+A3b cli | tools.oracle_dba.__file__ = C:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
 A3b cli | src.tools.oracle_dba.DIRETORIO_LOG_APROVACAO = C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\dir_env_a3
 A3b cli | tools.oracle_dba.DIRETORIO_LOG_APROVACAO = C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\dir_env_a3
 A3b cli | DIRETORIO_LOG_APROVACAO iguais = True
@@ -442,7 +442,7 @@ RESULTADO_JSON={"out": {"ausentes": [], "dir_iguais": true, "key_iguais": true, 
 
 ### a3b_web
 
-- Comando: `C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3b_web\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3b_web\ficticio.env`
+- Comando: `C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\python.exe -B C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3b_web\filho.py C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\a3b_web\ficticio.env`
 - returncode: 0
 - Variáveis extras acrescentadas ao env (nomes): ['SCRIPTS_REGISTRY_PATH']
 - Chaves com prefixo proibido passadas ao subprocesso (nomes): []
@@ -457,8 +457,8 @@ PRE | ORACLE_SANDBOX no processo antes da carga = AUSENTE
 A3b web | excecoes = []
 A3b web | ausentes em sys.modules = []
 A3b web | src.tools.* / tools.* em sys.modules ao fim = ['src.tools', 'src.tools.gemini_router', 'src.tools.notificador', 'src.tools.oracle_dba', 'src.tools.os_tools', 'src.tools.payloads', 'src.tools.rag_search', 'tools.gemini_router', 'tools.notificador', 'tools.oracle_dba', 'tools.os_tools', 'tools.rag_search']
-A3b web | src.tools.oracle_dba.__file__ = C:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
-A3b web | tools.oracle_dba.__file__ = C:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
+A3b web | src.tools.oracle_dba.__file__ = C:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
+A3b web | tools.oracle_dba.__file__ = C:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT\src\tools\oracle_dba.py
 A3b web | src.tools.oracle_dba.DIRETORIO_LOG_APROVACAO = C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\dir_env_a3
 A3b web | tools.oracle_dba.DIRETORIO_LOG_APROVACAO = C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3\dir_env_a3
 A3b web | DIRETORIO_LOG_APROVACAO iguais = True
@@ -497,7 +497,7 @@ import pathlib
 import subprocess
 import sys
 
-RAIZ = r"c:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT"
+RAIZ = r"c:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT"
 TMP = pathlib.Path(r"C:\Users\FREDER~1\AppData\Local\Temp\isolamento_fase3")
 SAIDA = pathlib.Path(RAIZ) / "docs" / "entregas" / "isolamento_env" / "reproducao_fase3.md"
 PREFIXOS = ("ORACLE_", "EMAIL_", "GEMINI_", "AGENTDBA_")

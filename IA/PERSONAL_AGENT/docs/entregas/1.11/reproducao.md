@@ -5,8 +5,8 @@ Fonte dos achados: `docs/entregas/1.10/revisao_gemini.md`, secoes 1, 6 e 7.
 - Data: 2026-11-17
 - Modelo que executou: Haiku 5.5 (claude-haiku-5-5)
 - Python: `Python 3.15.2`
-- Diretorio de trabalho do projeto: `c:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT`
-- Material de reproducao (fora do projeto): `C:\Users\Frederich\AppData\Local\Temp\claude\db29872ef7336ab6\474bbbe3-4d4e-49c8-bd9d-de39a3da8825\scratchpad\repro_1_11` (subpastas `limpa/`, `mut_rejeitado/`)
+- Diretorio de trabalho do projeto: `c:\Users\<usuario>\OneDrive - <organizacao>\Workspace\IA\PERSONAL_AGENT`
+- Material de reproducao (fora do projeto): `C:\Users\<usuario>\AppData\Local\Temp\claude\db29872ef7336ab6\474bbbe3-4d4e-49c8-bd9d-de39a3da8825\scratchpad\repro_1_11` (subpastas `limpa/`, `mut_rejeitado/`)
 - Restricoes respeitadas: sem `ORACLE_SANDBOX`, sem leitura de `.env`, sem git que altere indice ou arvore, todas as execucoes com `env -u ORACLE_SANDBOX PYTHONDONTWRITEBYTECODE=1`, pytest com `-p no:cacheprovider`.
 
 ## Git status antes
@@ -40,30 +40,30 @@ ls -la auditoria_oracle.log data/logs 2>&1
 == ls antes
 .:
 total 75
-drwxr-xr-x 1 Frederich 197609     0 Nov 17 17:18 .
-drwxr-xr-x 1 Frederich 197609     0 Nov 17 17:19 ..
-drwxr-xr-x 1 Frederich 197609     0 Nov 17 17:17 .claude
--rw-r--r-- 1 Frederich 197609  1653 Nov 17 17:17 .env.example
--rw-r--r-- 1 Frederich 197609   447 Nov 17 17:17 .gitignore
--rw-r--r-- 1 Frederich 197609  1663 Nov 17 17:17 CLAUDE.md
--rw-r--r-- 1 Frederich 197609  1910 Nov 17 17:17 README.md
--rw-r--r-- 1 Frederich 197609 30506 Nov 17 17:17 app.py
-drwxr-xr-x 1 Frederich 197609     0 Nov 17 17:18 data
-drwxr-xr-x 1 Frederich 197609     0 Nov 17 17:17 db
-drwxr-xr-x 1 Frederich 197609     0 Nov 17 17:17 docs
--rw-r--r-- 1 Frederich 197609   120 Nov 17 17:17 pytest.ini
-drwxr-xr-x 1 Frederich 197609     0 Nov 17 17:17 registry
--rw-r--r-- 1 Frederich 197609   314 Nov 17 17:17 requirements.txt
-drwxr-xr-x 1 Frederich 197609     0 Nov 17 17:17 scripts
-drwxr-xr-x 1 Frederich 197609     0 Nov 17 17:19 src
-drwxr-xr-x 1 Frederich 197609     0 Nov 17 17:19 tests
-drwxr-xr-x 1 Frederich 197609     0 Nov 17 17:17 tools
+drwxr-xr-x 1 <usuario> 197609     0 Nov 17 17:18 .
+drwxr-xr-x 1 <usuario> 197609     0 Nov 17 17:19 ..
+drwxr-xr-x 1 <usuario> 197609     0 Nov 17 17:17 .claude
+-rw-r--r-- 1 <usuario> 197609  1653 Nov 17 17:17 .env.example
+-rw-r--r-- 1 <usuario> 197609   447 Nov 17 17:17 .gitignore
+-rw-r--r-- 1 <usuario> 197609  1663 Nov 17 17:17 CLAUDE.md
+-rw-r--r-- 1 <usuario> 197609  1910 Nov 17 17:17 README.md
+-rw-r--r-- 1 <usuario> 197609 30506 Nov 17 17:17 app.py
+drwxr-xr-x 1 <usuario> 197609     0 Nov 17 17:18 data
+drwxr-xr-x 1 <usuario> 197609     0 Nov 17 17:17 db
+drwxr-xr-x 1 <usuario> 197609     0 Nov 17 17:17 docs
+-rw-r--r-- 1 <usuario> 197609   120 Nov 17 17:17 pytest.ini
+drwxr-xr-x 1 <usuario> 197609     0 Nov 17 17:17 registry
+-rw-r--r-- 1 <usuario> 197609   314 Nov 17 17:17 requirements.txt
+drwxr-xr-x 1 <usuario> 197609     0 Nov 17 17:17 scripts
+drwxr-xr-x 1 <usuario> 197609     0 Nov 17 17:19 src
+drwxr-xr-x 1 <usuario> 197609     0 Nov 17 17:19 tests
+drwxr-xr-x 1 <usuario> 197609     0 Nov 17 17:17 tools
 
 data:
 total 4
-drwxr-xr-x 1 Frederich 197609 0 Nov 17 17:18 .
-drwxr-xr-x 1 Frederich 197609 0 Nov 17 17:18 ..
-drwxr-xr-x 1 Frederich 197609 0 Nov 17 17:17 memory
+drwxr-xr-x 1 <usuario> 197609 0 Nov 17 17:18 .
+drwxr-xr-x 1 <usuario> 197609 0 Nov 17 17:18 ..
+drwxr-xr-x 1 <usuario> 197609 0 Nov 17 17:17 memory
 auditoria_oracle.log exists rc=1
 data/logs exists rc=1
 == pytest
@@ -117,7 +117,7 @@ E             + HASH_DIVERGENTE
 tests\test_executor.py:240: AssertionError
 ============================== warnings summary ===============================
 ..\..\..\..\..\..\..\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
     if asyncio.iscoroutinefunction(func):
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
@@ -135,13 +135,13 @@ EXIT=1
 == test -e depois
 auditoria_oracle.log rc=0
 data/logs rc=0
--rw-r--r-- 1 Frederich 197609 0 Nov 17 17:19 auditoria_oracle.log
+-rw-r--r-- 1 <usuario> 197609 0 Nov 17 17:19 auditoria_oracle.log
 
 data/logs:
 total 0
-drwxr-xr-x 1 Frederich 197609 0 Nov 17 17:19 .
-drwxr-xr-x 1 Frederich 197609 0 Nov 17 17:19 ..
--rw-r--r-- 1 Frederich 197609 0 Nov 17 17:19 auditoria_oracle.log
+drwxr-xr-x 1 <usuario> 197609 0 Nov 17 17:19 .
+drwxr-xr-x 1 <usuario> 197609 0 Nov 17 17:19 ..
+-rw-r--r-- 1 <usuario> 197609 0 Nov 17 17:19 auditoria_oracle.log
 ```
 
 Observacao: as duas falhas da copia limpa (`test_l1_procedure_t7_tipo_divergente_com_mock` e `test_t8_diretivas_sqlplus_recusadas`, ambas com `HASH_DIVERGENTE`) nao fazem parte dos achados 1.1, 6.1 ou 7.1. Foram registradas por completude.
@@ -283,7 +283,7 @@ WARNING  tools.oracle_dba:oracle_dba.py:1100 AUDITORIA HITL: REJEITADO (REJEITAD
 ____________ test_aprovacao_expirada_vira_timeout[fronteira_300s] _____________
 
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F07A623000>
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-37/test_aprovacao_expirada_vira_t0')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-37/test_aprovacao_expirada_vira_t0')
 ambiente_fake = [], delta = datetime.timedelta(seconds=300)
 
     @pytest.mark.parametrize(
@@ -328,7 +328,7 @@ WARNING  src.tools.oracle_dba:oracle_dba.py:1100 AUDITORIA HITL: TIMEOUT (APROVA
 _________________ test_aprovacao_expirada_vira_timeout[301s] __________________
 
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F07A158B40>
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-37/test_aprovacao_expirada_vira_t1')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-37/test_aprovacao_expirada_vira_t1')
 ambiente_fake = [], delta = datetime.timedelta(seconds=301)
 
     @pytest.mark.parametrize(
@@ -373,7 +373,7 @@ WARNING  src.tools.oracle_dba:oracle_dba.py:1100 AUDITORIA HITL: TIMEOUT (APROVA
 _________________ test_aprovacao_expirada_vira_timeout[1_dia] _________________
 
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F07A158910>
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-37/test_aprovacao_expirada_vira_t2')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-37/test_aprovacao_expirada_vira_t2')
 ambiente_fake = [], delta = datetime.timedelta(days=1)
 
     @pytest.mark.parametrize(
@@ -418,7 +418,7 @@ WARNING  src.tools.oracle_dba:oracle_dba.py:1100 AUDITORIA HITL: TIMEOUT (APROVA
 ________________ test_aprovacao_expirada_vira_timeout[futuro] _________________
 
 monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F07A15BAF0>
-tmp_path = WindowsPath('C:/Users/Frederich/AppData/Local/Temp/pytest-of-Frederich/pytest-37/test_aprovacao_expirada_vira_t3')
+tmp_path = WindowsPath('C:/Users/<usuario>/AppData/Local/Temp/pytest-of-<usuario>/pytest-37/test_aprovacao_expirada_vira_t3')
 ambiente_fake = [], delta = datetime.timedelta(days=-1, seconds=86399)
 
     @pytest.mark.parametrize(
@@ -458,7 +458,7 @@ E        +      where ['diag_teste_fake', 'diag_teste_fake'] = <tests.fakes_orac
 tests\test_oracle_kill.py:481: AssertionError
 ============================== warnings summary ===============================
 ..\..\..\..\..\..\..\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
     if asyncio.iscoroutinefunction(func):
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
@@ -482,7 +482,7 @@ EXIT=1
 .                                                                        [100%]
 ============================== warnings summary ===============================
 ..\..\..\..\..\..\..\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
-  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+  C:\Users\<usuario>\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
     if asyncio.iscoroutinefunction(func):
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
