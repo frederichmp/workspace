@@ -9,6 +9,11 @@ O m0, sem mutação, roda antes e precisa passar. Código de segurança (PROCESS
 Uso:
   python -I tools/controle_mutacao.py --tarefa <t> --rotulo <r> --alvo <arquivo> --teste <caminho> [--teste ...]
       (--mutacao <nome> <de> <para> ... | --mutacoes-json <arquivo>) [--incluir <arquivo do working tree> ...]
+      [--esperado-coletados <n>]
+
+KM2 (plano 9.10): antes do m0, a coleta (--collect-only) do projeto e a da cópia têm de bater, sem deselecionados, e
+o m0 tem de executar exatamente o coletado; senão a rodada é INVÁLIDA. Mutante morto (DETECTADA) só com rc 1 e ao
+menos 1 teste falho.
 
 O JSON é uma lista de {"nome", "de", "para"}; use-o para troca com aspas ou várias linhas.
 Código de saída: 0 todas detectadas, 1 alguma passou, 2 controle inválido ou erro.
@@ -46,6 +51,12 @@ RE_GOVERNANCA = re.compile(r"^(?:FALHA DE GOVERNANCA:|!+ _pytest\.outcomes\.Exit
 # ORACLE_* (inclui ORACLE_SANDBOX), EMAIL_*, GEMINI_*, OPS_KILL_*, OLLAMA_* nem *_PROXY, sem diferenciar maiúsculas.
 PREFIXOS_FORA_DO_FILHO = ("ORACLE_", "EMAIL_", "GEMINI_", "OPS_KILL_", "OLLAMA_")
 SUFIXOS_FORA_DO_FILHO = ("_PROXY",)
+# KM2 (plano 9.10): variáveis que mudam a seleção ou os plugins do pytest do filho (um "-k" herdado esvaziaria a
+# rodada sem invalidá-la). Nome exato, sem diferenciar maiúsculas.
+NOMES_FORA_DO_FILHO = frozenset({"PYTEST_ADDOPTS", "PYTEST_PLUGINS"})
+# KM2: contagem da coleta ("565 tests collected", "3/565 tests collected (562 deselected)") e da execução.
+RE_COLETADOS = re.compile(r"\b(\d+)(?:/(\d+))? tests? collected(?: \((\d+) deselected\))?")
+RE_CONTAGEM_TOTAL = re.compile(r"(\d+) (failed|passed|skipped|deselected|xfailed|xpassed|errors?)\b")
 
 
 # ---------- funções puras (testadas em tests/test_controle_mutacao.py) ----------
@@ -117,9 +128,44 @@ def classificar(codigo, saida):
     cont = {t.rstrip("s") if t.startswith("error") else t: int(n) for n, t in RE_CONTAGEM.findall(resumo)}
     if codigo == 0 and cont.get("passed", 0) > 0 and not cont.get("failed") and not cont.get("error"):
         return PASSOU, resumo
-    if codigo == 1 and (cont.get("failed", 0) or cont.get("error", 0)):
+    # KM2: mutante morto só com rc 1 e ao menos 1 teste falho. Só "error" (coleta, setup, teardown), rc 2/3/4/5,
+    # tempo esgotado ou falta da contagem: INVÁLIDA, nunca contada como morta.
+    if codigo == 1 and cont.get("failed", 0) >= 1:
         return DETECTADA, resumo
     return INVALIDA, f"pytest terminou com código {codigo}: {resumo or 'sem linha de contagem'}"
+
+
+def coletados(saida):
+    """(selecionados, deselecionados) da linha do --collect-only; None se a linha não existir."""
+    for linha in reversed(saida.splitlines()):
+        achado = RE_COLETADOS.search(linha)
+        if achado:
+            return int(achado.group(1)), int(achado.group(3) or 0)
+    return None
+
+
+def executados(saida):
+    """(executados, deselecionados) da linha final de uma execução: passed + skipped + failed + error + x*."""
+    resumo = next((l for l in reversed(saida.splitlines()) if RE_CONTAGEM_TOTAL.search(l) and " in " in l), "")
+    cont = {t.rstrip("s") if t.startswith("error") else t: int(n) for n, t in RE_CONTAGEM_TOTAL.findall(resumo)}
+    total = sum(cont.get(k, 0) for k in ("passed", "skipped", "failed", "error", "xfailed", "xpassed"))
+    return total, cont.get("deselected", 0)
+
+
+def validar_coleta(no_projeto, na_copia, esperado=None):
+    """KM2: None se a coleta é válida; senão o motivo. As duas coletas existem, sem deselecionados, iguais entre
+    si e, se dado, iguais ao esperado."""
+    if no_projeto is None or na_copia is None:
+        return f"coleta sem linha de contagem (projeto {no_projeto}, cópia {na_copia})"
+    if no_projeto[1] or na_copia[1]:
+        return f"coleta com deselecionados (projeto {no_projeto}, cópia {na_copia})"
+    if no_projeto[0] != na_copia[0]:
+        return f"coleta diverge: projeto {no_projeto[0]}, cópia {na_copia[0]}"
+    if esperado is not None and na_copia[0] != esperado:
+        return f"coleta {na_copia[0]} diferente do esperado {esperado}"
+    if na_copia[0] == 0:
+        return "nenhum teste coletado"
+    return None
 
 
 def testes_que_cairam(saida):
@@ -196,7 +242,7 @@ def ambiente_do_filho(ambiente):
     env = {}
     for chave, valor in ambiente.items():
         nome = chave.upper()
-        if nome.startswith(PREFIXOS_FORA_DO_FILHO) or nome.endswith(SUFIXOS_FORA_DO_FILHO):
+        if nome.startswith(PREFIXOS_FORA_DO_FILHO) or nome.endswith(SUFIXOS_FORA_DO_FILHO) or nome in NOMES_FORA_DO_FILHO:
             continue
         env[chave] = valor
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -205,6 +251,13 @@ def ambiente_do_filho(ambiente):
 
 def _rodar_testes(copia, testes):
     return _executar([sys.executable, *ARGS_PYTEST, *testes], copia, ambiente_do_filho(os.environ), TIMEOUT_TESTE)
+
+
+def _coletar_testes(pasta, testes):
+    """KM2: (selecionados, deselecionados) do --collect-only em `pasta`, com o ambiente do filho; None se falhar."""
+    codigo, saida = _executar([sys.executable, "-m", "pytest", "-q", "--collect-only", "-p", "no:cacheprovider", *testes],
+                              pasta, ambiente_do_filho(os.environ), TIMEOUT_TESTE)
+    return coletados(saida) if codigo == 0 else None
 
 
 def _gravar(caminho, texto):
@@ -239,6 +292,8 @@ def _main(argv):
     ap.add_argument("--mutacao", action="append", nargs=3, default=[], metavar=("NOME", "DE", "PARA"))
     ap.add_argument("--mutacoes-json", help="lista de {nome, de, para}")
     ap.add_argument("--incluir", action="append", default=[], help="arquivo do working tree copiado para a cópia")
+    ap.add_argument("--esperado-coletados", type=int, default=None,
+                    help="KM2: número de testes que a coleta tem de dar (opcional; projeto e cópia sempre comparados)")
     args = ap.parse_args(argv)
     try:
         tarefa = validar_tarefa(args.tarefa)
@@ -267,6 +322,7 @@ def _main(argv):
 
     tmp = _criar_tmp()
     linhas, textos, status = [], {}, {}
+    nota_coleta = "Coletados: não medido."
     try:
         copia = _criar_copia(tmp)
         for i in incluir:
@@ -281,10 +337,21 @@ def _main(argv):
             return 2
         original = caminho_alvo.read_bytes()
 
-        codigo, saida = _rodar_testes(copia, testes)
-        st, resumo = classificar(codigo, saida)
+        # KM2: a coleta do projeto e a da cópia, com o ambiente do filho, têm de bater entre si (e com o esperado, se
+        # dado), sem deselecionados; e o m0 tem de executar exatamente o que foi coletado. Senão, a rodada é INVÁLIDA.
+        coleta_projeto, coleta_copia = _coletar_testes(RAIZ, testes), _coletar_testes(copia, testes)
+        nota_coleta = (f"Coletados (selecionados, deselecionados): projeto {coleta_projeto}, cópia {coleta_copia}"
+                       + (f", esperado {args.esperado_coletados}" if args.esperado_coletados is not None else "") + ".")
+        problema = validar_coleta(coleta_projeto, coleta_copia, args.esperado_coletados)
+        if problema:
+            st, resumo, saida = INVALIDA, problema, ""
+        else:
+            codigo, saida = _rodar_testes(copia, testes)
+            st, resumo = classificar(codigo, saida)
+            if st == PASSOU and executados(saida) != (coleta_copia[0], 0):
+                st, resumo = INVALIDA, f"m0 executou {executados(saida)}, a coleta é {coleta_copia}: {resumo}"
         status["m0"] = st
-        textos["m0"] = f"# controle m0: sem mutação\n# local: cópia git archive HEAD + {incluir}\n\n{saida}"
+        textos["m0"] = f"# controle m0: sem mutação\n# local: cópia git archive HEAD + {incluir}\n# {nota_coleta}\n\n{saida}"
         linhas.append(("m0", "sem mutação", "-", resumo, "OK" if st == PASSOU else INVALIDA))
         if st == PASSOU:
             for nome, de, para in mutacoes:
@@ -323,10 +390,16 @@ def _main(argv):
         f"Alvo `{alvo}`; testes {', '.join(f'`{t}`' for t in testes)}; cópia `git archive HEAD`"
         + (f" + {', '.join(f'`{i}`' for i in incluir)}" if incluir else "") + ".",
         "",
+        nota_coleta,
+        "",
         "| Mutação | Troca | Contagem | Resultado | Status |",
         "|---|---|---|---|---|",
         *[f"| {' | '.join(_celula(c) for c in linha)} |" for linha in linhas],
         "",
+        "Mutações: " + ", ".join(
+            f"{rotulo} {sum(1 for m in mutacoes if status.get(m[0], ERRO) == chave)}"
+            for rotulo, chave in (("DETECTADAS", DETECTADA), ("PASSOU", PASSOU), ("INVÁLIDAS", INVALIDA), ("ERRO", ERRO))
+        ) + " (INVÁLIDA e ERRO nunca contam como mortas).",
         f"Resultado: {resultado}.",
     ]) + "\n"
     _gravar(relatorio, md)

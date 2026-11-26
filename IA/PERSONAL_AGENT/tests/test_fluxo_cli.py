@@ -625,3 +625,38 @@ def test_cli_k2_t5_nuvem_executa_a_liberada(main_cli, monkeypatch):
 
     (tool,) = _tools_vistas(llm)
     assert json.loads(tool["content"]) == {"sentinela_hw": 1}
+
+
+# =============================================================================
+# KM2, item 6 (plano 9.10.2): argumentos inválidos não derrubam o laço da CLI
+# =============================================================================
+
+class _LLMArgumentosBrutos(_LLMFalso):
+    """Como o _LLMFalso, mas o arguments da 1ª tool_call é o texto bruto dado (sem json.dumps)."""
+
+    def __init__(self, bruto, **kw):
+        super().__init__(nome="coletar_metricas_hardware", **kw)
+        self.bruto = bruto
+
+    def _create(self, model=None, messages=None, tools=None, **kwargs):
+        resposta = super()._create(model=model, messages=messages, tools=tools, **kwargs)
+        if len(self.chamadas) == 1:
+            resposta.choices[0].message.tool_calls[0].function.arguments = self.bruto
+        return resposta
+
+
+@pytest.mark.parametrize("bruto", ['{"drive": "C:\\\\sentinela-args', '["sentinela-args"]'], ids=["malformado", "lista"])
+def test_cli_km2_argumentos_invalidos_nao_derrubam_o_laco(main_cli, monkeypatch, caplog, bruto):
+    """KM2, item 6 (mata M_KM2_CLI_*): executar_agente termina normal; a 2ª chamada ao LLM recebe uma única resposta
+    da ferramenta, a recusa fixa, sem ecoar o argumento; a ferramenta não roda; o log local registra o motivo."""
+    import tools.oracle_dba as od
+
+    monkeypatch.setattr(main_cli, "coletar_metricas_hardware", lambda *a, **k: pytest.fail("ferramenta executada"))
+    caplog.set_level(logging.WARNING)
+    llm = _rodar(main_cli, monkeypatch, _LLMArgumentosBrutos(bruto))
+
+    assert len(llm.chamadas) == 2, "o laço caiu antes da 2ª chamada ao LLM"
+    (tool,) = _tools_vistas(llm)
+    assert tool["content"] == od.RESULTADO_ARGUMENTOS_INVALIDOS
+    assert "sentinela-args" not in tool["content"]
+    assert "ARGUMENTOS_INVALIDOS" in caplog.text

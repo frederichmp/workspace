@@ -142,6 +142,17 @@ RESULTADO_ORACLE_SO_LOCAL = json.dumps(
     ensure_ascii=False,
 )
 
+# KM2 (docs/plans/1.11-R1-ampliada.md 9.10.2, item 6): argumentos da tool_call que não são JSON de objeto não
+# derrubam o laço das interfaces; o LLM recebe esta recusa fixa (sem ecoar o argumento) e o detalhe vai ao log local.
+RESULTADO_ARGUMENTOS_INVALIDOS = json.dumps(
+    {
+        "status": "recusado",
+        "motivo": "ARGUMENTOS_INVALIDOS",
+        "mensagem": "Argumentos da ferramenta inválidos; nada foi executado.",
+    },
+    ensure_ascii=False,
+)
+
 TEXTO_HISTORICO_COM_DADO_DO_BANCO = (
     "O histórico desta conversa tem dados do banco e o coordenador ativo é em nuvem. "
     "Use 'Limpar Chat' ou religue o Ollama."
@@ -260,6 +271,27 @@ def coordenador_e_local(client: Any) -> bool:
         )
     except Exception:
         return False
+
+
+def ler_argumentos_da_ferramenta(nome_funcao: Any, bruto: Any) -> Optional[Dict[str, Any]]:
+    """
+    KM2 (plano 9.10.2, item 6): argumentos de uma tool_call. Vazio: {}. JSON de objeto: o dict. Qualquer outra coisa
+    (JSON malformado, lista, número, tipo errado): None, com o detalhe no log local (_registrar_erro_local). Nunca
+    levanta; quem chama devolve RESULTADO_ARGUMENTOS_INVALIDOS ao LLM e segue para a próxima tool_call.
+    """
+    if not bruto:
+        return {}
+    try:
+        valor = json.loads(bruto)
+    except Exception as exc:
+        _registrar_erro_local(str(nome_funcao), "ARGUMENTOS_INVALIDOS", exc=exc)
+        return None
+    if not isinstance(valor, dict):
+        _registrar_erro_local(
+            str(nome_funcao), "ARGUMENTOS_INVALIDOS", exc=TypeError(f"não é objeto JSON: {type(valor).__name__}")
+        )
+        return None
+    return valor
 
 
 _PAPEIS_DE_MENSAGEM = frozenset({"system", "user", "assistant", "tool"})

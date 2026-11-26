@@ -170,12 +170,14 @@ from tools.oracle_dba import (
     HOST_COORDENADOR_LOCAL,
     NOME_FERRAMENTA_KILL,
     PORTA_COORDENADOR_LOCAL,
+    RESULTADO_ARGUMENTOS_INVALIDOS,
     RESULTADO_KILL_DESABILITADO,
     RESULTADO_ORACLE_SO_LOCAL,
     TEXTO_HISTORICO_COM_DADO_DO_BANCO,
     _registrar_erro_local,
     criar_cliente_coordenador_local,
     ferramenta_liberada_nuvem,
+    ler_argumentos_da_ferramenta,
     ferramentas_do_coordenador,
     kill_habilitado,
     coordenador_e_local,
@@ -382,11 +384,19 @@ def executar_agente(prompt_usuario: str) -> None:
 
         for tool_call in mensagem_resposta.tool_calls:
             nome_funcao = tool_call.function.name
-            argumentos = (
-                json.loads(tool_call.function.arguments)
-                if tool_call.function.arguments
-                else {}
-            )
+            # KM2 (plano 9.10.2, item 6): argumento malformado não derruba o laço; recusa fixa ao LLM e segue.
+            argumentos = ler_argumentos_da_ferramenta(nome_funcao, tool_call.function.arguments)
+            if argumentos is None:
+                print(f"[Sistema]: Argumentos inválidos para '{nome_funcao}'; nada foi executado.")
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": nome_funcao,
+                        "content": RESULTADO_ARGUMENTOS_INVALIDOS,
+                    }
+                )
+                continue
             print(f"[Sistema]: O Agente decidiu executar '{nome_funcao}'...")
 
             # 2. Auditoria: Registra a intenção do LLM (O que ele decidiu fazer)

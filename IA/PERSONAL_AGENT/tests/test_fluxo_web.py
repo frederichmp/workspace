@@ -929,3 +929,32 @@ def test_web_k7_t6_c3_detalhe_no_log_local(montar_web, monkeypatch, caplog):
     (tool,) = _tools_vistas(amb)
     assert json.loads(tool["content"]) == {"erro_execucao": "RuntimeError"}
     assert "exc-sentinela" in caplog.text
+
+
+# =============================================================================
+# KM2, item 6 e P6a (plano 9.10.2 e 9.10.4): argumentos inválidos não derrubam o laço da Web
+# =============================================================================
+
+def test_web_km2_argumentos_invalidos_nao_derrubam_o_laco(montar_web, monkeypatch, caplog):
+    """KM2, P6a (mata M_KM2_WEB_*): o LLM manda arguments que não é objeto JSON. Sem exceção na tela, a recusa fixa
+    vai ao LLM sem ecoar o argumento, a ferramenta não roda, o laudo é pedido (2ª chamada), todo tool_call do
+    histórico tem resposta e o turno seguinte funciona."""
+    amb = montar_web([_linha_alvo()], kill_permitido=False)
+    import tools.oracle_dba as od  # depois do montar_web, que põe src/ no sys.path
+    import tools.os_tools as ost
+    monkeypatch.setattr(ost, "coletar_metricas_hardware", lambda *a, **k: '{"dados": {}}')
+    amb.chamada = ("coletar_metricas_hardware", "texto-sentinela-args")  # json.dumps -> string JSON, não objeto
+    caplog.set_level(logging.WARNING)
+    _pedir(amb)
+
+    assert len(amb.mensagens_llm) == 2, "o laço caiu antes do laudo"
+    (tool,) = _tools_vistas(amb)
+    assert tool["content"] == od.RESULTADO_ARGUMENTOS_INVALIDOS and "sentinela-args" not in tool["content"]
+    assert "ARGUMENTOS_INVALIDOS" in caplog.text
+    historico = amb.at.session_state.llm_messages
+    pedidos = {tc["id"] for m in historico if m.get("role") == "assistant" for tc in m.get("tool_calls") or []}
+    respondidos = {m["tool_call_id"] for m in historico if m.get("role") == "tool"}
+    assert pedidos <= respondidos, "tool_call sem resposta no histórico"
+
+    amb.at.chat_input[0].set_value("e agora?").run()
+    assert not amb.at.exception and len(amb.mensagens_llm) == 3

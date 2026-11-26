@@ -44,7 +44,14 @@ def test_troca_em_utf8():
     (0, "....\n5 passed in 1.00s\n", cm.PASSOU),
     (0, "5 passed, 2 skipped, 13 warnings in 1.00s\n", cm.PASSOU),
     (1, "FAILED tests/x.py::test_a - assert\n1 failed, 4 passed in 1.00s\n", cm.DETECTADA),
-    (1, "ERROR tests/x.py::test_b - erro\n1 error, 4 passed in 1.00s\n", cm.DETECTADA),
+    # KM2 (plano 9.10.2; expectativa alterada pela regra pedida): só "error" deixa de ser mutante morto.
+    (1, "ERROR tests/x.py::test_b - erro\n1 error, 4 passed in 1.00s\n", cm.INVALIDA),
+    (1, "FAILED tests/x.py::test_a - x\nERROR tests/x.py::test_b - e\n1 failed, 1 error in 1.00s\n", cm.DETECTADA),
+    (2, "FAILED tests/x.py::test_a - x\n1 failed in 1.00s\n", cm.INVALIDA),
+    (3, "1 failed in 1.00s\n", cm.INVALIDA),
+    (4, "ERROR: file or directory not found: tests/x.py\n\nno tests ran in 0.01s\n", cm.INVALIDA),
+    (5, "1 failed in 1.00s\n", cm.INVALIDA),
+    (1, "5 passed in 1.00s\n", cm.INVALIDA),
     (2, "Interrupted: 1 error during collection\n1 error in 0.50s\n", cm.INVALIDA),
     (5, "no tests ran in 0.01s\n", cm.INVALIDA),
     (None, "", cm.INVALIDA),
@@ -156,10 +163,12 @@ def test_km_ambiente_do_filho_tira_credenciais_gate_proxy_e_ollama():
     em qualquer caixa; o resto passa (positivo), e o bytecode fica desligado. Dict puro: o ambiente do pytest não muda."""
     fora = {
         "ORACLE_SANDBOX": "1", "oracle_user_diag": "x", "ORACLE_DSN": "x", "Email_Senha_App": "x",
+        "PYTEST_ADDOPTS": "-k inexistente", "pytest_plugins": "x",  # KM2
         "GEMINI_API_KEY": "x", "OPS_KILL_PKG_VERSAO": "2", "ops_kill_outra": "x", "OLLAMA_HOST": "x",
         "ollama_base_url": "x", "HTTP_PROXY": "x", "https_proxy": "x", "ALL_PROXY": "x", "No_Proxy": "x",
     }
-    fica = {"PATH": "p", "SYSTEMROOT": "s", "AGENTDBA_LOG_DIR": "l", "ORACLEHOME": "o", "PROXYCHAINS": "c"}
+    fica = {"PATH": "p", "SYSTEMROOT": "s", "AGENTDBA_LOG_DIR": "l", "ORACLEHOME": "o", "PROXYCHAINS": "c",
+            "PYTEST_XDIST_WORKER": "w", "PYTEST_ADDOPTS_OUTRO": "o"}  # KM2: só os nomes exatos saem
     env = cm.ambiente_do_filho({**fora, **fica})
     assert env == {**fica, "PYTHONDONTWRITEBYTECODE": "1"}
 
@@ -202,7 +211,11 @@ ARGS = ["--tarefa", "t1", "--rotulo", "c", "--alvo", ALVO, "--teste", "tests/tes
 
 
 class _Fakes:
-    def __init__(self, tmp_path, detecta=True, m0_passa=True, env_na_copia=False, quebra=False):
+    def __init__(self, tmp_path, detecta=True, m0_passa=True, env_na_copia=False, quebra=False,
+                 coleta_projeto=(3, 0), coleta_copia=(3, 0), m0_saida=None):
+        self.coleta = {"projeto": coleta_projeto, "copia": coleta_copia}
+        self.m0_saida = m0_saida
+        self.coletas = []
         self.copia = tmp_path / "copia_fake"
         self.detecta, self.m0_passa, self.env_na_copia, self.quebra = detecta, m0_passa, env_na_copia, quebra
         self.vistos = []
@@ -221,11 +234,16 @@ class _Fakes:
         self.vistos.append(texto)
         if texto == ORIGINAL:
             if self.m0_passa:
-                return 0, "3 passed in 0.10s\n"
+                return 0, self.m0_saida or "3 passed in 0.10s\n"
             return 1, "FAILED tests/test_alvo.py::test_f - x\n1 failed, 2 passed in 0.10s\n"
         if self.detecta:
             return 1, "FAILED tests/test_alvo.py::test_f - assert\n1 failed, 2 passed in 0.10s\n"
         return 0, "3 passed in 0.10s\n"
+
+    def coletar(self, pasta, testes):
+        qual = "copia" if Path(pasta) == self.copia else "projeto"
+        self.coletas.append(qual)
+        return self.coleta[qual]
 
 
 @pytest.fixture
@@ -245,6 +263,7 @@ def fakes(monkeypatch, tmp_path):
         monkeypatch.setattr(cm, "_criar_tmp", criar_tmp)
         monkeypatch.setattr(cm, "_criar_copia", f.criar_copia)
         monkeypatch.setattr(cm, "_rodar_testes", f.rodar_testes)
+        monkeypatch.setattr(cm, "_coletar_testes", f.coletar)
         return f
     return instalar
 
@@ -319,3 +338,126 @@ def test_main_erro_inesperado_sai_2_e_apaga_a_copia(fakes):
     f = fakes(quebra=True)
     assert cm.main(ARGS) == 2
     assert not f.tmp.exists()
+
+
+# ---------- KM2 (docs/plans/1.11-R1-ampliada.md 9.10): coleta, execução e validade da rodada ----------
+
+@pytest.mark.parametrize("saida, esperado", [
+    ("565 tests collected in 1.68s\n", (565, 0)),
+    ("1 test collected in 0.01s\n", (1, 0)),
+    ("3/565 tests collected (562 deselected) in 0.50s\n", (3, 562)),
+    ("no tests collected in 0.01s\n", None),
+    ("", None),
+])
+def test_km2_coletados(saida, esperado):
+    assert cm.coletados(saida) == esperado
+
+
+@pytest.mark.parametrize("saida, esperado", [
+    ("5 passed, 2 skipped, 13 warnings in 1.00s\n", (7, 0)),
+    ("1 failed, 4 passed, 1 error in 1.00s\n", (6, 0)),
+    ("3 passed, 562 deselected in 0.50s\n", (3, 562)),
+    ("1 xfailed, 2 passed in 0.10s\n", (3, 0)),
+    ("saída cortada\n", (0, 0)),
+])
+def test_km2_executados(saida, esperado):
+    assert cm.executados(saida) == esperado
+
+
+@pytest.mark.parametrize("projeto, copia, esperado, valida", [
+    ((5, 0), (5, 0), None, True),
+    ((5, 0), (5, 0), 5, True),
+    ((5, 0), (5, 0), 6, False),
+    ((5, 0), (4, 0), None, False),
+    ((3, 2), (3, 2), None, False),
+    (None, (5, 0), None, False),
+    ((5, 0), None, None, False),
+    ((0, 0), (0, 0), None, False),
+])
+def test_km2_validar_coleta(projeto, copia, esperado, valida):
+    assert (cm.validar_coleta(projeto, copia, esperado) is None) is valida
+
+
+def test_km2_coletar_testes_usa_collect_only_e_o_ambiente_do_filho(monkeypatch):
+    """KM2: a coleta roda --collect-only com o ambiente do filho (sem o PYTEST_ADDOPTS do pai)."""
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-k inexistente")
+    capturado = {}
+
+    def _executar(cmd, cwd, env, timeout):
+        capturado.update(cmd=cmd, env=env)
+        return 0, "7 tests collected in 0.10s\n"
+
+    monkeypatch.setattr(cm, "_executar", _executar)
+    assert cm._coletar_testes(".", ["tests/x.py"]) == (7, 0)
+    assert "--collect-only" in capturado["cmd"] and "tests/x.py" in capturado["cmd"]
+    assert "PYTEST_ADDOPTS" not in capturado["env"]
+
+
+def test_km2_rodar_testes_sem_pytest_addopts_do_pai(monkeypatch):
+    """KM2 (item 4, parte com falsos): com PYTEST_ADDOPTS="-k inexistente" no pai, o filho não o recebe."""
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-k inexistente")
+    monkeypatch.setenv("PYTEST_PLUGINS", "plugin_inexistente")
+    capturado = {}
+    monkeypatch.setattr(cm, "_executar", lambda cmd, cwd, env, timeout: capturado.update(env=env) or (0, ""))
+    cm._rodar_testes(".", ["tests/x.py"])
+    assert "PYTEST_ADDOPTS" not in capturado["env"] and "PYTEST_PLUGINS" not in capturado["env"]
+
+
+def test_km2_main_coleta_divergente_invalida_sem_rodar(fakes):
+    """KM2: projeto e cópia coletam números diferentes: rodada INVÁLIDA, sem m0 e sem mutações."""
+    f = fakes(coleta_copia=(2, 0))
+    assert cm.main(ARGS) == 2
+    assert f.vistos == []
+    md = (f.raiz / "docs" / "entregas" / "t1" / "c.md").read_text(encoding="utf-8")
+    assert "coleta diverge: projeto 3, cópia 2" in md and "Coletados (selecionados, deselecionados): projeto (3, 0)" in md
+
+
+def test_km2_main_coleta_com_deselecionados_invalida(fakes):
+    f = fakes(coleta_projeto=(1, 2), coleta_copia=(1, 2))
+    assert cm.main(ARGS) == 2
+    assert f.vistos == []
+
+
+def test_km2_main_esperado_diferente_invalida(fakes):
+    f = fakes()
+    assert cm.main(ARGS + ["--esperado-coletados", "4"]) == 2
+    assert f.vistos == []
+
+
+def test_km2_main_m0_executa_menos_que_o_coletado_invalida(fakes):
+    """KM2: o m0 passa, mas executa 2 dos 3 coletados: rodada INVÁLIDA, nenhuma mutação roda."""
+    f = fakes(m0_saida="2 passed in 0.10s\n")
+    assert cm.main(ARGS) == 2
+    assert len(f.vistos) == 1
+
+
+def test_km2_main_m0_com_deselected_invalida(fakes):
+    f = fakes(m0_saida="3 passed, 1 deselected in 0.10s\n")
+    assert cm.main(ARGS) == 2
+    assert len(f.vistos) == 1
+
+
+def test_km2_main_valida_registra_a_coleta_e_a_contagem(fakes):
+    f = fakes()
+    assert cm.main(ARGS + ["--esperado-coletados", "3"]) == 0
+    assert f.coletas == ["projeto", "copia"]
+    md = (f.raiz / "docs" / "entregas" / "t1" / "c.md").read_text(encoding="utf-8")
+    assert "projeto (3, 0), cópia (3, 0), esperado 3." in md
+    assert "Mutações: DETECTADAS 1, PASSOU 0, INVÁLIDAS 0, ERRO 0" in md
+
+
+def test_km2_main_mutante_so_com_error_e_invalido_e_nao_morto(fakes, monkeypatch):
+    """KM2 (item 2): um mutante que só produz "error" é INVÁLIDO (rc 2 na rodada), nunca contado como morto."""
+    f = fakes()
+    original = f.rodar_testes
+
+    def rodar(copia, testes):
+        codigo, saida = original(copia, testes)
+        if (copia / ALVO).read_bytes() != ORIGINAL:
+            return 1, "ERROR tests/test_alvo.py::test_f - setup\n1 error, 2 passed in 0.10s\n"
+        return codigo, saida
+
+    monkeypatch.setattr(cm, "_rodar_testes", rodar)
+    assert cm.main(ARGS) == 2
+    md = (f.raiz / "docs" / "entregas" / "t1" / "c.md").read_text(encoding="utf-8")
+    assert "Mutações: DETECTADAS 0, PASSOU 0, INVÁLIDAS 1, ERRO 0" in md

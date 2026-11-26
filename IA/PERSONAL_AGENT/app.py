@@ -177,12 +177,14 @@ from tools.oracle_dba import (
     HOST_COORDENADOR_LOCAL,
     NOME_FERRAMENTA_KILL,
     PORTA_COORDENADOR_LOCAL,
+    RESULTADO_ARGUMENTOS_INVALIDOS,
     RESULTADO_KILL_DESABILITADO,
     RESULTADO_ORACLE_SO_LOCAL,
     TEXTO_HISTORICO_COM_DADO_DO_BANCO,
     _registrar_erro_local,
     criar_cliente_coordenador_local,
     ferramenta_liberada_nuvem,
+    ler_argumentos_da_ferramenta,
     ferramentas_do_coordenador,
     kill_habilitado,
     coordenador_e_local,
@@ -326,11 +328,20 @@ def executar_agente_ui(prompt_usuario: str) -> Generator[str, None, None]:
         # Processa cada ferramenta solicitada
         for idx, tool_call in enumerate(mensagem_resposta.tool_calls):
             nome_funcao = tool_call.function.name
-            argumentos = (
-                json.loads(tool_call.function.arguments)
-                if tool_call.function.arguments
-                else {}
-            )
+            # KM2 (plano 9.10.2, item 6; P6a): argumento malformado não derruba o laço nem deixa o tool_call sem
+            # resposta no histórico; recusa fixa ao LLM e segue para a próxima tool_call.
+            argumentos = ler_argumentos_da_ferramenta(nome_funcao, tool_call.function.arguments)
+            if argumentos is None:
+                st.session_state.llm_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": nome_funcao,
+                        "content": RESULTADO_ARGUMENTOS_INVALIDOS,
+                    }
+                )
+                yield f"⛔ `{nome_funcao}` recusada: argumentos inválidos; nada foi executado."
+                continue
 
             # Auditoria: Registra intenção do Agente
             if (

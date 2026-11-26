@@ -681,6 +681,8 @@ LIBERADAS_ESPERADAS_K2 = {"coletar_metricas_hardware", "verificar_espaco_disco"}
 AUXILIARES_DO_LACO_K2 = {
     "coordenador_e_local", "historico_tem_dado_do_banco", "ferramenta_liberada_nuvem", "kill_habilitado",
     "ferramentas_do_coordenador", "_registrar_erro_local",
+    # KM2 (plano 9.10.2, item 6; ampliação declarada): lê os argumentos antes da recusa da nuvem, não é rota.
+    "ler_argumentos_da_ferramenta",
 }
 
 
@@ -1313,3 +1315,33 @@ def test_k7_t6_executor_leva_o_detalhe_ao_log_local(monkeypatch, ambiente_execut
 
     assert SENTINELA_DO_RAMO_K7[ramo] not in texto
     assert SENTINELA_DO_RAMO_K7[ramo] in caplog.text
+
+
+# =============================================================================
+# KM2, item 6 (docs/plans/1.11-R1-ampliada.md 9.10.2): argumentos da tool_call inválidos
+# =============================================================================
+
+@pytest.mark.parametrize(
+    "bruto, esperado",
+    [("", {}), (None, {}), ('{"drive": "C:\\\\"}', {"drive": "C:\\"}), ("{}", {})],
+    ids=["vazio", "none", "objeto", "objeto_vazio"],
+)
+def test_km2_ler_argumentos_validos(bruto, esperado):
+    assert od.ler_argumentos_da_ferramenta("ferramenta_x", bruto) == esperado
+
+
+@pytest.mark.parametrize(
+    "bruto",
+    ['{"drive": "C:\\\\sentinela-args', "[]", "3", "null", '"texto-sentinela-args"', 5, b"\xff"],
+    ids=["malformado", "lista", "numero", "null", "string", "int", "bytes_invalidos"],
+)
+def test_km2_ler_argumentos_invalidos_sem_ecoar_e_com_log(caplog, bruto):
+    """KM2, item 6 (mata M_KM2_SEM_DICT e M_KM2_SEM_LOG): o que não é JSON de objeto dá None e o motivo vai ao log
+    local; nunca levanta."""
+    with caplog.at_level(logging.WARNING, logger=od.logger.name):
+        assert od.ler_argumentos_da_ferramenta("ferramenta_x", bruto) is None
+    assert "ARGUMENTOS_INVALIDOS" in caplog.text and "ferramenta_x" in caplog.text
+    assert json.loads(od.RESULTADO_ARGUMENTOS_INVALIDOS) == {
+        "status": "recusado", "motivo": "ARGUMENTOS_INVALIDOS",
+        "mensagem": "Argumentos da ferramenta inválidos; nada foi executado.",
+    }
