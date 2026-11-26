@@ -1,0 +1,51 @@
+E               tests.test_oracle_kill._ErroOracleStrQuebrado: <exception str() failed>
+E               tests.test_oracle_kill._ErroOracleStrQuebrado: <exception str() failed>
+E               tests.test_oracle_kill._ErroGenericoStrQuebrado: <exception str() failed>
+          logger.error com o registro, desfecho normal com falha_registro="RESULTADO".
+                logger.error(
+            logger.error(
+            logger.error(
+          logger.error com o registro, desfecho normal com falha_registro="RESULTADO".
+                logger.error(
+            logger.error(
+            logger.error(
+          logger.error com o registro, desfecho normal com falha_registro="RESULTADO".
+                logger.error(
+            logger.error(
+            logger.error(
+        """K2 (A1, m30): p_status vazio (fora da lista fechada): st.error com 'resultado desconhecido' e o texto comum
+FAILED tests/test_oracle_kill.py::test_k2_status_fora_da_lista_fechada_e_resultado_desconhecido[erro_oracle]
+FAILED tests/test_oracle_kill.py::test_k2_status_fora_da_lista_fechada_e_resultado_desconhecido[vazio]
+FAILED tests/test_oracle_kill.py::test_k2_status_fora_da_lista_fechada_e_resultado_desconhecido[nulo]
+FAILED tests/test_oracle_kill.py::test_k2_status_fora_da_lista_fechada_e_resultado_desconhecido[codigo_novo]
+FAILED tests/test_oracle_kill.py::test_k2_status_fora_da_lista_fechada_e_resultado_desconhecido[minusculo]
+FAILED tests/test_oracle_kill.py::test_k2_recusas_do_pkg_nao_sao_desconhecidas_nem_executadas[PARAM_INVALIDO]
+FAILED tests/test_oracle_kill.py::test_k2_recusas_do_pkg_nao_sao_desconhecidas_nem_executadas[PROPRIA_SESSAO]
+FAILED tests/test_oracle_kill.py::test_k2_recusas_do_pkg_nao_sao_desconhecidas_nem_executadas[ALVO_NAO_ENCONTRADO]
+FAILED tests/test_oracle_kill.py::test_k2_recusas_do_pkg_nao_sao_desconhecidas_nem_executadas[ALVO_DIVERGENTE]
+FAILED tests/test_oracle_kill.py::test_k2_recusas_do_pkg_nao_sao_desconhecidas_nem_executadas[NAO_USUARIO]
+FAILED tests/test_oracle_kill.py::test_k2_recusas_do_pkg_nao_sao_desconhecidas_nem_executadas[USUARIO_PROTEGIDO]
+FAILED tests/test_oracle_kill.py::test_k2_invariantes_das_listas_de_status_do_pkg
+FAILED tests/test_oracle_kill.py::test_k2_str_do_erro_que_levanta_nao_escapa_de_matar_sessao[oracle_depois_do_execute]
+FAILED tests/test_oracle_kill.py::test_k2_str_do_erro_que_levanta_nao_escapa_de_matar_sessao[oracle_antes_do_execute]
+FAILED tests/test_oracle_kill.py::test_k2_str_do_erro_que_levanta_nao_escapa_de_matar_sessao[generico_antes_do_execute]
+FAILED tests/test_oracle_kill.py::test_k2_retorno_ilegivel_do_fluxo_de_kill_e_resultado_desconhecido[nao_json]
+FAILED tests/test_oracle_kill.py::test_k2_retorno_ilegivel_do_fluxo_de_kill_e_resultado_desconhecido[lista_vazia]
+FAILED tests/test_oracle_kill.py::test_k2_retorno_ilegivel_do_fluxo_de_kill_e_resultado_desconhecido[json_string]
+FAILED tests/test_oracle_kill.py::test_k2_retorno_ilegivel_do_fluxo_de_kill_e_resultado_desconhecido[none]
+FAILED tests/test_oracle_kill.py::test_k2_retorno_ilegivel_do_fluxo_de_kill_e_resultado_desconhecido[json_numero]
+FAILED tests/test_oracle_kill.py::test_k2_so_o_false_literal_tira_o_desconhecido[chave_ausente]
+FAILED tests/test_oracle_kill.py::test_k2_so_o_false_literal_tira_o_desconhecido[zero]
+FAILED tests/test_oracle_kill.py::test_k2_so_o_false_literal_tira_o_desconhecido[none]
+FAILED tests/test_oracle_kill.py::test_k2_so_o_false_literal_tira_o_desconhecido[texto_false]
+FAILED tests/test_oracle_kill.py::test_k2_todo_json_dumps_traz_resultado_desconhecido[matar_sessao_oracle]
+FAILED tests/test_oracle_kill.py::test_k2_todo_json_dumps_traz_resultado_desconhecido[executar_kill_verificado]
+FAILED tests/test_oracle_kill.py::test_k2_montar_notificacao_kill_resultado_desconhecido_keyword_only_sem_default
+FAILED tests/test_oracle_kill.py::test_k2_email_desconhecido_sem_erro_do_oracle_direto
+FAILED tests/test_oracle_kill.py::test_k2_email_do_desconhecido_no_fluxo_sem_erro_do_oracle[d8_getvalue_levanta]
+FAILED tests/test_oracle_kill.py::test_k2_email_do_desconhecido_no_fluxo_sem_erro_do_oracle[status_vazio]
+FAILED tests/test_oracle_kill.py::test_k2_email_do_desconhecido_no_fluxo_sem_erro_do_oracle[erro_oracle_no_execute]
+FAILED tests/test_fluxo_cli.py::test_cli_status_pkg_vazio_e_resultado_desconhecido
+FAILED tests/test_fluxo_web.py::test_web_status_pkg_vazio_e_resultado_desconhecido
+FAILED tests/test_item1_intencao.py::test_erro_interno_grava_resultado
+34 failed, 151 passed, 6 skipped, 13 warnings in 50.30s

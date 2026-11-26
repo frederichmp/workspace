@@ -1,0 +1,17 @@
+[
+  {"nome": "M_LIMITE_GE_128", "de": "len(valor) > LIMITE_TEXTO_IDENTIDADE", "para": "len(valor) >= LIMITE_TEXTO_IDENTIDADE"},
+  {"nome": "M_EXEC_INICIADO_ANTES_VAR",
+   "de": "        status_var = cursor.var(oracledb.DB_TYPE_VARCHAR, size=128)\n        logon_var = cursor.var(oracledb.DB_TYPE_DATE)\n        logon_var.setvalue(0, identidade_esperada[\"logon_time\"])\n        execute_iniciado = True\n",
+   "para": "        execute_iniciado = True\n        status_var = cursor.var(oracledb.DB_TYPE_VARCHAR, size=128)\n        logon_var = cursor.var(oracledb.DB_TYPE_DATE)\n        logon_var.setvalue(0, identidade_esperada[\"logon_time\"])\n"},
+  {"nome": "M_EXEC_KILL_GET_DEFAULT",
+   "de": "{c: alvo_reconsulta[c] for c in CAMPOS_IDENTIDADE_ESPERADA if c in alvo_reconsulta}",
+   "para": "{c: alvo_reconsulta.get(c) for c in CAMPOS_IDENTIDADE_ESPERADA}"},
+  {"nome": "X_REGEX_ID_0_9A_Z", "de": "_REGEX_ID_INTERVENCAO = re.compile(r\"[0-9a-f]{32}\")", "para": "_REGEX_ID_INTERVENCAO = re.compile(r\"[0-9a-z]{32}\")"},
+  {"nome": "M_RHS_SWAP_PROG_MACH",
+   "de": "                    p_program_esperado    => :p_program_esperado,\n                    p_machine_esperado    => :p_machine_esperado,\n",
+   "para": "                    p_program_esperado    => :p_machine_esperado,\n                    p_machine_esperado    => :p_program_esperado,\n"},
+  {"nome": "M_RHS_SWAP_SID_SERIAL",
+   "de": "                    p_sid                 => :p_sid,\n                    p_serial              => :p_serial,\n",
+   "para": "                    p_sid                 => :p_serial,\n                    p_serial              => :p_sid,\n"},
+  {"nome": "m27_limite_em_bytes_utf8", "de": "len(valor) > LIMITE_TEXTO_IDENTIDADE", "para": "len(valor.encode(\"utf-8\")) > LIMITE_TEXTO_IDENTIDADE"}
+]

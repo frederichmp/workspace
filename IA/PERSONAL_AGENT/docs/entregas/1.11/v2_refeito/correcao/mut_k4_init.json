@@ -1,0 +1,8 @@
+[
+  {"nome": "m23a_volta_ao_all",
+   "de": "\"oracle_tools_schema\",",
+   "para": "\"oracle_tools_schema\", \"matar_sessao_oracle\","},
+  {"nome": "m23b_volta_o_import_sem_all",
+   "de": "    oracle_tools_schema,",
+   "para": "    oracle_tools_schema,\n    matar_sessao_oracle,"}
+]

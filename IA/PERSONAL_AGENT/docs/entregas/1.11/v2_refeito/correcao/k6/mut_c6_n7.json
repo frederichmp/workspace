@@ -1,0 +1,7 @@
+[
+ {
+  "nome": "N7_BLOCO_COMENTARIO_PLSQL_V1",
+  "de": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n",
+  "para": "                    /*\r\n                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    */\r\n"
+ }
+]

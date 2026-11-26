@@ -1,0 +1,11 @@
+# Controle de mutação `mut_c4_n2_n3`
+
+Alvo `src/tools/oracle_dba.py`; testes `tests/test_oracle_kill.py`, `tests/test_item1_intencao.py`, `tests/test_fluxo_cli.py`, `tests/test_fluxo_web.py`; cópia `git archive HEAD` + `tests/test_oracle_kill.py`.
+
+| Mutação | Troca | Contagem | Resultado | Status |
+|---|---|---|---|---|
+| m0 | sem mutação | - | 273 passed, 6 skipped, 13 warnings in 55.72s | OK |
+| N2_PREP_GET_DEFAULT |     identidade = {c: fonte[c] for c in CAMPOS_IDENTIDADE_ESPERADA if … | 1 substituição | 1 failed, 272 passed, 6 skipped, 13 warnings in 56.63s \| caíram: tes… | DETECTADA |
+| N3_PRE_HITL_IGNORA_CAMINHO_EFETIVO |             _gravar_linha_jsonl_duravel(_caminho_log_efetivo(caminho_… | 1 substituição | 1 failed, 272 passed, 6 skipped, 13 warnings in 55.22s \| caíram:    … | DETECTADA |
+
+Resultado: todas DETECTADAS.

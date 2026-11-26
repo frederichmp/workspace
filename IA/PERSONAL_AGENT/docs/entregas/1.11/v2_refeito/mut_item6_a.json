@@ -1,0 +1,42 @@
+[
+ {
+  "nome": "m1_assinatura_v1_4_binds",
+  "de": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n            p_username_esperado=identidade_esperada[\"username\"],\r\n            p_program_esperado=identidade_esperada[\"program\"],\r\n            p_machine_esperado=identidade_esperada[\"machine\"],\r\n            p_logon_time_esperado=logon_var,\r\n            p_ref_aprovacao=ref_aprovacao,\r\n",
+  "para": "                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n"
+ },
+ {
+  "nome": "m2_ordem_trocada_bloco_e_binds",
+  "de": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n            p_username_esperado=identidade_esperada[\"username\"],\r\n            p_program_esperado=identidade_esperada[\"program\"],\r\n            p_machine_esperado=identidade_esperada[\"machine\"],\r\n            p_logon_time_esperado=logon_var,\r\n            p_ref_aprovacao=ref_aprovacao,\r\n",
+  "para": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n            p_username_esperado=identidade_esperada[\"username\"],\r\n            p_machine_esperado=identidade_esperada[\"machine\"],\r\n            p_program_esperado=identidade_esperada[\"program\"],\r\n            p_logon_time_esperado=logon_var,\r\n            p_ref_aprovacao=ref_aprovacao,\r\n"
+ },
+ {
+  "nome": "m3_ordem_trocada_so_binds",
+  "de": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n            p_username_esperado=identidade_esperada[\"username\"],\r\n            p_program_esperado=identidade_esperada[\"program\"],\r\n            p_machine_esperado=identidade_esperada[\"machine\"],\r\n            p_logon_time_esperado=logon_var,\r\n            p_ref_aprovacao=ref_aprovacao,\r\n",
+  "para": "                    p_username_esperado   => :p_username_esperado,\r\n                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n                    p_logon_time_esperado => :p_logon_time_esperado,\r\n                    p_ref_aprovacao       => :p_ref_aprovacao,\r\n                    p_status              => :p_status\r\n                );\r\n            END;\r\n            \"\"\",\r\n            p_inst_id=inst_id_int,\r\n            p_sid=sid_int,\r\n            p_serial=serial_int,\r\n            p_username_esperado=identidade_esperada[\"username\"],\r\n            p_machine_esperado=identidade_esperada[\"machine\"],\r\n            p_program_esperado=identidade_esperada[\"program\"],\r\n            p_logon_time_esperado=logon_var,\r\n            p_ref_aprovacao=ref_aprovacao,\r\n"
+ },
+ {
+  "nome": "m4_ref_aleatorio",
+  "de": "            p_ref_aprovacao=ref_aprovacao,",
+  "para": "            p_ref_aprovacao=uuid.uuid4().hex,"
+ },
+ {
+  "nome": "m5_logon_cru_sem_var_date",
+  "de": "            p_logon_time_esperado=logon_var,",
+  "para": "            p_logon_time_esperado=identidade_esperada[\"logon_time\"],"
+ },
+ {
+  "nome": "m6_ref_com_default_none",
+  "de": "    identidade_esperada: Dict[str, Any],\r\n    ref_aprovacao: str,\r\n",
+  "para": "    identidade_esperada: Dict[str, Any],\r\n    ref_aprovacao: str = None,\r\n"
+ },
+ {
+  "nome": "m7_sem_validacao_local",
+  "de": "    invalidos = campos_invalidos_identidade_e_ref(identidade_esperada, ref_aprovacao)\r\n",
+  "para": "    invalidos = []\r\n"
+ },
+ {
+  "nome": "m8_strip_no_username",
+  "de": "            p_username_esperado=identidade_esperada[\"username\"],",
+  "para": "            p_username_esperado=identidade_esperada[\"username\"].strip(),"
+ }
+]

@@ -1,0 +1,12 @@
+[
+ {
+  "nome": "N4_GATE_SANDBOX_DESLIGADO",
+  "de": "    if os.getenv(\"OPS_KILL_PKG_VERSAO\") != \"2\":\r\n        pytest.skip(\"Teste ignorado: requer OPS_KILL_PKG_VERSAO=2 (PKG_OPS_KILL v2 instalado)\")\r\n",
+  "para": "    pass\r\n"
+ },
+ {
+  "nome": "N8_SANDBOX_PASSA_NONE",
+  "de": "            identidade_esperada=identidade, ref_aprovacao=uuid.uuid4().hex,\r\n",
+  "para": "            identidade_esperada=None, ref_aprovacao=None,\r\n"
+ }
+]

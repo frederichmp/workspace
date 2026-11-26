@@ -1,0 +1,12 @@
+[
+ {
+  "nome": "N2_PREP_GET_DEFAULT",
+  "de": "    identidade = {c: fonte[c] for c in CAMPOS_IDENTIDADE_ESPERADA if c in fonte}\r\n",
+  "para": "    identidade = {c: fonte.get(c) for c in CAMPOS_IDENTIDADE_ESPERADA}\r\n"
+ },
+ {
+  "nome": "N3_PRE_HITL_IGNORA_CAMINHO_EFETIVO",
+  "de": "            _gravar_linha_jsonl_duravel(_caminho_log_efetivo(caminho_log), registro)\r\n",
+  "para": "            _gravar_linha_jsonl_duravel(Path(caminho_log), registro)\r\n"
+ }
+]

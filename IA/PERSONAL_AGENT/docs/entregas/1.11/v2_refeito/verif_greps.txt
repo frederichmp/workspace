@@ -1,0 +1,24 @@
+## 3.1 conta Oracle legada (código 1)
+(nenhuma linha)
+
+## 3.2 SQL de sessão no Python (código 1)
+(nenhuma linha)
+
+## 3.3 recarga do .env (código 1)
+(nenhuma linha)
+
+## 3.5 código que liga o sandbox (código 1)
+(nenhuma linha)
+
+## 3.6 credencial em print ou log (código 0)
+docs/entregas/revisao-subagentes-v2/medir_subagentes.py:58
+
+## 3.4 load_dotenv (código 0)
+app.py:73:        load_dotenv(stream=io.StringIO(texto), override=False)
+src/main.py:58:        load_dotenv(stream=io.StringIO(texto), override=False)
+
+## 3.7 git diff --stat 37b3cc1 -- registry/ db/
+(vazio)
+
+## 3.8 .env versionado
+nenhum

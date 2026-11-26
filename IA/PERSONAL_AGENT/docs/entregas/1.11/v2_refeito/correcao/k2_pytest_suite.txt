@@ -1,0 +1,40 @@
+........................................................................ [  5%]
+........................................................................ [ 10%]
+.................sss..s..ss.ss.......................................... [ 16%]
+........................................................................ [ 21%]
+........................................................................ [ 26%]
+........................................................................ [ 32%]
+........................................................................ [ 37%]
+........................................................................ [ 42%]
+........................................................................ [ 48%]
+........................................................................ [ 53%]
+........................................................................ [ 59%]
+........................................................................ [ 64%]
+........................................................................ [ 69%]
+........................................................................ [ 75%]
+........................................................................ [ 80%]
+........................................................................ [ 85%]
+........................................................................ [ 91%]
+........................ssssssss........................................ [ 96%]
+..............................................                           [100%]
+============================== warnings summary ===============================
+..\..\..\..\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: 13 warnings
+  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\langsmith\_internal\_beta_decorator.py:92: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_rag_search_env.py::test_contador_ve_o_env_do_diretorio_corrente
+  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\overrides\typing_utils.py:50: DeprecationWarning: 'typing.ByteString' and 'collections.abc.ByteString' are deprecated and slated for removal in Python 3.17
+    typing.ByteString: bytes,  # https://docs.python.org/3/library/typing.html#typing.ByteString
+
+tests/test_rag_search_env.py::test_contador_ve_o_env_do_diretorio_corrente
+  C:\Users\Frederich\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages\chromadb\telemetry\opentelemetry\__init__.py:128: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(f):
+
+tests/test_rag_search_env.py::test_obter_vectorstore_nao_le_env
+  C:\Users\Frederich\OneDrive - Startup Dados e Sistemas Ltda - EPP\Workspace\IA\PERSONAL_AGENT\src\tools\rag_search.py:39: LangChainDeprecationWarning: The class `Chroma` was deprecated in LangChain 0.2.9 and will be removed in 1.0. An updated version of the class exists in the `langchain-chroma package and should be used instead. To use it run `pip install -U `langchain-chroma` and import as `from `langchain_chroma import Chroma``.
+    _VECTORSTORE_INSTANCE = Chroma(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+SKIPPED [16] tests\conftest.py:188: Teste ignorado: requer ambiente de sandbox autorizado (ORACLE_SANDBOX=1)
+1326 passed, 16 skipped, 16 warnings in 184.63s (0:03:04)

@@ -10,8 +10,10 @@ Nenhum skip de plataforma. Falhas de E/S são injetadas assim:
 Os subprocessos (`python -I`) não importam o .env: o módulo `dotenv` é substituído por um falso no filho,
 e o filho de lock usa só msvcrt/fcntl.
 """
+import ast
 from datetime import datetime, timedelta, timezone
 import errno
+import inspect
 import json
 import logging
 import os
@@ -43,6 +45,7 @@ from tests.fakes_oracle import (
     USER_KILL_FAKE,
     _OracleFake,
     _linha_alvo,
+    _sem_comentarios_sql,
 )
 from tests.test_oracle_kill import (  # noqa: F401  (ambiente_fake é uma fixture)
     ARGS_ALVO,
@@ -54,6 +57,16 @@ from tests.test_oracle_kill import (  # noqa: F401  (ambiente_fake é uma fixtur
 )
 
 RAIZ = Path(__file__).resolve().parent.parent
+# Os 9 formais do PKG_OPS_KILL v2, na ordem da spec (docs/plans/1.11.md:117; implantacao.md:68-82).
+ORDEM_BINDS_KILL_V2 = [
+    "p_inst_id", "p_sid", "p_serial", "p_username_esperado", "p_program_esperado", "p_machine_esperado",
+    "p_logon_time_esperado", "p_ref_aprovacao", "p_status",
+]
+# A2 (revisão do Gemini): cada formal ligado ao placeholder de mesmo nome, à direita de "=>".
+PARES_BINDS_KILL_V2 = [(nome, nome) for nome in ORDEM_BINDS_KILL_V2]
+REGEX_PAR_FORMAL_PLACEHOLDER = r"\b(p_\w+)\s*=>\s*:(\w+)\b"
+# Spec proposta do PKG v2 (A4.4): fonte dos formais, tipos e direções.
+SQL_PKG_KILL_V2 = RAIZ / "docs" / "entregas" / "1.11" / "item6" / "ops_kill.sql"
 ID_A = "a" * 32
 ID_B = "b" * 32
 ID_C = "c" * 32
@@ -207,9 +220,17 @@ def test_intencao_gravada_antes_da_conta_kill(monkeypatch, tmp_path, ambiente_fa
     assert re.fullmatch(r"[0-9a-f]{32}", intencao["id_intervencao"])
     assert resultado["resultado_banco"] == "ENCERRADA"
     assert desfecho["falha_registro"] is None
-    # Sem o item 6 (aa9a0a5 revertido): a chamada ao PKG continua v1 (4 binds), sem ref_aprovacao
-    (_, _, binds), = [s for s in fake.sql_executado if s[0] == "KILL"]
-    assert set(binds) == {"p_inst_id", "p_sid", "p_serial", "p_status"}
+    # Item 6 v2 (docs/plans/1.11-V2-item6.md §4.3; decisao.md D7): a chamada ao PKG tem os 9 formais da v2,
+    # conferidos por nome e ordem nos binds e no texto do bloco; o ref é o id_intervencao da INTENCAO e da
+    # RESULTADO; o logon_time vai numa var DATE com o valor lido pela DIAG.
+    (_, sql, binds), = [s for s in fake.sql_executado if s[0] == "KILL"]
+    assert list(binds) == ORDEM_BINDS_KILL_V2
+    assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2
+    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, _sem_comentarios_sql(sql)) == PARES_BINDS_KILL_V2, "placeholder trocado (A2)"
+    assert binds["p_ref_aprovacao"] == intencao["id_intervencao"]
+    assert binds["p_ref_aprovacao"] == resultado["id_intervencao"]
+    assert binds["p_logon_time_esperado"].tipo is oracledb.DB_TYPE_DATE
+    assert binds["p_logon_time_esperado"].getvalue() == _linha_alvo()[COLUNAS_ALVO.index("LOGON_TIME")]
 
 
 # =============================================================================
@@ -357,7 +378,7 @@ def test_fsync_diretorio_so_quando_arquivo_novo(monkeypatch, tmp_path, fsync_dir
     for id_ in (ID_A, ID_B):
         registrar_log_aprovacao_kill(
             "dba_teste", "REJEITADO", "h", {"sid": 1}, motivo="T", caminho_log=log,
-            fase="RESULTADO", id_intervencao=id_,
+            fase="RESULTADO", id_intervencao=id_, resultado_desconhecido=False,
         )
     assert chamadas == ([log.parent] if fsync_dir_ativo else [])
 
@@ -367,17 +388,17 @@ def test_registro_fase_e_id_validados(tmp_path):
     base = dict(aprovador="dba", hash_payload="h", parametros={}, caminho_log=log)
 
     with pytest.raises(TypeError):
-        registrar_log_aprovacao_kill(decisao="REJEITADO", id_intervencao=ID_A, **base)  # sem fase
+        registrar_log_aprovacao_kill(decisao="REJEITADO", id_intervencao=ID_A, resultado_desconhecido=False, **base)  # sem fase
     with pytest.raises(TypeError):
-        registrar_log_aprovacao_kill(decisao="REJEITADO", fase="RESULTADO", **base)  # sem id
+        registrar_log_aprovacao_kill(decisao="REJEITADO", fase="RESULTADO", resultado_desconhecido=False, **base)  # sem id
     for kw in (
-        dict(decisao="REJEITADO", fase="X", id_intervencao=ID_A),
-        dict(decisao="REJEITADO", fase="INTENCAO", id_intervencao=ID_A),
-        dict(decisao="APROVADO", fase="INTENCAO", id_intervencao=ID_A, resultado_banco="ENCERRADA"),
-        dict(decisao="REJEITADO", fase="RESULTADO", id_intervencao="abc"),
-        dict(decisao="REJEITADO", fase="RESULTADO", id_intervencao="A" * 32),
-        dict(decisao="REJEITADO", fase="RESULTADO", id_intervencao=None),
-        dict(decisao="INVALIDA", fase="RESULTADO", id_intervencao=ID_A),
+        dict(decisao="REJEITADO", fase="X", id_intervencao=ID_A, resultado_desconhecido=None),
+        dict(decisao="REJEITADO", fase="INTENCAO", id_intervencao=ID_A, resultado_desconhecido=None),
+        dict(decisao="APROVADO", fase="INTENCAO", id_intervencao=ID_A, resultado_banco="ENCERRADA", resultado_desconhecido=None),
+        dict(decisao="REJEITADO", fase="RESULTADO", id_intervencao="abc", resultado_desconhecido=False),
+        dict(decisao="REJEITADO", fase="RESULTADO", id_intervencao="A" * 32, resultado_desconhecido=False),
+        dict(decisao="REJEITADO", fase="RESULTADO", id_intervencao=None, resultado_desconhecido=False),
+        dict(decisao="INVALIDA", fase="RESULTADO", id_intervencao=ID_A, resultado_desconhecido=False),
     ):
         with pytest.raises(ValueError):
             registrar_log_aprovacao_kill(**kw, **base)
@@ -553,6 +574,94 @@ def test_pls00306_no_execute_e_resultado_desconhecido(monkeypatch, tmp_path, amb
     assert MENSAGEM_RESULTADO_DESCONHECIDO in ambiente_fake[0]["assunto"]
 
 
+@pytest.mark.parametrize(
+    "cenario, fake_kw, resultado_esperado",
+    [
+        ("encerrada", {"status_pkg": "ENCERRADA"}, "ENCERRADA"),
+        ("alvo_divergente", {"status_pkg": "ALVO_DIVERGENTE"}, "ALVO_DIVERGENTE"),
+        ("erro_no_execute", {"erro_kill": oracledb.DatabaseError("ORA-00600: erro interno")}, "ERRO_ORACLE"),
+        # A7c (revisão do Gemini): todo p_status do PKG v2, com 1 execute só (casos acrescentados)
+        ("marcada_para_kill", {"status_pkg": "MARCADA_PARA_KILL"}, "MARCADA_PARA_KILL"),
+        ("param_invalido", {"status_pkg": "PARAM_INVALIDO"}, "PARAM_INVALIDO"),
+        ("propria_sessao", {"status_pkg": "PROPRIA_SESSAO"}, "PROPRIA_SESSAO"),
+        ("alvo_nao_encontrado", {"status_pkg": "ALVO_NAO_ENCONTRADO"}, "ALVO_NAO_ENCONTRADO"),
+        ("nao_usuario", {"status_pkg": "NAO_USUARIO"}, "NAO_USUARIO"),
+        ("usuario_protegido", {"status_pkg": "USUARIO_PROTEGIDO"}, "USUARIO_PROTEGIDO"),
+        ("status_erro_oracle", {"status_pkg": "ERRO_ORACLE"}, "ERRO_ORACLE"),
+        ("status_vazio", {"status_pkg": ""}, "DESCONHECIDO"),
+    ],
+)
+def test_kill_ponto_unico_de_chamada(monkeypatch, tmp_path, ambiente_fake, cenario, fake_kw, resultado_esperado):
+    """implantacao.md:202-205 (achado da conferencia.md do passo 7): fluxo completo aprovado, nos 3 cenários,
+    com exatamente 1 conexão KILL e exatamente 1 execute na conta KILL, e esse execute é o bloco v2 com os
+    9 formais em ordem. Prova pelo comportamento que não há segunda chamada nem bloco alternativo de 4
+    formais em nenhum caminho (o ALVO_DIVERGENTE incluído)."""
+    log = tmp_path / "kill.log"
+    fake = _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo(), _linha_alvo()], **fake_kw))
+    desfecho = conduzir_kill_hitl(dict(ARGS_ALVO), solicitar_aprovacao=_aprovar(), canal="TESTE", caminho_log=log)
+
+    assert desfecho["resultado_banco"] == resultado_esperado
+    assert fake.conexoes_kill == [USER_KILL_FAKE], f"{cenario}: exatamente 1 conexão KILL"
+    execucoes = [(sql, binds) for conta, sql, binds in fake.sql_executado if conta == "KILL"]
+    assert len(execucoes) == 1, f"{cenario}: exatamente 1 execute na conta KILL"
+    sql, binds = execucoes[0]
+    assert "OPS_OWNER.PKG_OPS_KILL.KILL_SESSION" in sql
+    assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2
+    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, _sem_comentarios_sql(sql)) == PARES_BINDS_KILL_V2, f"{cenario}: placeholder trocado (A2)"
+    assert list(binds) == ORDEM_BINDS_KILL_V2
+
+
+def _formais_do_procedure(texto_sql):
+    """Lista (nome, direção, tipo) de cada PROCEDURE kill_session do SQL (spec e body), na ordem."""
+    blocos = re.findall(r"PROCEDURE\s+kill_session\s*\((.*?)\)\s*(?:;|IS\b)", texto_sql, flags=re.IGNORECASE | re.DOTALL)
+    return [
+        [tuple(m) for m in re.findall(r"\b(p_\w+)\s+(IN|OUT|IN\s+OUT)\s+(\w+)", bloco, flags=re.IGNORECASE)]
+        for bloco in blocos
+    ]
+
+
+def test_ordem_binds_kill_v2_igual_aos_formais_da_spec_sql():
+    """A4.4 (revisão do Gemini): ORDEM_BINDS_KILL_V2 (cópia manual) amarrada aos formais da spec e do body do PKG v2
+    proposto (docs/entregas/1.11/item6/ops_kill.sql:56-66 e :92-102): mesmos nomes, mesma ordem; logon_time é
+    IN DATE; p_status é OUT VARCHAR2; os demais são IN."""
+    formais = _formais_do_procedure(SQL_PKG_KILL_V2.read_text(encoding="utf-8"))
+    assert len(formais) == 2, "spec e body do kill_session"
+    for lista in formais:
+        assert [nome.lower() for nome, _, _ in lista] == ORDEM_BINDS_KILL_V2
+        tipos = {nome.lower(): (direcao.upper(), tipo.upper()) for nome, direcao, tipo in lista}
+        assert tipos["p_logon_time_esperado"] == ("IN", "DATE")
+        assert tipos["p_status"] == ("OUT", "VARCHAR2")
+        assert all(d == "IN" for n, (d, _) in tipos.items() if n != "p_status")
+
+
+def test_t6_v2_contra_pkg_v1_falha_fechado_sem_fallback(monkeypatch, tmp_path, ambiente_fake):
+    """T6 (decisao.md D6; plano §7.4): o Python v2 contra o PKG v1 (PLS-00306 no execute) falha fechado.
+    Exatamente 1 execute na conta KILL, com o bloco v2 de 9 formais; nenhum bloco de 4 formais, nenhuma
+    retentativa; ERRO_ORACLE com resultado desconhecido, executado False e RESULTADO gravada."""
+    log = tmp_path / "kill.log"
+    fake = _instalar_oracle(
+        monkeypatch,
+        _OracleFake(
+            [_linha_alvo(), _linha_alvo()],
+            erro_kill=oracledb.DatabaseError("PLS-00306: wrong number or types of arguments in call to 'KILL_SESSION'"),
+        ),
+    )
+    desfecho = conduzir_kill_hitl(dict(ARGS_ALVO), solicitar_aprovacao=_aprovar(), canal="TESTE", caminho_log=log)
+
+    execucoes = [(sql, binds) for conta, sql, binds in fake.sql_executado if conta == "KILL"]
+    assert len(execucoes) == 1, "sem fallback nem retentativa: 1 execute só"
+    sql, binds = execucoes[0]
+    assert list(binds) == ORDEM_BINDS_KILL_V2
+    assert re.findall(r"\b(p_\w+)\s*=>", sql) == ORDEM_BINDS_KILL_V2, "nenhum bloco v1 de 4 formais"
+    assert re.findall(REGEX_PAR_FORMAL_PLACEHOLDER, _sem_comentarios_sql(sql)) == PARES_BINDS_KILL_V2, "placeholder trocado (A2)"
+    assert desfecho["resultado_banco"] == "ERRO_ORACLE"
+    assert desfecho["resultado_desconhecido"] is True
+    assert desfecho["executado"] is False
+    registros = _ler_jsonl(log)
+    assert [r["fase"] for r in registros] == ["INTENCAO", "RESULTADO"]
+    assert registros[1]["resultado_banco"] == "ERRO_ORACLE"
+
+
 # =============================================================================
 # T9 / T10: exceções dentro do fluxo
 # =============================================================================
@@ -582,7 +691,12 @@ def test_erro_interno_grava_resultado(monkeypatch, tmp_path, ambiente_fake, capl
     assert resultado["resultado_banco"] == "ERRO_INTERNO" and resultado["motivo"] == "RuntimeError"
     assert intencao["id_intervencao"] == resultado["id_intervencao"]
     assert fake.conexoes_kill == []
-    assert len(ambiente_fake) == 1 and "NÃO executada" in ambiente_fake[0]["assunto"]
+    # Expectativa alterada, declarada (correcao/decisao_c1.md P1, aceita pelo responsável em 2026-11-24):
+    # ERRO_INTERNO é sempre "resultado desconhecido", mesmo antes da conta KILL (falha fechada).
+    assert len(ambiente_fake) == 1
+    assert oracle_dba.MENSAGEM_RESULTADO_DESCONHECIDO in ambiente_fake[0]["assunto"]
+    assert "NÃO executada" not in ambiente_fake[0]["assunto"]
+    assert desfecho["resultado_desconhecido"] is True
     assert desfecho["resultado_banco"] == "ERRO_INTERNO" and desfecho["executado"] is False
     assert "segredo-xyz" not in log.read_text(encoding="utf-8")
     assert "segredo-xyz" not in desfecho["resultado_tool"]
@@ -768,7 +882,7 @@ def test_reconciliador_idempotente_e_resultado_real_posterior(tmp_path):
     # Uma RESULTADO real que chegue depois é anexada normalmente (o log é append-only) e prevalece para o auditor
     registrar_log_aprovacao_kill(
         "dba_teste", "APROVADO", "h", {"inst_id": 1, "sid": 101, "serial": 202}, resultado_banco="ENCERRADA",
-        caminho_log=log, fase="RESULTADO", id_intervencao=ID_A,
+        caminho_log=log, fase="RESULTADO", id_intervencao=ID_A, resultado_desconhecido=False,
     )
     resultados_a = [r["resultado_banco"] for r in _ler_jsonl(log) if r["fase"] == "RESULTADO"
                     and r["id_intervencao"] == ID_A]
@@ -920,7 +1034,7 @@ def test_lock_de_arquivo_entre_processos(monkeypatch, tmp_path):
         # Uma gravação (INTENCAO) com o lock ocupado falha e não deixa linha no arquivo
         with pytest.raises(LockLogAprovacaoIndisponivel):
             registrar_log_aprovacao_kill(
-                "dba_teste", "APROVADO", "h", {}, caminho_log=log, fase="INTENCAO", id_intervencao=ID_A,
+                "dba_teste", "APROVADO", "h", {}, caminho_log=log, fase="INTENCAO", id_intervencao=ID_A, resultado_desconhecido=None,
             )
         assert not log.exists() or log.read_bytes() == b""
     finally:
@@ -928,7 +1042,7 @@ def test_lock_de_arquivo_entre_processos(monkeypatch, tmp_path):
 
     # Liberado o lock, a gravação volta a funcionar
     registrar_log_aprovacao_kill(
-        "dba_teste", "APROVADO", "h", {}, caminho_log=log, fase="INTENCAO", id_intervencao=ID_A,
+        "dba_teste", "APROVADO", "h", {}, caminho_log=log, fase="INTENCAO", id_intervencao=ID_A, resultado_desconhecido=None,
     )
     assert _fases_no_log(log) == ["INTENCAO"]
 
@@ -941,7 +1055,7 @@ def test_lock_liberado_durante_a_espera_permite_gravar(monkeypatch, tmp_path):
     try:
         threading.Timer(0.5, lambda: (proc.stdin.write("fim\n"), proc.stdin.flush())).start()
         registrar_log_aprovacao_kill(
-            "dba_teste", "APROVADO", "h", {}, caminho_log=log, fase="INTENCAO", id_intervencao=ID_B,
+            "dba_teste", "APROVADO", "h", {}, caminho_log=log, fase="INTENCAO", id_intervencao=ID_B, resultado_desconhecido=None,
         )
     finally:
         _encerrar(proc)
@@ -957,7 +1071,7 @@ def test_gravacao_concorrente_threads(tmp_path):
             for n in range(15):
                 registrar_log_aprovacao_kill(
                     f"dba_{indice}", "REJEITADO", "h", {"n": n}, motivo="T", caminho_log=log,
-                    fase="RESULTADO", id_intervencao=f"{indice:016x}{n:016x}",
+                    fase="RESULTADO", id_intervencao=f"{indice:016x}{n:016x}", resultado_desconhecido=False,
                 )
         except Exception as exc:  # pragma: no cover
             erros.append(exc)
@@ -983,7 +1097,7 @@ def test_gravacao_cria_a_pasta_do_log(tmp_path):
     log = tmp_path / "a" / "b" / "kill.log"
     assert not log.parent.exists()
     registrar_log_aprovacao_kill(
-        "dba_teste", "REJEITADO", "h", {}, motivo="T", caminho_log=log, fase="RESULTADO", id_intervencao=ID_A,
+        "dba_teste", "REJEITADO", "h", {}, motivo="T", caminho_log=log, fase="RESULTADO", id_intervencao=ID_A, resultado_desconhecido=False,
     )
     assert log.is_file() and _fases_no_log(log) == ["RESULTADO"]
 
@@ -1066,3 +1180,285 @@ def test_env_example_log_dir_sem_onedrive():
     )
     assert "AGENTDBA_LOG_DIR=C:\\AgentDBA\\logs" in linhas
     assert "onedrive" not in "\n".join(linhas).lower()
+
+
+# =============================================================================
+# K6 / R-a (correcao/k6/decisao_ra.md): resultado_desconhecido na linha RESULTADO do JSONL
+# Valores lidos do JSONL com `is True`/`is False` (1 == True; decisao_ra.md §1).
+# =============================================================================
+
+def _fluxo_ra(monkeypatch, tmp_path, linhas, **fake_kw):
+    log = tmp_path / "kill.log"
+    fake = _instalar_oracle(monkeypatch, _OracleFake(linhas, **fake_kw))
+    desfecho = conduzir_kill_hitl(dict(ARGS_ALVO), solicitar_aprovacao=_aprovar(), canal="TESTE", caminho_log=log)
+    return desfecho, _ler_jsonl(log), fake
+
+
+CASOS_RA_FLUXO = [
+    pytest.param(dict(status_pkg="ENCERRADA"), "ENCERRADA", False, id="encerrada"),
+    pytest.param(dict(status_pkg="ALVO_DIVERGENTE"), "ALVO_DIVERGENTE", False, id="alvo_divergente_pkg"),
+    pytest.param(dict(status_pkg="NAO_USUARIO"), "NAO_USUARIO", False, id="recusa_do_pkg"),
+    pytest.param(dict(status_pkg=""), oracle_dba.STATUS_PKG_VAZIO, True, id="p_status_vazio"),
+    pytest.param(
+        dict(erro_connect_kill=oracledb.DatabaseError("ORA-12541: sem listener")), "ERRO_ORACLE", False,
+        id="erro_oracle_antes_do_execute",
+    ),
+    pytest.param(
+        dict(erro_kill=oracledb.DatabaseError("ORA-00600: erro interno")), "ERRO_ORACLE", True,
+        id="erro_oracle_depois_do_execute",
+    ),
+]
+
+
+@pytest.mark.parametrize("fake_kw, banco_esperado, desconhecido_esperado", CASOS_RA_FLUXO)
+def test_ra_resultado_do_fluxo_grava_resultado_desconhecido(
+    monkeypatch, tmp_path, ambiente_fake, fake_kw, banco_esperado, desconhecido_esperado
+):
+    """R-a ponto 1 (mata R-a1, R-a2): a RESULTADO principal grava o valor de :1839, o mesmo do desfecho; a
+    INTENCAO não tem a chave (ponto 2, mata R-a12)."""
+    desfecho, registros, _ = _fluxo_ra(monkeypatch, tmp_path, [_linha_alvo(), _linha_alvo()], **fake_kw)
+
+    assert [r["fase"] for r in registros] == ["INTENCAO", "RESULTADO"]
+    intencao, resultado = registros
+    assert "resultado_desconhecido" not in intencao
+    assert resultado["resultado_banco"] == banco_esperado
+    assert resultado["resultado_desconhecido"] is desconhecido_esperado
+    assert desfecho["resultado_desconhecido"] is desconhecido_esperado
+
+
+def test_ra_encerrada_sem_a_flag_grava_desconhecido_true(monkeypatch, tmp_path, ambiente_fake):
+    """R-a ponto 1, caso do §2 do Gemini (mata R-a2): retorno ENCERRADA sem `resultado_desconhecido: False`
+    -> e-mail/tool dizem desconhecido e agora o JSONL também (antes gravava só "ENCERRADA")."""
+    monkeypatch.setattr(
+        oracle_dba, "executar_kill_verificado",
+        lambda **kw: json.dumps({"status": "ok", "status_banco": "ENCERRADA"}),
+    )
+    desfecho, registros, fake = _fluxo_ra(monkeypatch, tmp_path, [_linha_alvo()], kill_permitido=False)
+
+    intencao, resultado = registros
+    assert resultado["resultado_banco"] == "ENCERRADA"
+    assert resultado["resultado_desconhecido"] is True
+    assert desfecho["resultado_desconhecido"] is True and desfecho["executado"] is False
+    assert fake.conexoes_kill == []
+
+
+def test_ra_alvo_alterado_local_grava_desconhecido_false(monkeypatch, tmp_path, ambiente_fake):
+    """R-a ponto 1, caso recomendado na conferência K6.5 §1: a reconsulta DIAG diverge da pré-consulta ->
+    ALVO_ALTERADO local, sem conta KILL; a RESULTADO do JSONL grava False. Único teste que confere o campo do JSONL
+    neste caso; o mutante M_ALVO_ALTERADO_DESCONHECIDO_TRUE também cai em 3 testes já existentes (k6/k65_aa_neg.md)."""
+    desfecho, registros, fake = _fluxo_ra(
+        monkeypatch, tmp_path, [_linha_alvo(), _linha_alvo(machine="outra-maquina")], kill_permitido=False,
+    )
+
+    intencao, resultado = registros
+    assert "resultado_desconhecido" not in intencao
+    assert resultado["resultado_banco"] == "ALVO_ALTERADO"
+    assert resultado["resultado_desconhecido"] is False
+    assert desfecho["resultado_desconhecido"] is False and desfecho["executado"] is False
+    assert fake.conexoes_kill == []
+
+
+@pytest.mark.parametrize("decisao", ["REJEITADO", "TIMEOUT"])
+def test_ra_recusa_humana_grava_desconhecido_false(monkeypatch, tmp_path, ambiente_fake, decisao):
+    """R-a ponto 1 (mata R-a7): recusa humana -> RESULTADO com resultado_desconhecido False (sem conta KILL)."""
+    fake = _instalar_oracle(monkeypatch, _OracleFake([], kill_permitido=False))
+    log = tmp_path / "kill.log"
+
+    registrar_decisao_kill(
+        decisao=decisao, aprovador="dba_teste", inst_id=1, sid=101, serial=202, alvo=_alvo_dict(),
+        hash_aprovado="h-fake", canal="TESTE", preparado_em=None, caminho_log=log,
+    )
+
+    (resultado,) = _ler_jsonl(log)
+    assert resultado["fase"] == "RESULTADO" and resultado["decisao"] == decisao
+    assert resultado["resultado_desconhecido"] is False
+    assert fake.conexoes == []
+
+
+def test_ra_interrompido_grava_desconhecido_true(monkeypatch, tmp_path, ambiente_fake):
+    """R-a ponto 1 (mata R-a3): INTERROMPIDO -> RESULTADO com resultado_desconhecido True."""
+    _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo(), _linha_alvo()], kill_permitido=False))
+    _sonda_que_levanta_na_2a(monkeypatch, KeyboardInterrupt())
+    log = tmp_path / "kill.log"
+
+    with pytest.raises(KeyboardInterrupt):
+        conduzir_kill_hitl(dict(ARGS_ALVO), solicitar_aprovacao=_aprovar(), canal="TESTE", caminho_log=log)
+
+    intencao, resultado = _ler_jsonl(log)
+    assert "resultado_desconhecido" not in intencao
+    assert resultado["resultado_banco"] == "INTERROMPIDO"
+    assert resultado["resultado_desconhecido"] is True
+
+
+def test_ra_reconciliador_grava_nao_concluida_com_desconhecido_true(tmp_path):
+    """R-a ponto 1 (mata R-a4): a NAO_CONCLUIDA anexada pelo reconciliador leva resultado_desconhecido True."""
+    log = tmp_path / "kill.log"
+    _escrever(log, [_intencao(ID_A, IDADE_MIN + 60)])
+
+    assert _reconciliar(log)["reconciliadas"] == [ID_A]
+
+    _, resultado = _ler_jsonl(log)
+    assert resultado["resultado_banco"] == "NAO_CONCLUIDA"
+    assert resultado["resultado_desconhecido"] is True
+
+
+_SEM_CAMPO = object()
+
+
+@pytest.mark.parametrize(
+    "valor", [_SEM_CAMPO, None, "talvez", 1, True, False],
+    ids=["ausente", "none", "talvez", "um", "true", "false"],
+)
+def test_ra_legado_resultado_sem_o_campo_continua_valida(tmp_path, valor):
+    """R-a ponto 5 (mata R-a5, R-a6): o reconciliador não lê o campo. RESULTADO antiga sem ele (ou com valor
+    não booleano) fecha a INTENCAO: nada é reconciliado, nenhuma linha inválida, arquivo igual byte a byte.
+    Passa também na base (049ed79): vale pelos mutantes, não pelo controle negativo (decisao_ra.md §8)."""
+    log = tmp_path / "kill.log"
+    resultado = _resultado(ID_A, "ENCERRADA", IDADE_MIN + 50)
+    if valor is not _SEM_CAMPO:
+        resultado["resultado_desconhecido"] = valor
+    _escrever(log, [_intencao(ID_A, IDADE_MIN + 60), resultado])
+    antes = log.read_bytes()
+
+    resumo = _reconciliar(log)
+
+    assert resumo["reconciliadas"] == [] and resumo["linhas_invalidas"] == 0
+    assert log.read_bytes() == antes
+
+
+_ARGS_REGISTRO = dict(aprovador="dba", decisao="REJEITADO", hash_payload="h", parametros={}, id_intervencao=ID_A)
+
+
+@pytest.mark.parametrize("valor", [None, 0, 1, "False", ""], ids=["none", "zero", "um", "texto_false", "vazio"])
+def test_ra_resultado_exige_bool(tmp_path, valor):
+    """R-a ponto 3 (mata R-a8): RESULTADO com valor não booleano -> ValueError antes de qualquer E/S, também em
+    _montar_registro_aprovacao_kill direto (que o reconciliador usa)."""
+    log = tmp_path / "kill.log"
+    with pytest.raises(ValueError):
+        registrar_log_aprovacao_kill(**_ARGS_REGISTRO, caminho_log=log, fase="RESULTADO", resultado_desconhecido=valor)
+    with pytest.raises(ValueError):
+        oracle_dba._montar_registro_aprovacao_kill(
+            "dba", "REJEITADO", "h", {}, None, None, None,
+            fase="RESULTADO", id_intervencao=ID_A, resultado_desconhecido=valor,
+        )
+    assert not log.exists()
+
+
+@pytest.mark.parametrize("valor", [True, False, 0], ids=["true", "false", "zero"])
+def test_ra_intencao_nao_leva_o_campo(tmp_path, valor):
+    """R-a ponto 2 (mata R-a11): INTENCAO com valor diferente de None -> ValueError, sem arquivo."""
+    log = tmp_path / "kill.log"
+    with pytest.raises(ValueError):
+        registrar_log_aprovacao_kill(
+            "dba", "APROVADO", "h", {}, caminho_log=log, fase="INTENCAO", id_intervencao=ID_A,
+            resultado_desconhecido=valor,
+        )
+    assert not log.exists()
+
+
+@pytest.mark.parametrize("funcao", ["registrar_log_aprovacao_kill", "_montar_registro_aprovacao_kill"])
+def test_ra_parametro_keyword_only_sem_default(funcao):
+    """R-a ponto 3, opção (a) do responsável (mata R-a15): keyword-only e sem default nas duas funções."""
+    param = inspect.signature(getattr(oracle_dba, funcao)).parameters["resultado_desconhecido"]
+    assert param.kind is inspect.Parameter.KEYWORD_ONLY
+    assert param.default is inspect.Parameter.empty
+
+
+def test_ra_resultado_sem_o_argumento_da_type_error(tmp_path):
+    """R-a ponto 3 (mata R-a15): omitir o argumento numa RESULTADO -> TypeError, sem arquivo."""
+    log = tmp_path / "kill.log"
+    with pytest.raises(TypeError):
+        registrar_log_aprovacao_kill(**_ARGS_REGISTRO, caminho_log=log, fase="RESULTADO")
+    assert not log.exists()
+
+
+_FUNCOES_REGISTRO_KILL = {"registrar_log_aprovacao_kill", "_montar_registro_aprovacao_kill"}
+
+
+def _chamadas_de_registro_na_producao():
+    arquivos = [RAIZ / "app.py"] + sorted((RAIZ / "src").rglob("*.py"))
+    chamadas = []
+    for arquivo in arquivos:
+        arvore = ast.parse(arquivo.read_text(encoding="utf-8"), filename=str(arquivo))
+        for no in ast.walk(arvore):
+            if not isinstance(no, ast.Call):
+                continue
+            nome = no.func.id if isinstance(no.func, ast.Name) else getattr(no.func, "attr", None)
+            if nome in _FUNCOES_REGISTRO_KILL:
+                chamadas.append((arquivo.relative_to(RAIZ).as_posix(), no.lineno, no))
+    return chamadas
+
+
+def test_ra_toda_chamada_de_producao_passa_resultado_desconhecido():
+    """R-a ponto 3, decisão 8.12.0.2 (mata R-a9): as 6 chamadas de produção (todas em oracle_dba.py) passam
+    resultado_desconhecido= explícito, sem **kwargs. O TypeError seria engolido nos except do fluxo e do
+    reconciliador (decisao_ra.md §0), então esta é a proteção real. Chamada nova obriga a revisar este teste."""
+    chamadas = _chamadas_de_registro_na_producao()
+    assert {arquivo for arquivo, _, _ in chamadas} == {"src/tools/oracle_dba.py"}
+    assert len(chamadas) == 6, [(a, l) for a, l, _ in chamadas]
+    for arquivo, linha, chamada in chamadas:
+        palavras = [k.arg for k in chamada.keywords]
+        assert None not in palavras, f"{arquivo}:{linha}: **kwargs na chamada de registro"
+        assert "resultado_desconhecido" in palavras, f"{arquivo}:{linha}: sem resultado_desconhecido="
+
+
+def _serializado(mensagem):
+    return json.loads(mensagem.split("registro=", 1)[1])
+
+
+@pytest.mark.parametrize(
+    "fake_kw, esperado", [(dict(status_pkg="ENCERRADA"), False), (dict(status_pkg=""), True)],
+    ids=["encerrada", "p_status_vazio"],
+)
+def test_ra_falha_ao_gravar_resultado_leva_o_campo_ao_critical(
+    monkeypatch, tmp_path, ambiente_fake, caplog, fake_kw, esperado
+):
+    """R-a ponto 4, decisão 8.12.0.2 (mata R-a10, R-a10b): a 2ª gravação (RESULTADO principal) falha -> o
+    registro de recuperação do logger.critical traz resultado_desconhecido com o valor de :1839."""
+    _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo(), _linha_alvo()], **fake_kw))
+    log = tmp_path / "kill.log"
+    _instalar_open_proxy(monkeypatch, log.name, "open_levanta", falhar_na_gravacao=2)
+    caplog.set_level(logging.INFO)
+
+    desfecho = conduzir_kill_hitl(dict(ARGS_ALVO), solicitar_aprovacao=_aprovar(), canal="TESTE", caminho_log=log)
+
+    assert desfecho["falha_registro"] == "RESULTADO"
+    criticos = [r.getMessage() for r in caplog.records if r.levelno == logging.CRITICAL and "registro=" in r.getMessage()]
+    assert len(criticos) == 1
+    assert _serializado(criticos[0])["resultado_desconhecido"] is esperado
+
+
+@pytest.mark.parametrize("decisao", ["REJEITADO", "TIMEOUT"])
+def test_ra_falha_ao_gravar_recusa_humana_leva_o_campo_ao_error(
+    monkeypatch, tmp_path, ambiente_fake, caplog, decisao
+):
+    """R-a ponto 4 (mata R-a14): a gravação da recusa humana falha -> o logger.error traz o campo False."""
+    _instalar_oracle(monkeypatch, _OracleFake([], kill_permitido=False))
+    log = tmp_path / "kill.log"
+    _instalar_open_proxy(monkeypatch, log.name, "open_levanta")
+    caplog.set_level(logging.INFO)
+
+    registrar_decisao_kill(
+        decisao=decisao, aprovador="dba_teste", inst_id=1, sid=101, serial=202, alvo=_alvo_dict(),
+        hash_aprovado="h-fake", canal="TESTE", preparado_em=None, caminho_log=log,
+    )
+
+    erros = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR and "registro=" in r.getMessage()]
+    assert len(erros) == 1
+    assert _serializado(erros[0])["resultado_desconhecido"] is False
+
+
+def test_ra_falha_ao_gravar_interrompido_leva_o_campo_ao_critical(monkeypatch, tmp_path, ambiente_fake, caplog):
+    """R-a ponto 4 (mata R-a13): a gravação do INTERROMPIDO falha -> o CRITICAL traz o campo True."""
+    _instalar_oracle(monkeypatch, _OracleFake([_linha_alvo(), _linha_alvo()], kill_permitido=False))
+    _sonda_que_levanta_na_2a(monkeypatch, KeyboardInterrupt())
+    log = tmp_path / "kill.log"
+    _instalar_open_proxy(monkeypatch, log.name, "open_levanta", falhar_na_gravacao=2)
+    caplog.set_level(logging.INFO)
+
+    with pytest.raises(KeyboardInterrupt):
+        conduzir_kill_hitl(dict(ARGS_ALVO), solicitar_aprovacao=_aprovar(), canal="TESTE", caminho_log=log)
+
+    criticos = [r.getMessage() for r in caplog.records if r.levelno == logging.CRITICAL and "INTERROMPIDO" in r.getMessage()]
+    assert len(criticos) == 1 and "RESULTADO NAO GRAVADA" in criticos[0]
+    assert _serializado(criticos[0])["resultado_desconhecido"] is True

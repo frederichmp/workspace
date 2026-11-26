@@ -1,0 +1,11 @@
+[
+  {"nome": "M_EXEC_INICIADO_ANTES_VAR",
+   "de": "        status_var = cursor.var(oracledb.DB_TYPE_VARCHAR, size=128)\r\n        logon_var = cursor.var(oracledb.DB_TYPE_DATE)\r\n        logon_var.setvalue(0, identidade_esperada[\"logon_time\"])\r\n        execute_iniciado = True\r\n",
+   "para": "        execute_iniciado = True\r\n        status_var = cursor.var(oracledb.DB_TYPE_VARCHAR, size=128)\r\n        logon_var = cursor.var(oracledb.DB_TYPE_DATE)\r\n        logon_var.setvalue(0, identidade_esperada[\"logon_time\"])\r\n"},
+  {"nome": "M_RHS_SWAP_PROG_MACH",
+   "de": "                    p_program_esperado    => :p_program_esperado,\r\n                    p_machine_esperado    => :p_machine_esperado,\r\n",
+   "para": "                    p_program_esperado    => :p_machine_esperado,\r\n                    p_machine_esperado    => :p_program_esperado,\r\n"},
+  {"nome": "M_RHS_SWAP_SID_SERIAL",
+   "de": "                    p_sid                 => :p_sid,\r\n                    p_serial              => :p_serial,\r\n",
+   "para": "                    p_sid                 => :p_serial,\r\n                    p_serial              => :p_sid,\r\n"}
+]

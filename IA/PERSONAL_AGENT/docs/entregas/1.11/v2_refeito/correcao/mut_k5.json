@@ -1,0 +1,17 @@
+[
+ {
+  "nome": "m28a_sandbox_sem_identidade_e_ref",
+  "de": "        sid=-1, serial=1, inst_id=1,\r\n        identidade_esperada=identidade, ref_aprovacao=uuid.uuid4().hex,\r\n",
+  "para": "        sid=-1, serial=1, inst_id=1,\r\n"
+ },
+ {
+  "nome": "m28b_sandbox_sem_gate",
+  "de": "    \"\"\"Reproduz caso validado no MODELO: encerramento de sessão de STARTUP_DIAG (retorna ENCERRADA).\"\"\"\r\n    _exigir_pkg_kill_v2()\r\n",
+  "para": "    \"\"\"Reproduz caso validado no MODELO: encerramento de sessão de STARTUP_DIAG (retorna ENCERRADA).\"\"\"\r\n"
+ },
+ {
+  "nome": "m28c_sandbox_connect_sem_try_finally",
+  "de": "    conn = oracledb.connect(user=user_mut, password=pass_mut, dsn=dsn)\r\n    try:\r\n        inst_admin, sid_admin, serial_admin = _ler_propria_sessao(conn)\r\n        identidade = _ler_identidade_gv_session(conn, inst_admin, sid_admin, serial_admin)\r\n    finally:\r\n        try:\r\n            conn.close()\r\n        except Exception:\r\n            pass\r\n",
+  "para": "    conn = oracledb.connect(user=user_mut, password=pass_mut, dsn=dsn)\r\n    inst_admin, sid_admin, serial_admin = _ler_propria_sessao(conn)\r\n    identidade = _ler_identidade_gv_session(conn, inst_admin, sid_admin, serial_admin)\r\n    conn.close()\r\n"
+ }
+]

@@ -1,0 +1,7 @@
+[
+ {
+  "nome": "M_T3_COMENTARIO_COM_FORMAL",
+  "de": "                    p_status              => :p_status\r\n",
+  "para": "                    p_status              => :p_status\r\n                    -- p_extra => :p_extra\r\n"
+ }
+]

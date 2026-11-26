@@ -1,0 +1,82 @@
+[
+ {
+  "nome": "R-a1_principal_sem_o_argumento",
+  "de": "            id_intervencao=id_intervencao,\r\n            resultado_desconhecido=resultado_desconhecido,\r\n",
+  "para": "            id_intervencao=id_intervencao,\r\n"
+ },
+ {
+  "nome": "R-a2_principal_false_fixo",
+  "de": "            id_intervencao=id_intervencao,\r\n            resultado_desconhecido=resultado_desconhecido,\r\n",
+  "para": "            id_intervencao=id_intervencao,\r\n            resultado_desconhecido=False,\r\n"
+ },
+ {
+  "nome": "R-a3_interrompido_false",
+  "de": "                id_intervencao=id_intervencao,\r\n                resultado_desconhecido=True,\r\n",
+  "para": "                id_intervencao=id_intervencao,\r\n                resultado_desconhecido=False,\r\n"
+ },
+ {
+  "nome": "R-a4_reconciliador_false",
+  "de": "                    id_intervencao=id_reg,\r\n                    resultado_desconhecido=True,\r\n",
+  "para": "                    id_intervencao=id_reg,\r\n                    resultado_desconhecido=False,\r\n"
+ },
+ {
+  "nome": "R-a5_reconc_so_conta_com_o_campo",
+  "de": "                    elif reg.get(\"fase\") == \"RESULTADO\":\r\n",
+  "para": "                    elif reg.get(\"fase\") == \"RESULTADO\" and \"resultado_desconhecido\" in reg:\r\n"
+ },
+ {
+  "nome": "R-a5b_reconciliador_so_conta_bool",
+  "de": "                    elif reg.get(\"fase\") == \"RESULTADO\":\r\n",
+  "para": "                    elif reg.get(\"fase\") == \"RESULTADO\" and isinstance(reg.get(\"resultado_desconhecido\"), bool):\r\n"
+ },
+ {
+  "nome": "R-a6_sem_campo_vira_linha_invalida",
+  "de": "                    elif reg.get(\"fase\") == \"RESULTADO\":\r\n                        com_resultado.add(id_reg)\r\n",
+  "para": "                    elif reg.get(\"fase\") == \"RESULTADO\" and \"resultado_desconhecido\" not in reg:\r\n                        resumo[\"linhas_invalidas\"] += 1\r\n                        continue\r\n                    elif reg.get(\"fase\") == \"RESULTADO\":\r\n                        com_resultado.add(id_reg)\r\n"
+ },
+ {
+  "nome": "R-a7_recusa_humana_true",
+  "de": "                id_intervencao=id_intervencao,\r\n                resultado_desconhecido=False,\r\n",
+  "para": "                id_intervencao=id_intervencao,\r\n                resultado_desconhecido=True,\r\n"
+ },
+ {
+  "nome": "R-a8_sem_validacao_bool",
+  "de": "        if not isinstance(resultado_desconhecido, bool):\r\n",
+  "para": "        if False:\r\n"
+ },
+ {
+  "nome": "R-a10_critical_sem_o_campo",
+  "de": "                    \"resultado_desconhecido\": resultado_desconhecido,\r\n",
+  "para": ""
+ },
+ {
+  "nome": "R-a10b_critical_false_fixo",
+  "de": "                    \"resultado_desconhecido\": resultado_desconhecido,\r\n",
+  "para": "                    \"resultado_desconhecido\": False,\r\n"
+ },
+ {
+  "nome": "R-a11_intencao_aceita_valor",
+  "de": "    elif resultado_desconhecido is not None:\r\n",
+  "para": "    elif False:\r\n"
+ },
+ {
+  "nome": "R-a12_chave_em_toda_fase",
+  "de": "    if fase == \"RESULTADO\":\r\n        registro[\"resultado_desconhecido\"] = resultado_desconhecido\r\n",
+  "para": "    if True:\r\n        registro[\"resultado_desconhecido\"] = resultado_desconhecido\r\n"
+ },
+ {
+  "nome": "R-a13_interrompido_recup_sem_campo",
+  "de": "            \"resultado_banco\": \"INTERROMPIDO\",\r\n            \"resultado_desconhecido\": True,\r\n",
+  "para": "            \"resultado_banco\": \"INTERROMPIDO\",\r\n"
+ },
+ {
+  "nome": "R-a14_recusa_recup_sem_campo",
+  "de": "                        \"resultado_banco\": None,\r\n                        \"resultado_desconhecido\": False,\r\n",
+  "para": "                        \"resultado_banco\": None,\r\n"
+ },
+ {
+  "nome": "R-a15_default_true",
+  "de": "    id_intervencao: str,\r\n    resultado_desconhecido: Optional[bool],\r\n) -> Dict[str, Any]:\r\n    \"\"\"\r\n    Registra uma linha",
+  "para": "    id_intervencao: str,\r\n    resultado_desconhecido: Optional[bool] = True,\r\n) -> Dict[str, Any]:\r\n    \"\"\"\r\n    Registra uma linha"
+ }
+]

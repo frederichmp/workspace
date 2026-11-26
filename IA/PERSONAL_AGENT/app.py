@@ -154,6 +154,7 @@ from tools.oracle_dba import (
     reconciliar_intencoes_orfas,
     APROVACAO_TTL_SEGUNDOS,
     MENSAGEM_RESULTADO_DESCONHECIDO,
+    MENSAGEM_DESFECHO_NAO_CONFIRMADO,
 )
 from tools.gemini_router import (
     gemini_tools_schema,
@@ -510,7 +511,7 @@ def processar_decisao_hitl(aprovado: bool, id_aprovador: str = "") -> bool:
     elif desfecho.get("resultado_desconhecido"):
         aviso_ui = (
             f"❌ **Intervenção aprovada por `{id_aprovador_limpo}`: {MENSAGEM_RESULTADO_DESCONHECIDO}** "
-            f"(erro do Oracle a partir da chamada ao PKG; resultado: `{desfecho['resultado_banco']}`). "
+            f"({MENSAGEM_DESFECHO_NAO_CONFIRMADO}; resultado: `{desfecho['resultado_banco']}`). "
             f"*(Notificação SMTP: {desfecho['email_detalhe']})*"
         )
         st.error(aviso_ui)
@@ -825,10 +826,11 @@ with col_chat:
                 f"- **Instância / SID / Serial#:** `inst_id={alvo.get('inst_id')}`, `sid={alvo.get('sid')}`, `serial#={alvo.get('serial#')}`\n"
                 f"- **Usuário Oracle:** `{alvo.get('username')}`\n"
                 f"- **Programa / Máquina:** `{alvo.get('program')}` / `{alvo.get('machine')}`\n"
+                f"- **Logon (DATE):** `{alvo.get('logon_time')}`\n"
                 f"- **Status Atual:** `{alvo.get('status')}`\n"
                 f"- **SQL ID:** `{alvo.get('sql_id')}`\n"
                 f"- **Evento de Espera:** `{alvo.get('event')}`\n\n"
-                f"🔒 **Hash SHA-256 de identidade do alvo** (inst_id, sid, serial#, username, program, machine; "
+                f"🔒 **Hash SHA-256 de identidade do alvo** (inst_id, sid, serial#, username, program, machine, logon_time; "
                 f"reconferido antes da execução): `{pend.get('hash_payload')}`\n\n"
                 f"Ao aprovar, um alerta de governança será disparado por e-mail para `{email_dest}`."
             )

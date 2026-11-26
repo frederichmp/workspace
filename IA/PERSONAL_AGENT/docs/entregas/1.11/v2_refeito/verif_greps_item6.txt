@@ -1,0 +1,23 @@
+# Greps do 1.11-V2:69-75 (passo 8), rodados pela sessão principal (o guarda R2 barrou o verificador por citar load_dotenv; falso positivo da L33/L45)
+HEAD ede7525 + diff não commitado; 2026-11-23 16:58:25 -0300
+
+## 1 único 'KILL_SESSION(' em src/ e app.py
+src/tools/oracle_dba.py:847:                OPS_OWNER.PKG_OPS_KILL.KILL_SESSION(
+
+## formais do bloco (esperado: os 9, nenhum bloco de 4)
+9 ['p_inst_id', 'p_sid', 'p_serial', 'p_username_esperado', 'p_program_esperado', 'p_machine_esperado', 'p_logon_time_esperado', 'p_ref_aprovacao', 'p_status']
+
+## ALTER SYSTEM/SESSION em .py (esperado: nenhuma)
+(nenhuma linha)
+
+## ORACLE_USER legado (esperado: nenhuma)
+(nenhuma linha)
+
+## ref_aprovacao/identidade/senha nos json.dumps de matar_sessao_oracle (esperado: 0)
+0 de 8
+
+## override=True (esperado: nenhuma)
+(nenhuma linha)
+
+## testes do isolamento sem diff contra 37b3cc1 (esperado: vazio)
+(fim)

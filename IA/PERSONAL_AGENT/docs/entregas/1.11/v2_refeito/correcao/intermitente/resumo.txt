@@ -1,0 +1,14 @@
+HEAD 1d2c752 | inicio 2026-11-24 12:21:25 -0300
+suite_r1 | rc=0 | 1378 passed, 16 skipped, 16 warnings in 197.12s (0:03:17) | parede 200 s
+suite_r2 | rc=0 | 1378 passed, 16 skipped, 16 warnings in 193.36s (0:03:13) | parede 196 s
+kill_r1 | rc=0 | 237 passed, 6 skipped, 13 warnings in 48.13s | parede 50 s
+kill_r2 | rc=0 | 237 passed, 6 skipped, 13 warnings in 47.39s | parede 49 s
+kill_r3 | rc=0 | 237 passed, 6 skipped, 13 warnings in 48.64s | parede 51 s
+kill_r4 | rc=0 | 237 passed, 6 skipped, 13 warnings in 49.05s | parede 51 s
+kill_r5 | rc=0 | 237 passed, 6 skipped, 13 warnings in 48.51s | parede 51 s
+kill_r6 | rc=0 | 237 passed, 6 skipped, 13 warnings in 48.39s | parede 51 s
+kill_r7 | rc=0 | 237 passed, 6 skipped, 13 warnings in 48.74s | parede 51 s
+kill_r8 | rc=0 | 237 passed, 6 skipped, 13 warnings in 48.37s | parede 50 s
+kill_r9 | rc=0 | 237 passed, 6 skipped, 13 warnings in 48.37s | parede 51 s
+kill_r10 | rc=0 | 237 passed, 6 skipped, 13 warnings in 48.61s | parede 50 s
+fim 2026-11-24 12:36:28 -0300

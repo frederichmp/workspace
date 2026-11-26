@@ -1,0 +1,12 @@
+m0 (sem mutação): rc=0 | 126 passed, 6 skipped, 13 warnings in 9.66s
+M_RHS_SWAP_PROG_MACH: SOBREVIVEU | rc=0 | 126 passed, 6 skipped, 13 warnings in 9.53s
+M_RHS_SWAP_SID_SERIAL: SOBREVIVEU | rc=0 | 126 passed, 6 skipped, 13 warnings in 9.52s
+M_STATUS_VAR_SIZE_8: SOBREVIVEU | rc=0 | 126 passed, 6 skipped, 13 warnings in 9.53s
+M_LOGON_COMENTARIO_NO_SELECT: SOBREVIVEU | rc=0 | 126 passed, 6 skipped, 13 warnings in 9.57s
+M_EXEC_INICIADO_ANTES_VAR: SOBREVIVEU | rc=0 | 126 passed, 6 skipped, 13 warnings in 9.52s
+M_EXEC_KILL_GET_DEFAULT: SOBREVIVEU | rc=0 | 126 passed, 6 skipped, 13 warnings in 9.72s
+M_FALLBACK_V1_NO_NAO_ENCONTRADO: SOBREVIVEU | rc=0 | 126 passed, 6 skipped, 13 warnings in 9.45s
+M_LIMITE_GE_128: SOBREVIVEU | rc=0 | 126 passed, 6 skipped, 13 warnings in 9.63s
+X_REGEX_ID_0_9A_Z: SOBREVIVEU | rc=0 | 126 passed, 6 skipped, 13 warnings in 9.56s
+X_SERIAL_FORA_ROW2: MORTO | rc=1 | 2 failed, 124 passed, 6 skipped, 13 warnings in 9.93s
+X_SELECT_SID_SERIAL_TROCADOS: SOBREVIVEU | rc=0 | 126 passed, 6 skipped, 13 warnings in 21.23s

@@ -1,0 +1,11 @@
+[
+ {"nome": "M_STATUS_VAR_SIZE_8",
+  "de": "cursor.var(oracledb.DB_TYPE_VARCHAR, size=128)",
+  "para": "cursor.var(oracledb.DB_TYPE_VARCHAR, size=8)"},
+ {"nome": "M_LOGON_COMENTARIO_NO_SELECT",
+  "de": "                   type,\r\n                   logon_time\r\n            FROM GV$SESSION\r\n",
+  "para": "                   type\r\n                   -- logon_time\r\n            FROM GV$SESSION\r\n"},
+ {"nome": "X_SELECT_SID_SERIAL_TROCADOS",
+  "de": "        query = \"\"\"\r\n            SELECT inst_id,\r\n                   sid,\r\n                   serial# AS \"serial#\",\r\n",
+  "para": "        query = \"\"\"\r\n            SELECT inst_id,\r\n                   serial# AS \"serial#\",\r\n                   sid,\r\n"}
+]

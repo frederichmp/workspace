@@ -359,6 +359,25 @@ def test_cli_resultado_desconhecido(cenario):
     assert od.MENSAGEM_RESULTADO_DESCONHECIDO == "resultado desconhecido: conferir sessão"
 
 
+def test_cli_status_pkg_vazio_e_resultado_desconhecido(cenario):
+    """K2 (A1, m29): p_status vazio (fora da lista fechada): a tela diz 'resultado desconhecido' com o texto comum
+    'desfecho no banco não confirmado' e não 'NÃO EXECUTADA' nem 'erro a partir da chamada ao PKG'."""
+    import tools.oracle_dba as od
+
+    r = cenario([_linha_alvo(), _linha_alvo()], "", ["dba", "S"])
+
+    assert len(r.oracle.conexoes_kill) == 1
+    assert od.MENSAGEM_RESULTADO_DESCONHECIDO in r.tela
+    assert od.MENSAGEM_DESFECHO_NAO_CONFIRMADO in r.tela
+    assert "NÃO EXECUTADA" not in r.tela and "NÃO executada" not in r.tela
+    assert "erro a partir da chamada ao PKG" not in r.tela
+    assert od.MENSAGEM_RESULTADO_DESCONHECIDO in r.emails[0][0]
+    assert "NÃO executada" not in r.emails[0][0]
+    assert od.MENSAGEM_DESFECHO_NAO_CONFIRMADO in r.emails[0][1]
+    assert "erro do Oracle" not in r.emails[0][1]
+    assert r.json_tool["resultado_desconhecido"] is True and r.json_tool["executado"] is False
+
+
 def test_cli_reconciliador_na_subida(main_cli, isolar_log_aprovacao, capsys):
     """Reconciliador da CLI: INTENCAO antiga ganha RESULTADO NAO_CONCLUIDA e é avisada; nunca levanta."""
     from datetime import datetime, timedelta, timezone

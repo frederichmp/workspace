@@ -1,0 +1,17 @@
+[
+ {
+  "nome": "N1_D8_VAZA_STR_EXC",
+  "de": "Erro a partir da chamada ao PKG: {type(exc).__name__}\"\r\n",
+  "para": "Erro a partir da chamada ao PKG: {_descrever_erro(exc)}\"\r\n"
+ },
+ {
+  "nome": "N5_SEM_STATUS_PKG_VAZIO_EM_MATAR",
+  "de": "            status_banco = status_banco or STATUS_PKG_VAZIO\r\n",
+  "para": ""
+ },
+ {
+  "nome": "N6_PARAM_INST_DESCONHECIDO_TRUE",
+  "de": "    validados = validar_parametros_kill(inst_id, sid, serial)\r\n    if validados is None:\r\n        return json.dumps(\r\n            {\r\n                \"status\": \"recusado\",\r\n                \"motivo\": \"PARAM_INVALIDO\",\r\n                \"status_banco\": \"PARAM_INVALIDO\",\r\n                \"resultado_desconhecido\": False,\r\n",
+  "para": "    validados = validar_parametros_kill(inst_id, sid, serial)\r\n    if validados is None:\r\n        return json.dumps(\r\n            {\r\n                \"status\": \"recusado\",\r\n                \"motivo\": \"PARAM_INVALIDO\",\r\n                \"status_banco\": \"PARAM_INVALIDO\",\r\n                \"resultado_desconhecido\": True,\r\n"
+ }
+]
