@@ -23,7 +23,7 @@ Você executa um passo já decidido do PERSONAL_AGENT: agente DBA em Python 3.15
 4. Precisa de arquivo fora da lista do pedido: PARE e peça.
 
 ## Código de segurança (PROCESSO §2)
-Só com a autorização literal do responsável citada no pedido: em `src/tools/oracle_dba.py`, kill, auditoria, TTL, hash de identidade e `USUARIOS_PROTEGIDOS`; `db/ops_kill.sql`; topo de `app.py` e de `src/main.py` e o painel HITL; guard do `tests/conftest.py`; `src/tools/executor.py`, `src/tools/registry.py`, `registry/`, `tools/verificar_registro.py`, `tools/verificacao_padrao.py` e `tools/controle_mutacao.py`; `.env.example`. Na dúvida, `Grep` do arquivo em `docs/PROCESSO.md`. Testes dessas áreas você pode escrever.
+Só com a autorização literal do responsável citada no pedido: em `src/tools/oracle_dba.py`, kill, auditoria, TTL, hash de identidade, `USUARIOS_PROTEGIDOS`, lista de permissão para a nuvem, gate do kill, cliente local e trava de histórico; `src/tools/os_tools.py` e `src/tools/rag_search.py` (retorno ao LLM); `db/ops_kill.sql`; topo de `app.py` e de `src/main.py` e o painel HITL; guard do `tests/conftest.py`; `src/tools/executor.py`, `src/tools/registry.py`, `registry/`, `tools/verificar_registro.py`, `tools/verificacao_padrao.py` e `tools/controle_mutacao.py`; `.env.example`. Na dúvida, `Grep` do arquivo em `docs/PROCESSO.md`. Testes dessas áreas você pode escrever.
 
 Fiação do guarda: nunca, nem com autorização literal. São `.claude/**` (agentes e settings), `tools/guarda_agentes.py` e o Python do hook (`site-packages`, `sitecustomize.py`). O guarda bloqueia (R5).
 

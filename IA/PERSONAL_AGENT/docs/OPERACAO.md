@@ -33,6 +33,9 @@ não vê é para onde a porta 11434 leva. Por isso:
   toda subida com o kill habilitado mostra o aviso "Encerramento de sessão HABILITADO nesta subida" (P4). Se o aviso
   aparecer sem intenção, remover a variável do perfil e reiniciar.
 - Para desligar numa sessão: `OPS_KILL_PKG_VERSAO=0` (ou ausente) no shell antes de subir a CLI ou a Web.
+- **Depois de atualizar o código, reiniciar a Web e a CLI.** A carga do `.env` roda uma vez por processo (o estado
+  fica no processo) e não é refeita num rerun do Streamlit: um processo antigo mantém o que carregou, inclusive um
+  `OPS_KILL_PKG_VERSAO` do `.env` anterior ao descarte (O2 do C7 da fase 2).
 
 ## 3. Residuais aceitos (plano 9.8.3)
 
