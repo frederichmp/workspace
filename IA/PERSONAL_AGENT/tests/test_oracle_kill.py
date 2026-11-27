@@ -2422,6 +2422,21 @@ def test_c1_parte2_e_copia_literal():
     assert len(blocos[0]) == 2 and blocos[0] == blocos[1]
 
 
+def test_c1_o2_contagem_da_flag_na_conferencia_dba_source():
+    """SQL v2, O2 do C7 (mata M_O2_*): a parte 2 confere em DBA_SOURCE quantas linhas do body citam v_pode_encerrar,
+    e o número esperado no comentário é o do body nos dois arquivos SQL."""
+    sql = ARQUIVOS_SQL_V2[1].read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+    esperado = re.findall(r"^-- \(1 linha: (\d+)\) Linhas do body com a flag v_pode_encerrar", sql, re.M)
+    assert len(esperado) == 1
+    assert re.search(r"SELECT COUNT\(\*\) AS linhas_v_pode_encerrar\s+FROM dba_source\s+WHERE owner = 'OPS_OWNER' "
+                     r"AND name = 'PKG_OPS_KILL' AND type = 'PACKAGE BODY'\s+AND INSTR\(text, 'v_pode_encerrar'\) > 0;", sql)
+    for caminho in ARQUIVOS_SQL_V2:
+        texto = caminho.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+        corpo = re.findall(r"CREATE OR REPLACE PACKAGE BODY pkg_ops_kill AS.*?END pkg_ops_kill;\n/", texto, re.S)
+        assert len(corpo) == 1
+        assert sum("v_pode_encerrar" in l for l in corpo[0].split("\n")) == int(esperado[0]), caminho.name
+
+
 @pytest.mark.parametrize("status", ["", None, "encerrada", "ERRO_PRE_KILL", "ALVO_AUSENTE_NO_KILL", "ERRO_ORACLE"])
 def test_c1_fake_aceita_status_do_contrato_e_injecoes(status):
     """SQL v2, parte A (§4d): o fake aceita os códigos do contrato do PKG e as injeções de falha (vazio, nulo,

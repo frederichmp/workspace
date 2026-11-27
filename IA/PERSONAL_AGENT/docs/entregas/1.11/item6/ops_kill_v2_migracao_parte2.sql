@@ -230,6 +230,12 @@ SELECT REGEXP_SUBSTR(text, 'ALVO_AUSENTE_NO_KILL|ERRO_PRE_KILL') AS codigo, COUN
    AND REGEXP_LIKE(text, 'v_status := ''(ALVO_AUSENTE_NO_KILL|ERRO_PRE_KILL)''')
  GROUP BY REGEXP_SUBSTR(text, 'ALVO_AUSENTE_NO_KILL|ERRO_PRE_KILL')
  ORDER BY 1;
+-- (1 linha: 4) Linhas do body com a flag v_pode_encerrar: declaração, TRUE no fim do bloco, FALSE no handler e
+-- a condição do comando de encerramento (sqlv2/conferencia_c7.md, O2).
+SELECT COUNT(*) AS linhas_v_pode_encerrar
+  FROM dba_source
+ WHERE owner = 'OPS_OWNER' AND name = 'PKG_OPS_KILL' AND type = 'PACKAGE BODY'
+   AND INSTR(text, 'v_pode_encerrar') > 0;
 
 -- Fim desta parte. A janela continua aberta até o primeiro kill sandbox v2 com ENCERRADA
 -- depois de ligar o gate (OPS_KILL_PKG_VERSAO=2) na sessão do operador (implantacao.md, seção 3.2, passos 6 e 7).

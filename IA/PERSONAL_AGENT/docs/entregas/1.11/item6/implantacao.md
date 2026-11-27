@@ -140,7 +140,7 @@ Portanto a ordem possível é **spec v2 e logo em seguida body v2, no mesmo scri
 | 3 | **Antes da janela:** a aplicação já roda a `main` integrada (Python v2) com o gate **desligado** (`OPS_KILL_PKG_VERSAO` ausente). Conferir que nenhuma subida mostra o aviso "HABILITADO". Durante a janela o kill dá `KILL_DESABILITADO`, sem chamar o PKG | **não** (gate desligado) |
 | **▶ INÍCIO DA JANELA** | **Parte 2:** o script grava `SELECT SYSTIMESTAMP AS inicio_janela` imediatamente antes do `CREATE OR REPLACE` da spec v2 | **não** |
 | 4 | **Parte 2.** Spec v2 e, em seguida, body v2 | **não** |
-| 5 | **Parte 2.** Conferências: `DBA_ERRORS` vazio; spec e body VALID; `DBA_ARGUMENTS` com 9 linhas, sem sobrecarga e sem DEFAULT; grant presente; `DBA_SOURCE` com 1 linha de `ERRO_PRE_KILL` e 1 de `ALVO_AUSENTE_NO_KILL` (o body instalado é o aprovado). Falhou alguma? Rollback (seção 4), e o gate continua desligado | **não** |
+| 5 | **Parte 2.** Conferências: `DBA_ERRORS` vazio; spec e body VALID; `DBA_ARGUMENTS` com 9 linhas, sem sobrecarga e sem DEFAULT; grant presente; `DBA_SOURCE` com 1 linha de `ERRO_PRE_KILL`, 1 de `ALVO_AUSENTE_NO_KILL` e 4 com `v_pode_encerrar` (o body instalado é o aprovado). Falhou alguma? Rollback (seção 4), e o gate continua desligado | **não** |
 | 6 | Só a sessão do operador sobe com `OPS_KILL_PKG_VERSAO=2` no shell e mostra o aviso "HABILITADO". É reinício, não implantação | **não** (até o passo 7) |
 | 7 | Primeiro teste sandbox v2 com identidade correta → ENCERRADA (seção 5) | **sim (v2)** |
 | **■ FIM DA JANELA** | Hora do teste do passo 7 com ENCERRADA. Registrar `inicio_janela` e fim no GOVERNANCA_LOG | sim (v2) |
@@ -184,7 +184,7 @@ Executado só em **sandbox autorizado**: banco de teste, com `ORACLE_SANDBOX=1` 
 
 1. **Estado inicial:** v1 instalada, Python v1. Rodar os `test_sandbox_kill_*` atuais e registrar que passam (linha de base).
 2. **Parte 1** no sandbox (pré-condições, backup, `ALTER TABLE`).
-3. **Parte 2** no sandbox. Conferências da v2: `DBA_ERRORS` **vazio**; spec e body VALID; `DBA_ARGUMENTS` com 9 linhas, sem sobrecarga e sem DEFAULT; grant presente; `DBA_SOURCE` com 1 linha de `ERRO_PRE_KILL` e 1 de `ALVO_AUSENTE_NO_KILL`.
+3. **Parte 2** no sandbox. Conferências da v2: `DBA_ERRORS` **vazio**; spec e body VALID; `DBA_ARGUMENTS` com 9 linhas, sem sobrecarga e sem DEFAULT; grant presente; `DBA_SOURCE` com 1 linha de `ERRO_PRE_KILL`, 1 de `ALVO_AUSENTE_NO_KILL` e 4 com `v_pode_encerrar`.
 4. **Testes sandbox de transição:** bloco v1 contra o PKG v2 dá PLS-00306, com o alvo vivo e sem auditoria. Com o Python v2 (branch do item 6): testes sandbox v2 da seção 5.
 5. **Rollback:** `rollback_ops_kill_v1.sql` no sandbox. Conferências que **provam que a v1 restaurada compila**:
    - `DBA_ERRORS` **vazio** para `OPS_OWNER.PKG_OPS_KILL`;
