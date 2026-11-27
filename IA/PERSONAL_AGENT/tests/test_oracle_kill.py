@@ -1460,7 +1460,9 @@ def test_k2_status_fora_da_lista_fechada_e_resultado_desconhecido(monkeypatch, t
     """K2 (A1; mata m17 e m18): p_status fora das duas listas (ERRO_ORACLE, vazio, nulo, código novo, caixa
     diferente) -> resultado_desconhecido True, executado False, 1 execute na conta KILL; tool e e-mail dizem
     'resultado desconhecido' e nunca 'executado para' nem 'NÃO executada'."""
-    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], status_pkg=status_pkg)
+    # SQL v2, parte A (§4d; ajuste declarado): o código novo "XYZ" está fora do contrato do PKG de propósito.
+    oracle_fake = _OracleFake([_linha_alvo(), _linha_alvo()], status_pkg=status_pkg,
+                              status_fora_do_contrato=(status_pkg == "XYZ"))
     desfecho, registros = _fluxo_aprovado(monkeypatch, tmp_path, oracle_fake)
 
     assert len(_binds_kill(oracle_fake)) == 1, "sem retentativa: 1 execute só"
@@ -1479,10 +1481,14 @@ def test_k2_status_fora_da_lista_fechada_e_resultado_desconhecido(monkeypatch, t
     assert [r["fase"] for r in registros] == ["INTENCAO", "RESULTADO"]
 
 
-# As 6 recusas do PKG que provam que nada foi encerrado (lista escrita aqui de propósito, sem ler a constante)
+# As recusas do PKG que provam que nada foi encerrado (lista escrita aqui de propósito, sem ler a constante).
+# SQL v2, parte A (sqlv2/decisao_c1.md §4a; expectativa alterada, declarada): + ERRO_PRE_KILL e ALVO_AUSENTE_NO_KILL.
 RECUSAS_ESPERADAS_PKG = [
     "PARAM_INVALIDO", "PROPRIA_SESSAO", "ALVO_NAO_ENCONTRADO", "ALVO_DIVERGENTE", "NAO_USUARIO", "USUARIO_PROTEGIDO",
+    "ERRO_PRE_KILL", "ALVO_AUSENTE_NO_KILL",
 ]
+# p_status que o PKG v2 devolve e que o Python declara resultado desconhecido (sqlv2/decisao_c1.md §3)
+DESCONHECIDOS_DECLARADOS_PKG = {"ERRO_ORACLE"}
 
 
 @pytest.mark.parametrize("status_pkg", RECUSAS_ESPERADAS_PKG)
@@ -1500,6 +1506,8 @@ def test_k2_recusas_do_pkg_nao_sao_desconhecidas_nem_executadas(monkeypatch, tmp
     assert tool["resultado_desconhecido"] is False
     if status_pkg == "ALVO_DIVERGENTE":
         assert mensagem == oracle_dba.MENSAGEM_ALVO_DIVERGENTE
+    elif status_pkg == "ERRO_PRE_KILL":
+        assert mensagem == oracle_dba.MENSAGEM_ERRO_PRE_KILL  # SQL v2, parte A (§4e; mata M11)
     else:
         assert mensagem == oracle_dba.MENSAGEM_RECUSA_PKG.format(status=status_pkg)
     assert "executado para" not in mensagem
@@ -1531,12 +1539,15 @@ def test_k2_invariantes_das_listas_de_status_do_pkg():
     for valor in ("ERRO_ORACLE", "", "DESCONHECIDO", "ERRO_INTERNO"):
         assert valor not in recusas, f"{valor!r} não pode estar em RECUSAS_PKG_SEM_KILL"
         assert valor not in executado, f"{valor!r} não pode estar em RESULTADOS_KILL_EXECUTADO"
-    sql = (ROOT_DIR_TESTE / "docs" / "entregas" / "1.11" / "item6" / "ops_kill.sql").read_text(
-        encoding="utf-8", errors="replace"
-    )
-    literais = set(re.findall(r"v_status\s*:=\s*'([A-Z_]+)'", sql))
-    assert literais, "nenhum v_status := '...' encontrado em ops_kill.sql"
-    assert literais == recusas | executado | {"ERRO_ORACLE"}
+    # SQL v2, parte A (§4a): os dois arquivos (o rascunho e a parte 2, que roda no MODELO) e a constante declarada.
+    assert DESCONHECIDOS_DECLARADOS_PKG.isdisjoint(recusas | executado)
+    for nome in ("ops_kill.sql", "ops_kill_v2_migracao_parte2.sql"):
+        sql = (ROOT_DIR_TESTE / "docs" / "entregas" / "1.11" / "item6" / nome).read_text(
+            encoding="utf-8", errors="replace"
+        )
+        literais = set(re.findall(r"v_status\s*:=\s*'([A-Z_]+)'", sql))
+        assert literais, f"nenhum v_status := '...' encontrado em {nome}"
+        assert literais == recusas | executado | DESCONHECIDOS_DECLARADOS_PKG, nome
 
 
 class _ErroOracleStrQuebrado(oracledb.DatabaseError):
@@ -2354,3 +2365,76 @@ def test_k6_t3_sem_gate_timeout_e_sem_aprovador_seguem_a_regra_de_sempre(monkeyp
     for desfecho in (expirado, vazio):
         assert desfecho["motivo"] != "KILL_DESABILITADO" and desfecho["executado"] is False
     assert ambiente_fake == []
+
+
+# =============================================================================
+# SQL v2, parte A (docs/entregas/1.11/sqlv2/decisao_c1.md §4): estrutura do kill_session, cópia literal e fake
+# =============================================================================
+
+ARQUIVOS_SQL_V2 = [
+    ROOT_DIR_TESTE / "docs" / "entregas" / "1.11" / "item6" / "ops_kill.sql",
+    ROOT_DIR_TESTE / "docs" / "entregas" / "1.11" / "item6" / "ops_kill_v2_migracao_parte2.sql",
+]
+
+
+def _kill_session_do_body(caminho):
+    sql = caminho.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+    body = sql[sql.index("CREATE OR REPLACE PACKAGE BODY"):]
+    p = body[body.index("PROCEDURE kill_session"):body.index("END kill_session;") + len("END kill_session;")]
+    return re.sub(r"--[^\n]*", "", p)
+
+
+@pytest.mark.parametrize("caminho", ARQUIVOS_SQL_V2, ids=["ops_kill", "parte2"])
+def test_c1_pkg_estrutura_do_kill_session(caminho):
+    """SQL v2, parte A (§4b; mata M1 a M6, M8 e M14): um só comando de encerramento (EXECUTE IMMEDIATE), depois do WHEN OTHERS do
+    bloco pré-kill (ERRO_PRE_KILL) e antes do WHEN OTHERS do comando; a flag só vira TRUE dentro do bloco, antes do
+    handler; o kill exige a flag; registra fica fora dos dois handlers; todo v_status é literal; -30 dá
+    ALVO_AUSENTE_NO_KILL; ALVO_NAO_ENCONTRADO só no SELECT; v_type nulo recusa (A1)."""
+    p = _kill_session_do_body(caminho)
+    assert len(re.findall(r"EXECUTE\s+IMMEDIATE", p)) == 1 and len(re.findall(r"ALTER\s+SYSTEM", p)) == 1
+    pos_exec = re.search(r"EXECUTE\s+IMMEDIATE", p).start()
+    others = [m.start() for m in re.finditer(r"WHEN\s+OTHERS\s+THEN", p)]
+    assert len(others) == 2 and others[0] < pos_exec < others[1]
+    assert re.match(r"WHEN\s+OTHERS\s+THEN\s+v_status\s*:=\s*'ERRO_PRE_KILL'\s*;", p[others[0]:])
+    verdadeiros = [m.start() for m in re.finditer(r"v_pode_encerrar\s*:=\s*TRUE\s*;", p)]
+    assert len(verdadeiros) == 1 and verdadeiros[0] < others[0]
+    assert re.search(r"v_pode_encerrar\s+BOOLEAN\s*:=\s*FALSE\s*;", p)
+    # C7 (mata M15 a M17): a flag só recebe TRUE ou FALSE literal, e nenhum SELECT ... INTO grava v_status.
+    assert set(re.findall(r"\bv_pode_encerrar\s*:=\s*([^;]+?)\s*;", p)) <= {"TRUE", "FALSE"}
+    assert not re.search(r"\bINTO\b[^;]*\bv_status\b", p)
+    assert re.search(r"IF\s+v_pode_encerrar\s+AND\s+v_status\s+IS\s+NULL\s+THEN\s+BEGIN\s+EXECUTE\s+IMMEDIATE", p)
+    chamadas = [m.start() for m in re.finditer(r"\bregistra\s*\(", p)]
+    assert len(chamadas) == 1 and chamadas[0] > others[1]
+    assert re.findall(r"\bp_status\s*:=\s*([^;]+);", p) == ["v_status"]
+    assert len(re.findall(r"\bv_status\s*:=", p)) == len(re.findall(r"\bv_status\s*:=\s*'[A-Z_]+'\s*;", p))
+    assert re.search(r"SQLCODE\s*=\s*-30\s+THEN\s+v_status\s*:=\s*'ALVO_AUSENTE_NO_KILL'\s*;", p)
+    assert len(re.findall(r"'ALVO_NAO_ENCONTRADO'", p)) == 1
+    assert re.search(r"IF\s+v_type\s+IS\s+NULL\s+OR\s+v_type\s*<>\s*'USER'\s+THEN", p)
+
+
+def test_c1_parte2_e_copia_literal():
+    """SQL v2, parte A (§4c; guarda, mata M7): spec e body da parte 2 (o que roda no MODELO) são cópia literal dos
+    do ops_kill.sql."""
+    blocos = []
+    for caminho in ARQUIVOS_SQL_V2:
+        sql = caminho.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+        blocos.append(re.findall(r"CREATE OR REPLACE PACKAGE (?:BODY )?pkg_ops_kill AS.*?END pkg_ops_kill;\n/", sql, re.S))
+    assert len(blocos[0]) == 2 and blocos[0] == blocos[1]
+
+
+@pytest.mark.parametrize("status", ["", None, "encerrada", "ERRO_PRE_KILL", "ALVO_AUSENTE_NO_KILL", "ERRO_ORACLE"])
+def test_c1_fake_aceita_status_do_contrato_e_injecoes(status):
+    """SQL v2, parte A (§4d): o fake aceita os códigos do contrato do PKG e as injeções de falha (vazio, nulo,
+    minúscula)."""
+    _OracleFake([], status_pkg=status)
+
+
+def test_c1_fake_recusa_codigo_fora_do_contrato(monkeypatch):
+    """SQL v2, parte A (§4d; mata M12 e M13): código com forma de status fora do contrato lido do SQL levanta, salvo
+    com o kwarg explícito; acrescentar o código só à lista do Python não o põe no contrato."""
+    with pytest.raises(AssertionError):
+        _OracleFake([], status_pkg="ALVO_SAIU_ANTES_DO_KILL")
+    _OracleFake([], status_pkg="ALVO_SAIU_ANTES_DO_KILL", status_fora_do_contrato=True)
+    monkeypatch.setattr(oracle_dba, "RECUSAS_PKG_SEM_KILL", oracle_dba.RECUSAS_PKG_SEM_KILL + ("FANTASMA",))
+    with pytest.raises(AssertionError):
+        _OracleFake([], status_pkg="FANTASMA")

@@ -83,12 +83,16 @@ RECONCILIACAO_IDADE_MINIMA_SEGUNDOS = APROVACAO_TTL_SEGUNDOS + 300
 # Resultados de PKG_OPS_KILL que significam execução efetiva do encerramento
 RESULTADOS_KILL_EXECUTADO: Tuple[str, ...] = ("ENCERRADA", "MARCADA_PARA_KILL")
 
-# p_status do PKG_OPS_KILL v2 que provam que nenhuma sessão foi encerrada (ops_kill.sql:128-176; o
-# ALVO_NAO_ENCONTRADO também vem do ORA-00030 no comando de encerramento do PKG, :193-194). Lista FECHADA: qualquer outro
-# p_status (ERRO_ORACLE, vazio, nulo, código novo) é resultado desconhecido (decisao_c1.md, ponto 1).
+# p_status do PKG_OPS_KILL v2 que provam que nenhuma sessão foi encerrada por esta chamada. Lista FECHADA.
+# - Antes do comando de encerramento (bloco das etapas 1 a 6 do PKG): PARAM_INVALIDO, PROPRIA_SESSAO,
+#   ALVO_NAO_ENCONTRADO, ALVO_DIVERGENTE, NAO_USUARIO, USUARIO_PROTEGIDO e ERRO_PRE_KILL (erro capturado
+#   antes do comando, que não roda).
+# - No comando: ALVO_AUSENTE_NO_KILL (ORA-00030: não havia sessão com esse sid,serial#).
+# Qualquer outro p_status (ERRO_ORACLE, vazio, nulo, código novo) é resultado desconhecido (sqlv2/decisao_c1.md).
 RECUSAS_PKG_SEM_KILL: Tuple[str, ...] = (
     "PARAM_INVALIDO", "PROPRIA_SESSAO", "ALVO_NAO_ENCONTRADO",
     "ALVO_DIVERGENTE", "NAO_USUARIO", "USUARIO_PROTEGIDO",
+    "ERRO_PRE_KILL", "ALVO_AUSENTE_NO_KILL",
 )
 
 # Identidade esperada enviada ao PKG_OPS_KILL v2 (1.11-V2 item 6; docs/entregas/1.11/v2_refeito/decisao.md D1).
@@ -105,6 +109,12 @@ LIMITE_TEXTO_IDENTIDADE = 128
 MENSAGEM_ALVO_DIVERGENTE = (
     "A identidade da sessão no banco diverge da aprovada (verificação do procedimento de encerramento). "
     "Encerramento NÃO executado. Campos e valores só em OPS_KILL_AUDIT."
+)
+
+# SQL v2, parte A (sqlv2/decisao_c1.md §1): erro capturado pelo PKG antes do comando de encerramento.
+MENSAGEM_ERRO_PRE_KILL = (
+    "Erro no procedimento de encerramento antes do comando de encerramento. "
+    "Encerramento NÃO executado. Detalhe só em OPS_KILL_AUDIT."
 )
 
 # Usuários que nunca podem ser alvo de encerramento.
@@ -1189,6 +1199,9 @@ def matar_sessao_oracle(
         elif status_banco == "ALVO_DIVERGENTE":
             # O Python só recebe o código; a mensagem não usa o texto genérico "executado" (decisao.md D5).
             mensagem = MENSAGEM_ALVO_DIVERGENTE
+        elif status_banco == "ERRO_PRE_KILL":
+            # Erro capturado pelo PKG antes do comando de encerramento; o texto do erro fica só em OPS_KILL_AUDIT (R1).
+            mensagem = MENSAGEM_ERRO_PRE_KILL
         elif status_banco in RECUSAS_PKG_SEM_KILL:
             mensagem = MENSAGEM_RECUSA_PKG.format(status=status_banco)
         else:

@@ -176,6 +176,9 @@ def test_r1_varredura_ferramentas_de_diagnostico(monkeypatch, rede, ferramenta, 
         ("encerrada", dict(status_pkg="ENCERRADA"), "ENCERRADA"),
         ("recusa_pkg", dict(status_pkg="NAO_USUARIO"), "NAO_USUARIO"),
         ("desconhecido", dict(status_pkg=""), od.STATUS_PKG_VAZIO),
+        # SQL v2, parte A (sqlv2/decisao_c1.md §4e): os dois códigos novos do PKG, recusas sem kill.
+        ("erro_pre_kill", dict(status_pkg="ERRO_PRE_KILL"), "ERRO_PRE_KILL"),
+        ("alvo_ausente_no_kill", dict(status_pkg="ALVO_AUSENTE_NO_KILL"), "ALVO_AUSENTE_NO_KILL"),
     ],
 )
 def test_r1_varredura_matar_sessao_oracle(monkeypatch, rede, ramo, fake_kw, motivo):
@@ -197,6 +200,8 @@ def test_r1_varredura_matar_sessao_oracle(monkeypatch, rede, ramo, fake_kw, moti
     if ramo == "erro_oracle_depois":
         assert resultado["resultado_desconhecido"] is True
         assert od.MENSAGEM_RESULTADO_DESCONHECIDO in resultado["mensagem"]
+    if ramo in ("erro_pre_kill", "alvo_ausente_no_kill"):
+        assert resultado["resultado_desconhecido"] is False and "ORA-" not in texto
     if ramo == "excecao_antes":
         assert resultado["mensagem"] == "RuntimeError" and resultado["resultado_desconhecido"] is False
     if ramo == "encerrada":

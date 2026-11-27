@@ -83,95 +83,115 @@ CREATE OR REPLACE PACKAGE BODY pkg_ops_kill AS
     v_div    VARCHAR2(64);
     v_status VARCHAR2(40);
     v_msg    VARCHAR2(400);
+    -- TRUE só na última instrução do bloco das etapas 1 a 6, com todas as checagens
+    -- aprovadas. Exceção antes dela o deixa FALSE: sem ele, não há ALTER SYSTEM.
+    v_pode_encerrar BOOLEAN := FALSE;
   BEGIN
-    -- 1. Parâmetros. program e machine podem ser NULL (a GV$SESSION pode trazê-los
-    --    nulos; a comparação abaixo é null-safe). username e logon_time não.
-    --    Tamanhos limitados aos das colunas da GV$SESSION (bytes), para que nenhum
-    --    valor estoure variáveis/colunas e a chamada sempre termine com auditoria.
-    --    REGEXP_LIKE com 'c': sensível a maiúsculas independentemente do NLS_SORT.
-    --    p_ref_aprovacao: só formato é validado; o valor é apenas registrado (ver spec).
-    IF p_inst_id IS NULL OR p_sid IS NULL OR p_serial IS NULL
-       OR p_inst_id <= 0 OR p_sid <= 0 OR p_serial <= 0
-       OR p_username_esperado IS NULL
-       OR p_logon_time_esperado IS NULL
-       OR LENGTHB(p_username_esperado) > 128
-       OR LENGTHB(p_program_esperado) > 128
-       OR LENGTHB(p_machine_esperado) > 128
-       OR p_ref_aprovacao IS NULL
-       OR NOT REGEXP_LIKE(p_ref_aprovacao, '^[0-9a-f]{32}$', 'c') THEN
-      v_status := 'PARAM_INVALIDO';
+    -- Etapas 1 a 6: nenhuma encerra sessão. Erro em qualquer delas vira ERRO_PRE_KILL,
+    -- com linha em OPS_KILL_AUDIT e sem ALTER SYSTEM. O WHEN OTHERS deste bloco não
+    -- cobre a etapa 7 nem o registra, que ficam depois do END do bloco.
+    BEGIN
+      -- 1. Parâmetros. program e machine podem ser NULL (a GV$SESSION pode trazê-los
+      --    nulos; a comparação abaixo é null-safe). username e logon_time não.
+      --    Tamanhos limitados aos das colunas da GV$SESSION (bytes), para que nenhum
+      --    valor estoure variáveis/colunas e a chamada sempre termine com auditoria.
+      --    REGEXP_LIKE com 'c': sensível a maiúsculas independentemente do NLS_SORT.
+      --    p_ref_aprovacao: só formato é validado; o valor é apenas registrado (ver spec).
+      IF p_inst_id IS NULL OR p_sid IS NULL OR p_serial IS NULL
+         OR p_inst_id <= 0 OR p_sid <= 0 OR p_serial <= 0
+         OR p_username_esperado IS NULL
+         OR p_logon_time_esperado IS NULL
+         OR LENGTHB(p_username_esperado) > 128
+         OR LENGTHB(p_program_esperado) > 128
+         OR LENGTHB(p_machine_esperado) > 128
+         OR p_ref_aprovacao IS NULL
+         OR NOT REGEXP_LIKE(p_ref_aprovacao, '^[0-9a-f]{32}$', 'c') THEN
+        v_status := 'PARAM_INVALIDO';
 
-    -- 2. Própria sessão
-    ELSIF p_inst_id = SYS_CONTEXT('USERENV', 'INSTANCE')
-      AND p_sid = SYS_CONTEXT('USERENV', 'SID') THEN
-      v_status := 'PROPRIA_SESSAO';
+      -- 2. Própria sessão
+      ELSIF p_inst_id = SYS_CONTEXT('USERENV', 'INSTANCE')
+        AND p_sid = SYS_CONTEXT('USERENV', 'SID') THEN
+        v_status := 'PROPRIA_SESSAO';
 
-    ELSE
-      -- 3. Um único SELECT: lê o alvo e calcula os campos divergentes na mesma leitura.
-      --    DECODE trata NULL = NULL como igual (comparação null-safe). Textos comparados
-      --    como RAW (binário): o resultado não depende de NLS_COMP/NLS_SORT da sessão
-      --    chamadora (BINARY_CI/AI tratariam 'App.exe' e 'app.exe' como iguais).
-      BEGIN
-        SELECT username, program, machine, type, logon_time,
-               RTRIM(
-                 CASE WHEN DECODE(UTL_RAW.CAST_TO_RAW(username), UTL_RAW.CAST_TO_RAW(p_username_esperado), 0, 1) = 1 THEN 'USERNAME,' END ||
-                 CASE WHEN DECODE(UTL_RAW.CAST_TO_RAW(program),  UTL_RAW.CAST_TO_RAW(p_program_esperado),  0, 1) = 1 THEN 'PROGRAM,'  END ||
-                 CASE WHEN DECODE(UTL_RAW.CAST_TO_RAW(machine),  UTL_RAW.CAST_TO_RAW(p_machine_esperado),  0, 1) = 1 THEN 'MACHINE,'  END ||
-                 CASE WHEN DECODE(logon_time, p_logon_time_esperado, 0, 1) = 1 THEN 'LOGON_TIME,' END,
-                 ',')
-          INTO v_user, v_prog, v_mach, v_type, v_logon, v_div
-          FROM sys.gv_$session
-         WHERE inst_id = p_inst_id
-           AND sid = p_sid
-           AND serial# = p_serial;
-      EXCEPTION
-        WHEN NO_DATA_FOUND THEN
-          v_status := 'ALVO_NAO_ENCONTRADO';
-      END;
+      ELSE
+        -- 3. Um único SELECT: lê o alvo e calcula os campos divergentes na mesma leitura.
+        --    DECODE trata NULL = NULL como igual (comparação null-safe). Textos comparados
+        --    como RAW (binário): o resultado não depende de NLS_COMP/NLS_SORT da sessão
+        --    chamadora (BINARY_CI/AI tratariam 'App.exe' e 'app.exe' como iguais).
+        BEGIN
+          SELECT username, program, machine, type, logon_time,
+                 RTRIM(
+                   CASE WHEN DECODE(UTL_RAW.CAST_TO_RAW(username), UTL_RAW.CAST_TO_RAW(p_username_esperado), 0, 1) = 1 THEN 'USERNAME,' END ||
+                   CASE WHEN DECODE(UTL_RAW.CAST_TO_RAW(program),  UTL_RAW.CAST_TO_RAW(p_program_esperado),  0, 1) = 1 THEN 'PROGRAM,'  END ||
+                   CASE WHEN DECODE(UTL_RAW.CAST_TO_RAW(machine),  UTL_RAW.CAST_TO_RAW(p_machine_esperado),  0, 1) = 1 THEN 'MACHINE,'  END ||
+                   CASE WHEN DECODE(logon_time, p_logon_time_esperado, 0, 1) = 1 THEN 'LOGON_TIME,' END,
+                   ',')
+            INTO v_user, v_prog, v_mach, v_type, v_logon, v_div
+            FROM sys.gv_$session
+           WHERE inst_id = p_inst_id
+             AND sid = p_sid
+             AND serial# = p_serial;
+        EXCEPTION
+          WHEN NO_DATA_FOUND THEN
+            v_status := 'ALVO_NAO_ENCONTRADO';
+        END;
 
-      -- 4. Identidade divergente: não encerra. Observados vão nas colunas alvo_*;
-      --    esperados (só dos campos divergentes) vão em mensagem.
-      IF v_status IS NULL AND v_div IS NOT NULL THEN
-        v_status := 'ALVO_DIVERGENTE';
-        v_msg := SUBSTRB('divergente: ' || v_div || ' | esperado:'
-          || CASE WHEN INSTR(v_div, 'USERNAME')   > 0 THEN ' username='   || p_username_esperado END
-          || CASE WHEN INSTR(v_div, 'PROGRAM')    > 0 THEN ' program='    || NVL(p_program_esperado, '<null>') END
-          || CASE WHEN INSTR(v_div, 'MACHINE')    > 0 THEN ' machine='    || NVL(p_machine_esperado, '<null>') END
-          || CASE WHEN INSTR(v_div, 'LOGON_TIME') > 0 THEN ' logon_time=' || TO_CHAR(p_logon_time_esperado, 'YYYY-MM-DD HH24:MI:SS') END,
-          1, 400);
-      END IF;
+        -- 4. Identidade divergente: não encerra. Observados vão nas colunas alvo_*;
+        --    esperados (só dos campos divergentes) vão em mensagem.
+        IF v_status IS NULL AND v_div IS NOT NULL THEN
+          v_status := 'ALVO_DIVERGENTE';
+          v_msg := SUBSTRB('divergente: ' || v_div || ' | esperado:'
+            || CASE WHEN INSTR(v_div, 'USERNAME')   > 0 THEN ' username='   || p_username_esperado END
+            || CASE WHEN INSTR(v_div, 'PROGRAM')    > 0 THEN ' program='    || NVL(p_program_esperado, '<null>') END
+            || CASE WHEN INSTR(v_div, 'MACHINE')    > 0 THEN ' machine='    || NVL(p_machine_esperado, '<null>') END
+            || CASE WHEN INSTR(v_div, 'LOGON_TIME') > 0 THEN ' logon_time=' || TO_CHAR(p_logon_time_esperado, 'YYYY-MM-DD HH24:MI:SS') END,
+            1, 400);
+        END IF;
 
-      -- 5/6. Tipo e usuário protegido, sobre os valores OBSERVADOS
-      IF v_status IS NULL THEN
-        IF v_type <> 'USER' THEN
-          v_status := 'NAO_USUARIO';
-        ELSIF v_user IS NULL
-           OR INSTR(c_protegidos, ',' || UPPER(v_user) || ',') > 0 THEN
-          v_status := 'USUARIO_PROTEGIDO';
+        -- 5/6. Tipo e usuário protegido, sobre os valores OBSERVADOS.
+        --      v_type nulo conta como não USER (null-safe).
+        IF v_status IS NULL THEN
+          IF v_type IS NULL OR v_type <> 'USER' THEN
+            v_status := 'NAO_USUARIO';
+          ELSIF v_user IS NULL
+             OR INSTR(c_protegidos, ',' || UPPER(v_user) || ',') > 0 THEN
+            v_status := 'USUARIO_PROTEGIDO';
+          END IF;
+        END IF;
+
+        IF v_status IS NULL THEN
+          v_pode_encerrar := TRUE;
         END IF;
       END IF;
+    EXCEPTION
+      WHEN OTHERS THEN
+        v_status := 'ERRO_PRE_KILL';
+        v_pode_encerrar := FALSE;
+        v_msg := SUBSTRB(SQLERRM, 1, 400);
+        -- Depois de exceção, as variáveis do INTO não são observação confiável.
+        v_user := NULL; v_prog := NULL; v_mach := NULL; v_logon := NULL; v_div := NULL;
+    END;
 
-      -- 7. Encerramento. Micro-janela residual SELECT -> ALTER SYSTEM aceita: o comando
-      --    é endereçado por sid + serial#; se a sessão sair e o SID for reutilizado,
-      --    o serial# muda e o Oracle devolve ORA-00030 (ALVO_NAO_ENCONTRADO).
-      IF v_status IS NULL THEN
-        BEGIN
-          EXECUTE IMMEDIATE 'ALTER SYSTEM KILL SESSION '''
-            || TO_CHAR(p_sid) || ',' || TO_CHAR(p_serial)
-            || ',@' || TO_CHAR(p_inst_id) || ''' IMMEDIATE';
-          v_status := 'ENCERRADA';
-        EXCEPTION
-          WHEN OTHERS THEN
-            IF SQLCODE = -31 THEN
-              v_status := 'MARCADA_PARA_KILL';
-            ELSIF SQLCODE = -30 THEN
-              v_status := 'ALVO_NAO_ENCONTRADO';
-            ELSE
-              v_status := 'ERRO_ORACLE';
-              v_msg := SUBSTRB(SQLERRM, 1, 400);
-            END IF;
-        END;
-      END IF;
+    -- 7. Encerramento: único ALTER SYSTEM do pacote. Micro-janela residual SELECT -> ALTER
+    --    SYSTEM aceita: o comando é endereçado por sid + serial#; se a sessão não existir
+    --    mais (inclusive SID reutilizado, com serial# novo), o Oracle devolve ORA-00030.
+    IF v_pode_encerrar AND v_status IS NULL THEN
+      BEGIN
+        EXECUTE IMMEDIATE 'ALTER SYSTEM KILL SESSION '''
+          || TO_CHAR(p_sid) || ',' || TO_CHAR(p_serial)
+          || ',@' || TO_CHAR(p_inst_id) || ''' IMMEDIATE';
+        v_status := 'ENCERRADA';
+      EXCEPTION
+        WHEN OTHERS THEN
+          IF SQLCODE = -31 THEN
+            v_status := 'MARCADA_PARA_KILL';
+          ELSIF SQLCODE = -30 THEN
+            v_status := 'ALVO_AUSENTE_NO_KILL';
+          ELSE
+            v_status := 'ERRO_ORACLE';
+            v_msg := SUBSTRB(SQLERRM, 1, 400);
+          END IF;
+      END;
     END IF;
 
     registra(v_solicitante, p_inst_id, p_sid, p_serial,
@@ -203,7 +223,14 @@ SELECT position, argument_name, data_type, in_out, overload, defaulted
 -- (STARTUP_KILL / EXECUTE; CREATE OR REPLACE preserva o grant)
 SELECT grantee, privilege FROM dba_tab_privs
  WHERE owner = 'OPS_OWNER' AND table_name = 'PKG_OPS_KILL';
+-- (2 linhas: ALVO_AUSENTE_NO_KILL 1; ERRO_PRE_KILL 1) O body instalado é o desta proposta (sqlv2/decisao_c1.md §6).
+SELECT REGEXP_SUBSTR(text, 'ALVO_AUSENTE_NO_KILL|ERRO_PRE_KILL') AS codigo, COUNT(*) AS linhas
+  FROM dba_source
+ WHERE owner = 'OPS_OWNER' AND name = 'PKG_OPS_KILL' AND type = 'PACKAGE BODY'
+   AND REGEXP_LIKE(text, 'v_status := ''(ALVO_AUSENTE_NO_KILL|ERRO_PRE_KILL)''')
+ GROUP BY REGEXP_SUBSTR(text, 'ALVO_AUSENTE_NO_KILL|ERRO_PRE_KILL')
+ ORDER BY 1;
 
 -- Fim desta parte. A janela continua aberta até o primeiro kill sandbox v2 com ENCERRADA
--- depois de implantar o Python do item 6 (implantacao.md, seção 3.2, passos 6 e 7).
+-- depois de ligar o gate (OPS_KILL_PKG_VERSAO=2) na sessão do operador (implantacao.md, seção 3.2, passos 6 e 7).
 SELECT SYSTIMESTAMP AS fim_parte2 FROM dual;

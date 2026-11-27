@@ -6,6 +6,7 @@ bind :p_serial, conta DIAG) consome a fila `linhas_diag`; as demais consultas n�
 """
 import re
 from datetime import datetime
+from pathlib import Path
 
 import oracledb
 import pytest
@@ -197,13 +198,27 @@ class _ConexaoFake:
         pass
 
 
+# SQL v2, parte A (sqlv2/decisao_c1.md §4d): o contrato de p_status do PKG v2 é lido do próprio SQL (fonte independente
+# das listas do Python, para não virar tautologia). Código com forma de status fora dele é recusado pelo fake.
+STATUS_CONTRATO_PKG = frozenset(re.findall(
+    r"v_status\s*:=\s*'([A-Z_]+)'",
+    (Path(__file__).resolve().parent.parent / "docs" / "entregas" / "1.11" / "item6" / "ops_kill.sql").read_text(
+        encoding="utf-8", errors="replace"),
+))
+
+
 class _OracleFake:
     """Simula oracledb.connect: fila de linhas para a conta DIAG e p_status para a conta KILL."""
 
     def __init__(
         self, linhas_diag, status_pkg=None, kill_permitido=True, erro_kill=None, erro_connect_kill=None,
-        erro_getvalue_status=None, erro_var_kill=None, erro_setvalue=None,
+        erro_getvalue_status=None, erro_var_kill=None, erro_setvalue=None, status_fora_do_contrato=False,
     ):
+        # sqlv2/decisao_c1.md §4d: status com forma de código e fora do contrato do PKG v2 só com o kwarg explícito.
+        # "", None e minúsculas continuam aceitos como injeção de falha.
+        if (isinstance(status_pkg, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", status_pkg)
+                and status_pkg not in STATUS_CONTRATO_PKG and not status_fora_do_contrato):
+            raise AssertionError(f"status_pkg {status_pkg!r} fora do contrato do PKG v2 (ops_kill.sql)")
         self.linhas_diag = list(linhas_diag)
         self.status_pkg = status_pkg
         self.erro_getvalue_status = erro_getvalue_status  # exceção levantada pelo getvalue da var do p_status
